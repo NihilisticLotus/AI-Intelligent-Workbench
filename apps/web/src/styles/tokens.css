@@ -1,0 +1,108 @@
+/* 设计令牌与基础样式：迁移自 design/prototype/assets/styles.css（以 docs/ui-design.md 第 3 节为准） */
+/* ========== 设计令牌：深色（默认） ========== */
+:root {
+  color-scheme: dark;
+  /* 中性石墨：不带色偏，避免影响对美术资产颜色的判断 */
+  --bg-0: #1e1f22;      /* 侧栏、凹陷区域 */
+  --bg-1: #26272b;      /* 主区、右侧面板 */
+  --bg-2: #2e3035;      /* 卡片、弹出层 */
+  --bg-3: #383a40;      /* 悬停、选中、次要按钮 */
+  --bg-viewport: #333333; /* 三维预览：严格中性灰 */
+  --line: #3e4047;
+  --line-strong: #565961;
+  --fg-1: #ecece9;
+  --fg-2: #bcbdc0;
+  --fg-3: #9c9ea3;      /* 最弱文字，在 bg-0~bg-2 上 ≥4.5:1 */
+
+  --accent: #8b95ff;    /* 靛：焦点、选中、主操作 */
+  --accent-ink: #15162b;
+  --accent-weak: rgba(139, 149, 255, 0.16);
+  --attn: #f2b646;      /* 琥珀：只用于需要你处理（审批、过期） */
+  --attn-ink: #2a1d05;
+  --attn-weak: rgba(242, 182, 70, 0.14);
+  --ok: #62c98e;
+  --ok-weak: rgba(98, 201, 142, 0.14);
+  --err: #f27676;
+  --err-weak: rgba(242, 118, 118, 0.14);
+  --info: #6cb6e8;
+
+  --diff-add: rgba(98, 201, 142, 0.13);
+  --diff-add-strong: rgba(98, 201, 142, 0.32);
+  --diff-del: rgba(242, 118, 118, 0.13);
+  --diff-del-strong: rgba(242, 118, 118, 0.32);
+
+  /* Agent 身份色（用户可改），始终与字母徽标同时出现 */
+  --ag-claude: #e8a07c;
+  --ag-codex: #56c2c8;
+  --ag-codebuddy: #b896f6;
+  --ag-zcode: #a2cf63;
+  --ag-workbuddy: #f08fb8;
+  --ag-fake: #a7b0c4;  /* 演示 Agent：中性蓝灰，避免和真实 Agent 混淆 */
+
+  --font-ui: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
+  --font-code: "JetBrains Mono", "Cascadia Mono", "Cascadia Code", Consolas, "Microsoft YaHei UI", monospace;
+
+  --fs-12: 12px; --fs-13: 13px; --fs-14: 14px; --fs-16: 16px; --fs-20: 20px; --fs-26: 26px;
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px; --sp-7: 48px;
+  --r-ctl: 6px; --r-card: 8px; --r-dialog: 12px; --r-pill: 999px;
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--line);
+  --dur-fast: 120ms; --dur-base: 180ms; --dur-slow: 260ms;
+  --ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+/* ========== 设计令牌：浅色 ========== */
+:root[data-theme="light"] {
+  color-scheme: light;
+  --bg-0: #dcdddf;
+  --bg-1: #f4f4f3;
+  --bg-2: #ffffff;
+  --bg-3: #e9e9ea;
+  --bg-viewport: #8c8c8c;
+  --line: #d2d3d6;
+  --line-strong: #a9abb0;
+  --fg-1: #1c1d20;
+  --fg-2: #45474d;
+  --fg-3: #5f6168;
+  --accent: #4a55d6;
+  --accent-ink: #ffffff;
+  --accent-weak: rgba(74, 85, 214, 0.12);
+  --attn: #9a6200;
+  --attn-ink: #ffffff;
+  --attn-weak: rgba(196, 128, 0, 0.14);
+  --ok: #1f8a52;
+  --ok-weak: rgba(31, 138, 82, 0.12);
+  --err: #c43838;
+  --err-weak: rgba(196, 56, 56, 0.1);
+  --info: #22709f;
+  --diff-add: rgba(31, 138, 82, 0.1);
+  --diff-add-strong: rgba(31, 138, 82, 0.26);
+  --diff-del: rgba(196, 56, 56, 0.09);
+  --diff-del-strong: rgba(196, 56, 56, 0.24);
+  --ag-claude: #b5592f;
+  --ag-codex: #13808a;
+  --ag-codebuddy: #7a4ed1;
+  --ag-zcode: #4f8a12;
+  --ag-workbuddy: #b03a6e;
+  --ag-fake: #56607a;
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.14), 0 0 0 1px var(--line);
+}
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body {
+  background: var(--bg-1);
+  color: var(--fg-1);
+  font: 400 var(--fs-14)/1.6 var(--font-ui);
+  -webkit-font-smoothing: antialiased;
+}
+button, input, textarea, select { font: inherit; color: inherit; }
+a { color: var(--accent); }
+code, pre, kbd, .mono { font-family: var(--font-code); font-size: var(--fs-13); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--r-ctl); }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+svg.i { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
+}

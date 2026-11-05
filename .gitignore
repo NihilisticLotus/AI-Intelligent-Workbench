@@ -1,0 +1,7 @@
+node_modules/
+dist/
+*.log
+.aic-data/
+.claude/worktrees/
+.env
+.env.*

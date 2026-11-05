@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>任务看板 - AI Console 原型</title>
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="stylesheet" href="assets/components.css">
+<link rel="stylesheet" href="assets/interact.css">
+<style>
+  .filters { display: flex; align-items: center; gap: var(--sp-2); padding: 0 var(--sp-5) var(--sp-3); flex-wrap: wrap; }
+  .filters .grow { flex: 1; }
+  .chipsel { display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 10px; border: 0; border-radius: var(--r-pill); background: transparent; color: var(--fg-2); font-size: var(--fs-12); cursor: pointer; }
+  .chipsel:hover { background: var(--bg-2); color: var(--fg-1); }
+  .chipsel[aria-pressed="true"] { background: var(--bg-3); color: var(--fg-1); }
+  .chipsel .ag { width: 14px; height: 14px; font-size: 9px; border-radius: 3px; }
+  .capacity { display: flex; gap: var(--sp-3); font-size: var(--fs-12); color: var(--fg-3); align-items: center; }
+  .capacity span { display: inline-flex; align-items: center; gap: 5px; }
+  .capacity .ag { width: 14px; height: 14px; font-size: 9px; border-radius: 3px; }
+  .board { flex: 1; min-height: 0; display: grid; grid-auto-flow: column; grid-auto-columns: minmax(256px, 1fr); gap: var(--sp-4); overflow-x: auto; padding: 0 var(--sp-5) var(--sp-4); }
+  .col { display: flex; flex-direction: column; min-height: 0; }
+  .col-head { display: flex; align-items: center; gap: var(--sp-2); padding: 4px 4px 10px; font-size: var(--fs-13); font-weight: 600; }
+  .col-head .n { color: var(--fg-3); font-weight: 400; }
+  .col-head .note { margin-left: auto; font-weight: 400; font-size: var(--fs-12); color: var(--fg-3); }
+  .col-body { display: flex; flex-direction: column; gap: var(--sp-2); overflow: auto; flex: 1; padding: 2px; }
+  .done-list { list-style: none; margin: 0; padding: 0; font-size: var(--fs-13); }
+  .done-list li { display: flex; gap: 8px; align-items: center; padding: 7px 4px; color: var(--fg-2); }
+  .done-list li span.t { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .done-list .r { font-size: var(--fs-12); color: var(--fg-3); white-space: nowrap; }
+  .sum dl { display: grid; grid-template-columns: 72px 1fr; gap: 6px 10px; margin: 0 0 var(--sp-4); font-size: var(--fs-13); }
+  .sum dt { color: var(--fg-3); } .sum dd { margin: 0; }
+  .sum h2 { font-size: var(--fs-16); margin: 0 0 var(--sp-3); }
+</style>
+</head>
+<body data-page="kanban">
+<div class="app" data-side="closed">
+  <aside class="sidebar"></aside>
+
+  <main class="main">
+    <header class="main-head">
+      <h1>全部任务</h1>
+      <span class="grow"></span>
+      <nav class="viewswitch" aria-label="主区视图">
+        <a href="workbench.html">对话</a>
+        <a href="kanban.html" aria-current="page">看板</a>
+      </nav>
+    </header>
+    <div class="filters">
+      <div class="seg-mini" role="radiogroup" aria-label="看板按什么筛选">
+        <button role="radio" data-wired="1" data-kview="project" aria-checked="true">按项目</button><button role="radio" data-wired="1" data-kview="group" aria-checked="false">按分组</button>
+      </div>
+      <span class="kchips" style="display:inline-flex;gap:var(--sp-2);flex-wrap:wrap"></span>
+      <span class="grow"></span>
+      <div class="capacity hide-narrow" aria-label="各 Agent 并发占用">
+        <span><span class="ag claude">C</span>2/2 并发</span>
+        <span><span class="ag codex">X</span>1/2</span>
+        <span><span class="ag codebuddy">B</span>1/2</span>
+      </div>
+    </div>
+
+    <div class="board">
+      <section class="col" aria-labelledby="c-queue">
+        <div class="col-head"><span class="status idle"><span class="dot"></span></span><span id="c-queue">排队中</span><span class="n">2</span><span class="note">可拖动排序</span></div>
+        <div class="col-body">
+          <article class="task-card" tabindex="0" aria-label="升级 Addressables 到 2.3，排队第 1 位">
+            <span class="handle" title="拖动调整顺序，或聚焦后按 Alt+↑/↓"><svg class="i" aria-hidden="true"><use href="#i-drag"/></svg></span>
+            <div class="t">升级 Addressables 到 2.3</div>
+            <div class="row"><span class="ag codex">X</span>Codex<span>gpt-5.5-codex</span></div>
+            <div class="now">第 1 位，Codex 有空位后开始</div>
+          </article>
+          <article class="task-card" tabindex="0" aria-label="战斗音效接入 Wwise 事件表，排队第 2 位">
+            <span class="handle" title="拖动调整顺序，或聚焦后按 Alt+↑/↓"><svg class="i" aria-hidden="true"><use href="#i-drag"/></svg></span>
+            <div class="t">战斗音效接入 Wwise 事件表</div>
+            <div class="row"><span class="ag claude">C</span>Claude Code<span>Sonnet 5</span></div>
+            <div class="now">第 2 位，等 Claude Code 空位（2/2）</div>
+          </article>
+        </div>
+      </section>
+
+      <section class="col" aria-labelledby="c-run">
+        <div class="col-head"><span class="status run"><span class="dot"></span></span><span id="c-run">运行中</span><span class="n">3</span></div>
+        <div class="col-body">
+          <article class="task-card" tabindex="0" data-action="side" data-tab="kt-sum">
+            <div class="t">背包界面支持手柄导航</div>
+            <div class="row"><span class="ag codex">X</span>Codex<span class="grow"></span><span>12 分钟</span></div>
+            <div class="bar" role="progressbar" aria-label="计划进度" aria-valuemin="0" aria-valuemax="6" aria-valuenow="3"><i style="width:50%"></i></div>
+            <div class="now">正在修改 InventoryGrid.cs</div>
+          </article>
+          <article class="task-card" tabindex="0">
+            <div class="t">宝箱模型：箱盖改圆、补铁箍</div>
+            <div class="row"><span class="ag codebuddy">B</span>CodeBuddy<span class="grow"></span><span>5 分钟</span></div>
+            <div class="bar" role="progressbar" aria-label="计划进度" aria-valuemin="0" aria-valuemax="4" aria-valuenow="2"><i style="width:50%"></i></div>
+            <div class="row"><span class="now" style="flex:1">已写入 chest.glb</span><a href="asset-mode.html" class="btn sm ghost"><svg class="i" aria-hidden="true"><use href="#i-cube"/></svg>预览</a></div>
+          </article>
+          <article class="task-card" tabindex="0">
+            <div class="t">批量把 FBX 转成 glTF 并压缩贴图</div>
+            <div class="row"><span class="ag claude">C</span>Claude Code<span class="grow"></span><span>21 分钟</span></div>
+            <div class="bar" role="progressbar" aria-label="文件进度" aria-valuemin="0" aria-valuemax="120" aria-valuenow="38"><i style="width:32%"></i></div>
+            <div class="now">38/120 个文件</div>
+          </article>
+        </div>
+      </section>
+
+      <section class="col" aria-labelledby="c-wait">
+        <div class="col-head"><span class="status wait"><span class="dot"></span></span><span id="c-wait">等待审批</span><span class="n">1</span></div>
+        <div class="col-body">
+          <article class="task-card needs" tabindex="0">
+            <div class="t">修复 Steam 云同步时存档偶发损坏</div>
+            <div class="row"><span class="ag claude">C</span>Claude Code<span class="grow"></span><span>等待 3 分钟</span></div>
+            <div class="now">请求执行 Unity.exe -runTests</div>
+            <div class="row"><button class="btn sm attn">允许</button><a class="btn sm" href="workbench.html#approval">查看</a></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="col" aria-labelledby="c-review">
+        <div class="col-head"><span class="status ok"><span class="dot"></span></span><span id="c-review">待验收</span><span class="n">2</span></div>
+        <div class="col-body">
+          <article class="task-card" tabindex="0">
+            <div class="t">补全日文本地化文本表</div>
+            <div class="row"><span class="ag codebuddy">B</span>CodeBuddy<span class="grow"></span><span class="add">+412</span></div>
+            <div class="now">3 条超长需人工确认</div>
+          </article>
+          <article class="task-card" tabindex="0">
+            <div class="t">主菜单背景视差动画</div>
+            <div class="row"><span class="ag claude">C</span>Claude Code<span class="grow"></span><span class="add">+96</span><span class="del">−12</span></div>
+            <div class="now">已通过编译，等你在编辑器里看效果</div>
+          </article>
+        </div>
+      </section>
+
+      <section class="col" aria-labelledby="c-fail">
+        <div class="col-head"><span class="status err"><span class="dot"></span></span><span id="c-fail">失败或中断</span><span class="n">1</span></div>
+        <div class="col-body">
+          <article class="task-card" tabindex="0">
+            <div class="t">修复贴图命名检查脚本</div>
+            <div class="row"><span class="ag codex">X</span>Codex<span class="grow"></span><span>2 小时前</span></div>
+            <div class="alert err" style="padding:8px 10px">
+              <svg class="i" aria-hidden="true"><use href="#i-warn"/></svg>
+              <div class="body"><strong>Codex 登录已过期</strong><p>重新登录后从中断处继续。</p></div>
+            </div>
+            <div class="row"><a class="btn sm primary" href="agents.html">重新登录</a><button class="btn sm">交接给 Claude Code</button></div>
+          </article>
+        </div>
+      </section>
+
+      <section class="col" aria-labelledby="c-done">
+        <div class="col-head"><span class="status ok"><svg class="i" aria-hidden="true" style="width:14px;height:14px"><use href="#i-check"/></svg></span><span id="c-done">已完成</span><span class="n">近 7 天 4</span></div>
+        <div class="col-body">
+          <ul class="done-list">
+            <li><svg class="i" aria-hidden="true" style="color:var(--ok)"><use href="#i-merge"/></svg><span class="t">角色选择界面适配 16:10</span><span class="r">已合并</span></li>
+            <li><svg class="i" aria-hidden="true" style="color:var(--ok)"><use href="#i-merge"/></svg><span class="t">修复对话框打字机效果跳字</span><span class="r">已合并</span></li>
+            <li><svg class="i" aria-hidden="true"><use href="#i-x"/></svg><span class="t">尝试用 DOTS 重写弹幕系统</span><span class="r">已丢弃</span></li>
+            <li><svg class="i" aria-hidden="true"><use href="#i-undo"/></svg><span class="t">批量重命名音效文件</span><span class="r">已回滚</span></li>
+          </ul>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <div class="resizer"></div>
+  <aside class="side" aria-label="任务摘要">
+    <div class="side-head">
+      <div class="tabs" role="tablist" aria-label="任务摘要">
+        <button role="tab" aria-selected="true" aria-controls="k-sum" id="kt-sum">摘要</button>
+        <button role="tab" aria-selected="false" aria-controls="k-diff" id="kt-diff" tabindex="-1">改动</button>
+      </div>
+      <span class="grow"></span>
+      <button class="btn ghost icon sm" data-action="side-close" aria-label="收起右侧面板"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="side-body pane-pad sum" id="k-sum" role="tabpanel" aria-labelledby="kt-sum">
+      <h2>背包界面支持手柄导航</h2>
+      <dl>
+        <dt>状态</dt><dd><span class="status run"><span class="dot"></span>运行中，步骤 3/6</span></dd>
+        <dt>Agent</dt><dd>Codex，gpt-5.5-codex</dd>
+        <dt>改动</dt><dd><span class="add">+138</span> <span class="del">−21</span>，4 个文件</dd>
+        <dt>分支</dt><dd class="mono" style="font-size:12px">aic/t9a1-gamepad-inventory</dd>
+      </dl>
+      <a class="btn primary" href="workbench.html">打开对话</a>
+    </div>
+    <div class="side-body pane-pad" id="k-diff" role="tabpanel" aria-labelledby="kt-diff" hidden>
+      <div class="empty"><p>与工作台的改动面板相同，原型未展开。</p></div>
+    </div>
+  </aside>
+</div>
+<script src="assets/app.js"></script>
+<script src="assets/interact.js"></script>
+</body>
+</html>

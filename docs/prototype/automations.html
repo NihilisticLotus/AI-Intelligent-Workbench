@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>自动化 - AI Console 原型</title>
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="stylesheet" href="assets/components.css">
+<link rel="stylesheet" href="assets/interact.css">
+<style>
+  .page { max-width: 1040px; margin: 0 auto; padding: 0 var(--sp-5) var(--sp-7); }
+  .page-lead { margin: 0 0 var(--sp-3); color: var(--fg-2); font-size: var(--fs-13); }
+  .afilters { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-3); flex-wrap: wrap; }
+  .chipsel { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border: 0; border-radius: var(--r-pill); background: transparent; color: var(--fg-2); font-size: var(--fs-12); cursor: pointer; }
+  .chipsel:hover { background: var(--bg-2); color: var(--fg-1); }
+  .chipsel[aria-pressed="true"] { background: var(--bg-3); color: var(--fg-1); }
+  .sub { display: block; font-size: var(--fs-12); color: var(--fg-3); font-weight: 400; }
+  .attn-t { color: var(--attn); }
+
+  /* 列表：表格语义，行只用底色区分，不画线 */
+  .auto-table { width: 100%; border-collapse: separate; border-spacing: 0 2px; font-size: var(--fs-13); }
+  .auto-table th { text-align: left; font-weight: 400; font-size: var(--fs-12); color: var(--fg-3); padding: 0 10px 4px; white-space: nowrap; }
+  .auto-table td { padding: 10px; vertical-align: middle; background: transparent; }
+  .auto-table tr[data-id] { cursor: pointer; }
+  .auto-table tr[data-id] td:first-child { border-radius: var(--r-card) 0 0 var(--r-card); }
+  .auto-table tr[data-id] td:last-child { border-radius: 0 var(--r-card) var(--r-card) 0; }
+  .auto-table tr[data-id]:hover td { background: var(--bg-2); }
+  .auto-table tr[aria-selected="true"] td { background: var(--bg-3); }
+  .auto-table tr[data-id]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .auto-table tr.off .c-name b, .auto-table tr.off .c-trig { color: var(--fg-3); }
+  .c-sw { width: 1%; white-space: nowrap; }
+  .c-sw .switch { vertical-align: middle; }
+  .sw-t { margin-left: 6px; font-size: var(--fs-12); color: var(--fg-3); }
+  .c-name b { font-weight: 600; }
+  .c-trig { color: var(--fg-2); }
+  .c-trig svg.i { width: 14px; height: 14px; vertical-align: -2px; margin-right: 6px; color: var(--fg-3); }
+  .c-ag { white-space: nowrap; }
+  .c-ag > span:last-child { display: inline-block; vertical-align: middle; margin-left: 6px; }
+  .c-ag .ag { vertical-align: middle; }
+  .c-next, .c-res { white-space: nowrap; font-size: var(--fs-12); color: var(--fg-2); }
+  .c-more { width: 1%; }
+  .page { container-type: inline-size; }
+  .c-name { min-width: 13em; }
+  .c-next .sub { white-space: normal; max-width: 16em; }
+  /* 主区变窄（右侧面板打开）时先收起“Agent 与模型”列，详情面板里能看到 */
+  @container (max-width: 900px) { .auto-table .c-ag, .auto-table th:nth-child(4) { display: none; } }
+  @container (max-width: 680px) { .auto-table .c-res, .auto-table th:nth-child(6) { display: none; } }
+  @media (max-width: 767px) {
+    .auto-table thead { display: none; }
+    .auto-table tr[data-id] { display: grid; grid-template-columns: auto 1fr auto; background: var(--bg-2); border-radius: var(--r-card); margin-bottom: var(--sp-2); }
+    .auto-table tr[data-id] td { padding: 6px 10px; background: transparent !important; border-radius: 0 !important; }
+    .auto-table .c-trig, .auto-table .c-next, .auto-table .c-res { grid-column: 2 / 4; }
+    .auto-table .c-res { display: block; padding-bottom: 10px !important; }
+    .auto-table .c-res .sub { display: inline; margin-left: 6px; }
+    .auto-table .c-more { grid-column: 3; grid-row: 1; }
+  }
+
+  /* 右侧详情 */
+  #a-detail h2 { font-size: var(--fs-16); margin: 0 0 4px; }
+  #a-detail h3 { font-size: var(--fs-13); margin: var(--sp-5) 0 4px; }
+  #a-detail .lead { display: flex; gap: var(--sp-2); align-items: center; margin: 0 0 var(--sp-3); flex-wrap: wrap; }
+  #a-detail .lead .sub { display: inline; }
+  .d-acts { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-bottom: var(--sp-4); }
+  .d-kv { display: grid; grid-template-columns: 72px 1fr; gap: 8px 12px; margin: 0; font-size: var(--fs-13); }
+  .d-kv dt { color: var(--fg-3); } .d-kv dd { margin: 0; min-width: 0; }
+  .d-kv .ag { width: 16px; height: 16px; font-size: 9px; vertical-align: -3px; }
+  .prompt { color: var(--fg-1); }
+  .var { display: inline-block; padding: 0 6px; border-radius: var(--r-pill); background: var(--accent-weak); color: var(--fg-1); font-size: var(--fs-12); line-height: 20px; }
+  .runs { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+  .runs > li { background: var(--bg-2); border-radius: var(--r-card); padding: 8px 10px 10px 12px; font-size: var(--fs-13); }
+  .runs .rh { display: flex; align-items: center; gap: var(--sp-2); }
+  .runs .rh .t { color: var(--fg-1); font-size: var(--fs-12); }
+  .runs .rh .sub { display: inline; }
+  .runs .rh .grow { flex: 1; }
+  .runs p { margin: 2px 0 0; color: var(--fg-2); }
+  .runs .judge { margin-top: 8px; }
+
+  /* 新建 / 编辑对话框 */
+  .vars { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; margin-top: 6px; }
+  .vars .sub { display: inline; margin-right: 2px; }
+  .daypick { display: flex; flex-wrap: wrap; gap: 4px; }
+  .daypick label { position: relative; cursor: pointer; }
+  .daypick input { position: absolute; opacity: 0; inset: 0; margin: 0; cursor: pointer; }
+  .daypick span { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: var(--r-pill); background: var(--bg-2); color: var(--fg-2); font-size: var(--fs-12); box-shadow: inset 0 0 0 1px var(--line-strong); }
+  .daypick input:checked + span { background: var(--accent); color: var(--accent-ink); box-shadow: none; font-weight: 600; }
+  .daypick input:checked + span::before { content: "✓ "; }
+  .daypick input:focus-visible + span { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .next-box { display: flex; gap: var(--sp-2); align-items: flex-start; margin: 0 0 var(--sp-2) 96px; padding: 10px 12px; border-radius: var(--r-card); background: var(--bg-2); font-size: var(--fs-13); }
+  .next-box > svg.i { color: var(--fg-3); margin-top: 3px; }
+  .next-box b { display: block; color: var(--fg-1); font-weight: 600; }
+  .next-box ol { margin: 2px 0 0; padding-left: 1.3em; color: var(--fg-1); }
+  .next-box span { color: var(--fg-3); font-size: var(--fs-12); }
+  @media (max-width: 600px) { .next-box, .field-note { margin-left: 0; } }
+  dialog.dlg.wide .form-row { grid-template-columns: 96px 1fr; }
+</style>
+</head>
+<body data-page="automations">
+<div class="app" data-side="open">
+  <aside class="sidebar"></aside>
+  <main class="main">
+    <header class="main-head">
+      <h1>自动化</h1>
+      <span class="meta hide-narrow"></span>
+      <span class="grow"></span>
+      <button class="btn primary" data-wired="1" data-new-auto><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>新建自动化</button>
+      <button class="btn ghost icon" data-action="side" aria-label="显示或收起详情面板" title="详情面板 Ctrl+J"><svg class="i" aria-hidden="true"><use href="#i-panel"/></svg></button>
+    </header>
+    <div class="content-scroll">
+      <div class="page">
+        <p class="page-lead">按时间或事件自动派发任务。每次运行都是一个普通任务，出现在侧栏和看板里，可以点进对话查看。</p>
+        <div class="afilters"><span class="achips" style="display:inline-flex;gap:var(--sp-2);flex-wrap:wrap"></span></div>
+        <table class="auto-table" aria-label="自动化列表">
+          <thead><tr><th scope="col">开关</th><th scope="col">名称</th><th scope="col">触发方式</th><th scope="col">Agent 与模型</th><th scope="col">下次运行</th><th scope="col">最近结果</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead>
+          <tbody id="auto-rows"></tbody>
+        </table>
+        <div class="empty" id="auto-empty" hidden><h3>这个项目还没有自动化</h3><p>比如每晚构建、每周写更新日志、美术目录有新文件时自动检查。</p><button class="btn primary" data-wired="1" data-new-auto>新建自动化</button></div>
+      </div>
+    </div>
+  </main>
+
+  <div class="resizer"></div>
+  <aside class="side" aria-label="自动化详情">
+    <div class="side-head">
+      <div class="tabs" role="tablist" aria-label="自动化详情">
+        <button role="tab" aria-selected="true" aria-controls="a-detail" id="at-detail">详情与运行历史</button>
+      </div>
+      <span class="grow"></span>
+      <button class="btn ghost icon sm" data-action="side-close" aria-label="收起详情面板" title="收起 Ctrl+J"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="side-body pane-pad" id="a-detail" role="tabpanel" aria-labelledby="at-detail"></div>
+  </aside>
+</div>
+<script src="assets/app.js"></script>
+<script src="assets/interact.js"></script>
+<script src="assets/automations.js"></script>
+</body>
+</html>

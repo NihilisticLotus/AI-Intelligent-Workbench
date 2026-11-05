@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agent 管理 - AI Console 原型</title>
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="stylesheet" href="assets/components.css">
+<link rel="stylesheet" href="assets/interact.css">
+<style>
+  .page { max-width: 1040px; margin: 0 auto; padding: var(--sp-2) var(--sp-5) var(--sp-7); }
+  .page-lead { margin: 0 0 var(--sp-5); color: var(--fg-2); font-size: var(--fs-13); }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: var(--sp-3); }
+  .agent-card { background: var(--bg-2); border-radius: var(--r-card); padding: var(--sp-4); display: flex; flex-direction: column; gap: var(--sp-3); cursor: pointer; }
+  .agent-card:hover { background: var(--bg-3); }
+  .agent-card[aria-current="true"] { box-shadow: inset 0 0 0 2px var(--accent); }
+  .agent-card .top { display: flex; gap: var(--sp-3); align-items: center; }
+  .agent-card .name { font-weight: 600; font-size: var(--fs-16); }
+  .agent-card .src { font-size: var(--fs-12); color: var(--fg-3); }
+  .agent-card dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; margin: 0; font-size: var(--fs-13); }
+  .agent-card dt { color: var(--fg-3); } .agent-card dd { margin: 0; min-width: 0; }
+  .agent-card .acts { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+  .detail { margin-top: var(--sp-6); display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-6); }
+  .detail h2 { font-size: var(--fs-16); margin: 0 0 var(--sp-3); display: flex; align-items: center; gap: var(--sp-2); }
+  .detail h3 { font-size: var(--fs-13); margin: var(--sp-5) 0 var(--sp-2); display: flex; align-items: center; gap: var(--sp-2); }
+  .detail h3:first-child { margin-top: 0; }
+  .detail h3 .grow { flex: 1; }
+  .acct { display: flex; align-items: center; gap: var(--sp-3); padding: 10px 12px; border-radius: var(--r-card); background: var(--bg-2); margin-bottom: var(--sp-2); }
+  .acct .info { flex: 1; min-width: 0; }
+  .acct .info b { font-weight: 600; font-size: var(--fs-13); display: block; }
+  .acct .info span { font-size: var(--fs-12); color: var(--fg-3); }
+  .method { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-2); }
+  .method button { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; padding: 10px 12px; border: 1px dashed var(--line-strong); border-radius: var(--r-card); background: transparent; cursor: pointer; text-align: left; font-size: var(--fs-13); }
+  .method button:hover { background: var(--bg-2); border-style: solid; }
+  .method button span { font-size: var(--fs-12); color: var(--fg-3); }
+  .field { display: grid; grid-template-columns: 96px 1fr; gap: var(--sp-2); align-items: center; font-size: var(--fs-13); margin-bottom: var(--sp-2); }
+  .field label { color: var(--fg-2); }
+  .testlog { margin: 0; padding: 10px 12px; background: var(--bg-0); border-radius: var(--r-card); font-size: 12.5px; color: var(--fg-2); white-space: pre-wrap; }
+  @media (max-width: 1023px) { .detail { grid-template-columns: 1fr; gap: var(--sp-4); } }
+</style>
+</head>
+<body data-page="agents">
+<div class="app">
+  <aside class="sidebar"></aside>
+  <main class="main">
+    <header class="main-head">
+      <h1>Agent 管理</h1>
+      <span class="grow"></span>
+      <button class="btn"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg>重新检测</button>
+    </header>
+    <div class="content-scroll">
+      <div class="page">
+        <p class="page-lead">上次检测：今天 13:58。安装、登录、更新都在这里点按钮完成，不需要打开命令行。</p>
+        <div class="cards">
+          <article class="agent-card" tabindex="0" aria-current="true">
+            <span class="top"><span class="ag claude lg">C</span><span><span class="name">Claude Code</span><br><span class="src">npm 全局安装</span></span><span style="margin-left:auto" class="status ok"><span class="dot"></span>就绪</span></span>
+            <dl>
+              <dt>版本</dt><dd>2.3.8（已验证）</dd>
+              <dt>账号</dt><dd>个人订阅、工作室 API Key</dd>
+              <dt>运行中</dt><dd>2 个会话（并发上限 2）</dd>
+            </dl>
+          </article>
+
+          <article class="agent-card" tabindex="0">
+            <span class="top"><span class="ag codex lg">X</span><span><span class="name">Codex</span><br><span class="src">npm 全局安装</span></span><span style="margin-left:auto" class="status wait"><span class="dot"></span>需要登录</span></span>
+            <div class="alert attn" style="padding:8px 10px">
+              <svg class="i" aria-hidden="true"><use href="#i-warn"/></svg>
+              <div class="body"><strong>ChatGPT 登录已过期</strong><p>1 个任务因此失败。重新登录会在浏览器中打开授权页面。</p></div>
+            </div>
+            <dl><dt>版本</dt><dd>0.61.0，可更新到 0.63.2</dd></dl>
+            <div class="acts"><button class="btn sm attn">重新登录</button><button class="btn sm">更新到 0.63.2</button></div>
+          </article>
+
+          <article class="agent-card" tabindex="0">
+            <span class="top"><span class="ag codebuddy lg">B</span><span><span class="name">CodeBuddy</span><br><span class="src">WorkBuddy 内置引擎</span></span><span style="margin-left:auto" class="status ok"><span class="dot"></span>就绪</span></span>
+            <dl>
+              <dt>版本</dt><dd style="color:var(--attn)"><svg class="i" aria-hidden="true" style="width:13px;height:13px;vertical-align:-2px"><use href="#i-warn"/></svg> 4.2.0，未验证版本</dd>
+              <dt>账号</dt><dd>沿用 WorkBuddy 登录</dd>
+              <dt>模型</dt><dd>glm-5.1、kimi-k2.5、minimax-m2.7、deepseek-v3-2</dd>
+            </dl>
+          </article>
+
+          <article class="agent-card" tabindex="0">
+            <span class="top"><span class="ag zcode lg">Z</span><span><span class="name">ZCode</span><br><span class="src">ZCode 内置引擎</span></span><span style="margin-left:auto" class="status idle"><span class="dot"></span>未连接</span></span>
+            <dl>
+              <dt>版本</dt><dd>0.17.1</dd>
+              <dt>说明</dt><dd>需要协议桥接，目前是实验功能，可能没有中途审批。</dd>
+            </dl>
+            <div class="acts"><button class="btn sm">启用实验桥接</button></div>
+          </article>
+        </div>
+
+        <section class="detail" aria-label="Claude Code 详情">
+          <div>
+            <h2><span class="ag claude">C</span>Claude Code</h2>
+            <h3>账号</h3>
+            <div class="acct">
+              <svg class="i" aria-hidden="true"><use href="#i-link"/></svg>
+              <div class="info"><b>个人订阅</b><span>订阅登录，本周额度已用 46%，周一 08:00 重置</span></div>
+              <span class="status ok"><span class="dot"></span>默认</span>
+              <button class="btn ghost icon sm" aria-label="个人订阅的更多操作"><svg class="i" aria-hidden="true"><use href="#i-more"/></svg></button>
+            </div>
+            <div class="acct">
+              <svg class="i" aria-hidden="true"><use href="#i-key"/></svg>
+              <div class="info"><b>工作室 API Key</b><span>官方 API Key，结尾 …7Q2c，保存在 Windows 凭据管理器</span></div>
+              <button class="btn sm">测试</button>
+              <button class="btn ghost icon sm" aria-label="工作室 API Key 的更多操作"><svg class="i" aria-hidden="true"><use href="#i-more"/></svg></button>
+            </div>
+            <h3>添加账号</h3>
+            <div class="method">
+              <button><b>订阅登录</b><span>在浏览器中授权</span></button>
+              <button><b>官方 API Key</b><span>粘贴密钥</span></button>
+              <button><b>自定义地址</b><span>兼容第三方中转</span></button>
+            </div>
+          </div>
+          <div>
+            <h3>默认设置</h3>
+            <div class="field"><label for="dm">默认模型</label><select class="select" id="dm"><option>Opus 5.5</option><option>Sonnet 5</option></select></div>
+            <div class="field"><label for="cc">并发上限</label><select class="select" id="cc"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></div>
+            <div class="field"><label>引擎位置</label><span class="mono" style="font-size:12px">%APPDATA%\npm\claude.cmd</span></div>
+            <h3>测试连接<span class="grow"></span><button class="btn sm"><svg class="i" aria-hidden="true"><use href="#i-play"/></svg>再测一次</button></h3>
+<pre class="testlog mono">13:58:02  找到引擎
+13:58:03  ACP 握手成功，协议版本 1
+13:58:05  个人订阅：发送测试消息，1.8 秒收到回复
+结果：一切正常</pre>
+          </div>
+        </section>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+<script src="assets/interact.js"></script>
+</body>
+</html>

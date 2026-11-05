@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>能力 - AI Console 原型</title>
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="stylesheet" href="assets/components.css">
+<link rel="stylesheet" href="assets/interact.css">
+<link rel="stylesheet" href="assets/generate.css">
+<style>
+  .page { max-width: 1120px; margin: 0 auto; padding: 0 var(--sp-5) var(--sp-7); container-type: inline-size; }
+  .cap-top { display: flex; align-items: center; gap: var(--sp-3); margin: 0 0 var(--sp-3); flex-wrap: wrap; }
+  .cap-top p { margin: 0; color: var(--fg-2); font-size: var(--fs-13); flex: 1 1 22em; }
+  .sub { display: block; font-size: var(--fs-12); color: var(--fg-3); font-weight: 400; }
+  .discover { margin-bottom: var(--sp-3); }
+  .discover .actions { margin-top: 6px; }
+  .cap-tabs { margin-bottom: var(--sp-3); }
+  .toolbar { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); flex-wrap: wrap; }
+  .toolbar .sub { display: inline; }
+  .toolbar .grow { flex: 1; }
+
+  /* 列表：和自动化页一样，表格语义，行只用底色区分 */
+  .cap-table { width: 100%; border-collapse: separate; border-spacing: 0 2px; font-size: var(--fs-13); }
+  .cap-table th { text-align: left; font-weight: 400; font-size: var(--fs-12); color: var(--fg-3); padding: 0 10px 4px; white-space: nowrap; }
+  .cap-table td { padding: 9px 10px; vertical-align: middle; }
+  .cap-table tr[data-id] { cursor: pointer; }
+  .cap-table tr[data-id] td:first-child { border-radius: var(--r-card) 0 0 var(--r-card); }
+  .cap-table tr[data-id] td:last-child { border-radius: 0 var(--r-card) var(--r-card) 0; }
+  .cap-table tr[data-id]:hover td { background: var(--bg-2); }
+  .cap-table tr[aria-selected="true"] td { background: var(--bg-3); }
+  .cap-table tr[data-id]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .cap-table tr.off .c-name b { color: var(--fg-3); }
+  .c-name b { font-weight: 600; font-family: var(--font-code); font-size: 12.5px; }
+  .c-desc { color: var(--fg-2); max-width: 22em; }
+  .c-nowrap, .c-sw { white-space: nowrap; }
+  .c-sw { width: 1%; }
+  .c-sw .switch { vertical-align: middle; }
+  .sw-t { margin-left: 6px; font-size: var(--fs-12); color: var(--fg-3); }
+  .c-more { width: 1%; }
+  .c-recent { font-size: var(--fs-12); color: var(--fg-2); white-space: nowrap; }
+  .c-recent .sub { font-family: var(--font-code); font-size: 11.5px; }
+  .tag { display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: var(--r-pill); background: var(--bg-2); color: var(--fg-2); font-size: var(--fs-12); white-space: nowrap; }
+  .tag svg.i { width: 12px; height: 12px; }
+  .tag.lock { background: var(--accent-weak); color: var(--fg-1); }
+  tr[aria-selected="true"] .tag:not(.lock) { background: var(--bg-2); }
+  .ags { display: inline-flex; gap: 3px; vertical-align: middle; }
+  .ags .ag { width: 18px; height: 18px; font-size: 10px; border-radius: 4px; }
+  .ags .ag.no { background: transparent; color: var(--fg-3); box-shadow: inset 0 0 0 1px var(--line-strong); }
+  /* 主区变窄时先收起次要列 */
+  @container (max-width: 920px) { .cap-table .c-recent, .cap-table .h-recent, .cap-table .c-ver, .cap-table .h-ver { display: none; } }
+  @container (max-width: 720px) { .cap-table .c-type, .cap-table .h-type, .cap-table .c-src, .cap-table .h-src, .cap-table .c-desc, .cap-table .h-desc { display: none; } }
+  @media (max-width: 767px) { .cap-table .c-conc, .cap-table .h-conc, .cap-table .c-dist, .cap-table .h-dist { display: none; } .page { padding: 0 var(--sp-3) var(--sp-6); } }
+  @media (max-width: 480px) { .cap-table .c-ags, .cap-table .h-ags, .cap-table .sw-t { display: none; } .cap-table td { padding: 8px 6px; } }
+
+  /* 右侧详情 */
+  .cap-side h2 { font-size: var(--fs-16); margin: 0 0 4px; font-family: var(--font-code); }
+  .cap-side h3 { font-size: var(--fs-13); margin: var(--sp-5) 0 6px; }
+  .cap-side .lead { display: flex; gap: var(--sp-2); align-items: center; margin: 0 0 var(--sp-3); flex-wrap: wrap; }
+  .d-acts { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-bottom: var(--sp-4); }
+  .d-kv { display: grid; grid-template-columns: 76px 1fr; gap: 8px 12px; margin: 0; font-size: var(--fs-13); }
+  .d-kv dt { color: var(--fg-3); } .d-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+  .codeline { display: block; padding: 6px 10px; border-radius: var(--r-ctl); background: var(--bg-0); font: 12.5px/1.5 var(--font-code); color: var(--fg-1); overflow-wrap: anywhere; }
+  .plain { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-13); }
+  .plain li { display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; }
+  .plain code { font-size: 12.5px; color: var(--fg-1); }
+  .plain .sub { display: inline; }
+  .plain .ag { width: 16px; height: 16px; font-size: 9px; vertical-align: -3px; }
+  .calls li { padding: 6px 10px; border-radius: var(--r-ctl); background: var(--bg-2); }
+  .mdprev { margin: 0; padding: 10px 12px; border-radius: var(--r-card); background: var(--bg-0); font: 12.5px/1.6 var(--font-code); color: var(--fg-2); white-space: pre-wrap; max-height: 240px; overflow: auto; }
+  .note { font-size: var(--fs-12); color: var(--fg-3); margin: 4px 0 0; }
+
+  /* 扫描与整合向导 */
+  dialog.dlg.cap-wide { width: min(960px, calc(100vw - 32px)); }
+  .wz-steps { display: flex; gap: var(--sp-2); list-style: none; margin: 0 0 var(--sp-4); padding: 0; flex-wrap: wrap; font-size: var(--fs-12); }
+  .wz-steps li { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-3); }
+  .wz-steps li + li::before { content: ""; width: 16px; height: 1px; background: var(--line-strong); }
+  .wz-steps .n { width: 18px; height: 18px; border-radius: 50%; display: inline-grid; place-items: center; box-shadow: inset 0 0 0 1px var(--line-strong); font-size: 11px; }
+  .wz-steps li[aria-current="step"] { color: var(--fg-1); font-weight: 600; }
+  .wz-steps li[aria-current="step"] .n { background: var(--accent); color: var(--accent-ink); box-shadow: none; }
+  .wz-steps li.done .n { background: var(--bg-3); color: var(--ok); box-shadow: none; }
+  .scanlist { list-style: none; margin: 0 0 var(--sp-3); padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+  .scanlist > li { padding: 8px 12px; border-radius: var(--r-card); background: var(--bg-2); }
+  .scanlist .sh { display: flex; align-items: center; gap: var(--sp-2); color: var(--fg-1); }
+  .scanlist .sh .grow { flex: 1; }
+  .scanlist ul { margin: 4px 0 0 28px; padding: 0; list-style: none; font: 12px/1.6 var(--font-code); color: var(--fg-3); }
+  .matrix-wrap { overflow: auto; max-height: 52vh; }
+  .matrix { width: 100%; border-collapse: collapse; font-size: var(--fs-12); }
+  .matrix th, .matrix td { padding: 5px 8px; text-align: left; white-space: nowrap; }
+  .matrix thead th { position: sticky; top: 0; background: var(--bg-1); color: var(--fg-3); font-weight: 400; z-index: 1; }
+  .matrix tbody th { font: 600 12px/1.4 var(--font-code); color: var(--fg-1); }
+  .matrix tbody th .sub { font-family: var(--font-ui); white-space: normal; max-width: 18em; }
+  .matrix tbody tr:nth-child(odd) td, .matrix tbody tr:nth-child(odd) th { background: color-mix(in srgb, var(--bg-2) 55%, transparent); }
+  .matrix .grp th { background: none !important; padding-top: 12px; font: 600 var(--fs-13)/1.4 var(--font-ui); color: var(--fg-1); }
+  .cell { display: inline-flex; align-items: center; gap: 4px; }
+  .cell svg.i { width: 13px; height: 13px; }
+  .cell.has { color: var(--ok); }
+  .cell.none { color: var(--fg-3); }
+  .cell.diff { color: var(--attn); }
+  button.cell { border: 0; background: var(--attn-weak); border-radius: var(--r-pill); padding: 2px 8px; font: inherit; cursor: pointer; }
+  button.cell:hover { filter: brightness(1.1); }
+  .legend { display: flex; gap: var(--sp-4); flex-wrap: wrap; margin: 0 0 var(--sp-2); font-size: var(--fs-12); color: var(--fg-2); }
+  .diffcols { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+  @media (max-width: 640px) { .diffcols { grid-template-columns: 1fr; } }
+  .diffcol { display: block; padding: 10px 12px; border-radius: var(--r-card); background: var(--bg-2); cursor: pointer; box-shadow: inset 0 0 0 1px transparent; }
+  .diffcol:has(input:checked) { box-shadow: inset 0 0 0 2px var(--accent); }
+  .diffcol pre { margin: 6px 0 0; padding: 8px 10px; border-radius: var(--r-ctl); background: var(--bg-0); font: 12px/1.6 var(--font-code); color: var(--fg-2); white-space: pre-wrap; }
+  .diffcol mark { background: var(--attn-weak); color: var(--fg-1); border-radius: 3px; padding: 0 2px; }
+  .picklist { columns: 2 220px; column-gap: var(--sp-4); margin: 0 0 var(--sp-3); }
+  .picklist label { display: flex; gap: 6px; align-items: baseline; break-inside: avoid; padding: 2px 0; color: var(--fg-1); }
+  .picklist code { font-size: 12.5px; }
+  .picklist .sub { display: inline; }
+  .wbfiles { margin: 6px 0 0; padding-left: 1.2em; font: 12px/1.7 var(--font-code); color: var(--fg-1); }
+  .result-big { font-size: var(--fs-16); color: var(--fg-1); margin: 0 0 var(--sp-2); }
+  .envrow { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; margin-bottom: 6px; }
+  .checks { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+  .checks label { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-1); cursor: pointer; }
+  .checks .ag { width: 16px; height: 16px; font-size: 9px; }
+  .testlog { margin: 0; padding: 10px 12px; border-radius: var(--r-card); background: var(--bg-0); font: 12px/1.7 var(--font-code); color: var(--fg-2); white-space: pre-wrap; min-height: 7em; }
+</style>
+</head>
+<body data-page="capabilities">
+<div class="app" data-side="open">
+  <aside class="sidebar"></aside>
+  <main class="main">
+    <header class="main-head">
+      <h1>能力</h1>
+      <span class="meta hide-narrow" id="cap-meta"></span>
+      <span class="grow"></span>
+      <button class="btn ghost icon" data-action="side" aria-label="显示或收起详情面板" title="详情面板 Ctrl+J"><svg class="i" aria-hidden="true"><use href="#i-panel"/></svg></button>
+    </header>
+    <div class="content-scroll">
+      <div class="page">
+        <div class="cap-top">
+          <p>把各 Agent 的 MCP 和 Skill 收拢到一处，所有 Agent 都能用；图片、音效、视频生成器也在这里管理。<span class="sub" id="cap-last"></span></p>
+          <button class="btn primary" data-wired="1" id="cap-scan"><svg class="i" aria-hidden="true"><use href="#i-scan"/></svg>扫描本机 Agent</button>
+        </div>
+        <div class="alert info discover" id="cap-discover" role="status">
+          <svg class="i" aria-hidden="true"><use href="#i-bell"/></svg>
+          <div class="body"><strong>在 CodeBuddy 里发现新的 MCP：image-gen，是否整合？</strong>
+            <p>来自 ~/.codebuddy/mcp.json，刚刚新增。整合后所有 Agent 都能用。</p>
+            <div class="actions"><button class="btn sm primary" data-wired="1" data-disc="take">整合</button><button class="btn sm ghost" data-wired="1" data-disc="ignore">忽略</button></div></div>
+        </div>
+        <div class="tabs cap-tabs" role="tablist" aria-label="能力类型">
+          <button role="tab" id="ct-mcp" aria-selected="true" aria-controls="cp-mcp"><svg class="i" aria-hidden="true"><use href="#i-plug"/></svg>MCP <span class="count" id="cnt-mcp"></span></button>
+          <button role="tab" id="ct-skill" aria-selected="false" aria-controls="cp-skill" tabindex="-1"><svg class="i" aria-hidden="true"><use href="#i-puzzle"/></svg>Skill <span class="count" id="cnt-skill"></span></button>
+          <button role="tab" id="ct-gen" aria-selected="false" aria-controls="cp-gen" tabindex="-1"><svg class="i" aria-hidden="true"><use href="#i-wand"/></svg>生成器 <span class="count" id="cnt-gen"></span></button>
+        </div>
+
+        <section id="cp-mcp" role="tabpanel" aria-labelledby="ct-mcp">
+          <div class="toolbar">
+            <button class="btn sm" data-wired="1" id="mcp-new"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>新建 MCP</button>
+            <span class="sub">经工作台的 MCP 入口统一提供，每个服务器只启动一份，多个会话共享。</span>
+          </div>
+          <table class="cap-table" aria-label="MCP 列表">
+            <thead><tr><th scope="col">名称</th><th scope="col" class="h-type">类型</th><th scope="col">状态</th><th scope="col" class="h-ags">提供给</th><th scope="col" class="h-conc">并发</th><th scope="col" class="h-recent">最近调用</th><th scope="col">启用</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead>
+            <tbody id="mcp-rows"></tbody>
+          </table>
+        </section>
+
+        <section id="cp-skill" role="tabpanel" aria-labelledby="ct-skill" hidden>
+          <div class="toolbar">
+            <button class="btn sm" data-wired="1" id="skill-import"><svg class="i" aria-hidden="true"><use href="#i-download"/></svg>导入 Skill</button>
+            <span class="sub">统一库：%APPDATA%\AI_Console\skills，改一处，所有 Agent 同时生效。</span>
+          </div>
+          <table class="cap-table" aria-label="Skill 列表">
+            <thead><tr><th scope="col">名称</th><th scope="col" class="h-desc">描述</th><th scope="col" class="h-src">来源</th><th scope="col" class="h-ver">版本</th><th scope="col" class="h-ags">分配给</th><th scope="col" class="h-dist">分发</th><th scope="col">启用</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead>
+            <tbody id="skill-rows"></tbody>
+          </table>
+        </section>
+
+        <section id="cp-gen" role="tabpanel" aria-labelledby="ct-gen" hidden>
+          <div class="toolbar">
+            <button class="btn sm" data-wired="1" id="gen-add"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>添加生成器</button>
+            <span class="sub">每个启用的生成器经 MCP 入口提供给 Agent（gen__image、gen__sfx、gen__video）。付费生成每次都要审批。具体用哪些服务等调研结论，下面都是示例。</span>
+          </div>
+          <table class="cap-table" aria-label="生成器列表">
+            <thead><tr><th scope="col">名称</th><th scope="col" class="h-type">类型</th><th scope="col" class="h-recent">接入</th><th scope="col">状态</th><th scope="col" class="h-conc">并发</th><th scope="col" class="h-ver">费用</th><th scope="col">启用</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead>
+            <tbody id="gen-rows"></tbody>
+          </table>
+        </section>
+      </div>
+    </div>
+  </main>
+
+  <div class="resizer"></div>
+  <aside class="side" aria-label="能力详情">
+    <div class="side-head">
+      <div class="tabs" role="tablist" aria-label="能力详情">
+        <button role="tab" aria-selected="true" aria-controls="cap-detail" id="cdt-detail">详情</button>
+      </div>
+      <span class="grow"></span>
+      <button class="btn ghost icon sm" data-action="side-close" aria-label="收起详情面板" title="收起 Ctrl+J"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+    </div>
+    <div class="side-body pane-pad cap-side" id="cap-detail" role="tabpanel" aria-labelledby="cdt-detail"></div>
+  </aside>
+</div>
+<script src="assets/app.js"></script>
+<script src="assets/interact.js"></script>
+<script src="assets/capabilities.js"></script>
+<script src="assets/generate.js"></script>
+</body>
+</html>

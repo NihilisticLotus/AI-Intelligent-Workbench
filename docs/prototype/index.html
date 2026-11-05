@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Console 界面原型</title>
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="stylesheet" href="assets/interact.css">
+<style>
+  body { overflow: auto; }
+  .wrap { max-width: 820px; margin: 0 auto; padding: 64px 24px; }
+  header { display: flex; align-items: center; gap: 12px; }
+  header h1 { font-size: var(--fs-26); margin: 0; font-weight: 600; }
+  header .grow { flex: 1; }
+  .lead { color: var(--fg-2); max-width: 40em; margin: 12px 0 36px; }
+  .pages { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .pages a { display: flex; flex-direction: column; gap: 6px; padding: 18px 20px; border-radius: var(--r-card); background: var(--bg-2); color: var(--fg-1); text-decoration: none; height: 100%; }
+  .pages a:hover { background: var(--bg-3); }
+  .pages b { font-size: var(--fs-16); display: flex; align-items: center; gap: 8px; }
+  .pages span { color: var(--fg-2); font-size: var(--fs-13); }
+  .notes { margin-top: 40px; font-size: var(--fs-13); color: var(--fg-2); }
+  .notes h2 { font-size: var(--fs-14); color: var(--fg-1); margin: 0 0 8px; }
+  .notes ul { margin: 0; padding-left: 1.2em; }
+  .notes li { margin: 4px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <span class="brand-mark" style="width:32px;height:32px;font-size:13px;border-radius:8px">AI</span>
+    <h1>AI Console 界面原型</h1>
+    <span class="grow"></span>
+    <button class="btn ghost icon" data-action="theme" aria-label="切换日间/夜间模式"><svg class="i" aria-hidden="true"><use href="#i-sun"/></svg></button>
+  </header>
+  <p class="lead">静态原型，用来评审布局、组件和配色。数据都是示例，大多数按钮没有接功能。设计说明见 docs/ui-design.md。</p>
+
+  <ul class="pages">
+    <li><a href="workbench.html"><b><svg class="i" aria-hidden="true"><use href="#i-chat"/></svg>工作台：对话</b><span>侧栏任务列表、进行中的对话、工具调用、待审批卡片、交接分隔条，右侧改动面板。</span></a></li>
+    <li><a href="kanban.html"><b><svg class="i" aria-hidden="true"><use href="#i-kanban"/></svg>工作台：看板</b><span>主区切到看板视图，按状态分列的并行任务；点“背包界面”卡片在右侧看摘要。</span></a></li>
+    <li><a href="asset-mode.html"><b><svg class="i" aria-hidden="true"><use href="#i-cube"/></svg>资产预览</b><span>Agent 改了模型后，右侧预览自动刷新；可一键全屏，和任务前对比。需要联网加载 three.js。</span></a></li>
+    <li><a href="generate.html"><b><svg class="i" aria-hidden="true"><use href="#i-wand"/></svg>生成</b><span>用 ComfyUI、Codex 图片生成、音效服务生成图片、音效、视频：首次一键安装、内置入门模板、排队和进度、批量结果挑选、采用进资产目录。</span></a></li>
+    <li><a href="automations.html"><b><svg class="i" aria-hidden="true"><use href="#i-auto"/></svg>自动化</b><span>定时和事件触发的任务：每晚构建、每周更新日志、新 FBX 自动检查。表单化设置触发方式和运行规则，不用写 cron。</span></a></li>
+    <li><a href="monitor.html"><b><svg class="i" aria-hidden="true"><use href="#i-chart"/></svg>监控</b><span>运行概览、近 7 天用量图表、Agent 健康、告警规则、最近事件，以及快速判断的卡住检测和准确度。</span></a></li>
+    <li><a href="capabilities.html"><b><svg class="i" aria-hidden="true"><use href="#i-plug"/></svg>能力</b><span>把各 Agent 的 MCP 和 Skill 收拢到一处：扫描本机、对比差异、一键整合，所有 Agent 共用一套工具。</span></a></li>
+    <li><a href="agents.html"><b><svg class="i" aria-hidden="true"><use href="#i-bot"/></svg>Agent 管理</b><span>四个 Agent 的状态、登录过期、未验证版本、账号与测试连接。</span></a></li>
+  </ul>
+
+  <section class="notes">
+    <h2>可以试试</h2>
+    <ul>
+      <li>Ctrl+B 折叠或展开侧栏，Ctrl+J 显示或收起右侧面板；拖动右侧面板左边缘调整宽度，聚焦后也可以用方向键。</li>
+      <li>侧栏底部切换深色和浅色，选择会被记住。</li>
+      <li>工作台里点工具调用展开详情；点输入框下方的 Agent、账号、模型打开切换器。</li>
+      <li>资产预览页点“全屏查看”或“和任务前对比”，Esc 退出；点“模拟 Agent 写入”看自动刷新。</li>
+      <li>快速判断：审批卡片的“风险评估”、新建任务的“推荐 Agent”、测试通过后的“完成度判断”，都可以点 [不同意]；设置里的“快速判断”一节可以换判断引擎。</li>
+      <li>窗口窄于 1280 像素时右侧面板变成覆盖抽屉；窄于 768 像素时变成单栏和底部导航。</li>
+    </ul>
+  </section>
+</div>
+<script src="assets/app.js"></script>
+<script src="assets/interact.js"></script>
+</body>
+</html>

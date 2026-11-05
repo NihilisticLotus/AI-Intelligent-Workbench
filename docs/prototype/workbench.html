@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>工作台 - AI Console 原型</title>
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="stylesheet" href="assets/components.css">
+<link rel="stylesheet" href="assets/interact.css">
+</head>
+<body data-page="workbench" data-task="t8f2">
+<div class="app" data-side="open">
+  <aside class="sidebar"></aside>
+
+  <main class="main">
+    <header class="main-head">
+      <h1>修复 Steam 云同步时存档偶发损坏</h1>
+      <span class="status wait"><span class="dot"></span>等待审批</span>
+      <span class="meta hide-narrow"><svg class="i" aria-hidden="true"><use href="#i-branch"/></svg><span class="mono" style="font-size:12px">aic/t8f2-fix-save-corrupt</span></span>
+      <span class="grow"></span>
+      <nav class="viewswitch" aria-label="主区视图">
+        <a href="workbench.html" aria-current="page">对话</a>
+        <a href="kanban.html">看板</a>
+      </nav>
+      <button class="btn ghost icon" data-action="side" aria-label="显示或收起右侧面板" title="右侧面板 Ctrl+J"><svg class="i" aria-hidden="true"><use href="#i-panel"/></svg></button>
+    </header>
+
+    <div class="main-body">
+      <section class="content" aria-label="对话">
+        <div class="stream" tabindex="0" aria-label="对话记录">
+          <div class="stream-inner">
+            <article class="msg user">
+              <div class="who"><span class="me">黄</span></div>
+              <div>
+                <div class="head"><b>你</b><span>今天 14:02</span></div>
+                <div class="text">
+                  <p>有玩家反馈：在 Steam Deck 上退出游戏后再打开，存档有时变成空文件，只能从头开始。日志附上了。先查原因，修复时不要改存档格式，老存档必须能读。</p>
+                  <span class="attach"><svg class="i" aria-hidden="true"><use href="#i-file"/></svg>player_save_corrupt.log<span class="mono" style="font-size:12px">38 KB</span></span>
+                </div>
+              </div>
+            </article>
+
+            <article class="msg">
+              <div class="who"><span class="ag codebuddy" title="CodeBuddy">B</span></div>
+              <div>
+                <div class="head"><b>CodeBuddy</b><span>glm-5.1</span><span>14:03</span></div>
+                <div class="text"><p>日志里 <code>SaveManager.Save</code> 和 Steam 云同步的上传几乎同时发生，上传读到的是写了一半的文件。问题出在 <code>File.WriteAllText</code> 直接覆盖原文件。</p></div>
+              </div>
+            </article>
+            <div class="tools-group">
+              <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">搜索</span><span class="target">"WriteAllText" 于 Assets/Scripts</span><span class="end">4 处匹配</span></summary></details>
+              <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">读取</span><span class="target">Assets/Scripts/Save/SaveManager.cs</span><span class="end">186 行</span></summary></details>
+            </div>
+
+            <div class="handoff" role="group" aria-label="交接">
+              <details>
+                <summary><svg class="i" aria-hidden="true"><use href="#i-swap"/></svg>已从 CodeBuddy（glm-5.1）交接到 Claude Code（Opus 5.5），交接（有损），点开查看</summary>
+                <div class="summary-box">
+                  <h4>任务目标与约束</h4><p>修复退出时存档被截断，不改存档格式。</p>
+                  <h4>当前状态</h4><p>定位到 SaveManager.Save 直接覆盖写入；未修改任何文件。</p>
+                  <h4>下一步</h4><p>改为先写临时文件再原子替换，读取失败时回退 .bak；补 EditMode 测试。</p>
+                </div>
+              </details>
+            </div>
+
+            <article class="msg">
+              <div class="who"><span class="ag claude" title="Claude Code">C</span></div>
+              <div>
+                <div class="head"><b>Claude Code</b><span>Opus 5.5</span><span>14:07</span></div>
+                <div class="text"><p>按交接内容继续。写入改成“临时文件 → 落盘 → 原子替换”，读取时主存档解析失败就回退到 <code>.bak</code>。存档内容和格式不变。</p></div>
+              </div>
+            </article>
+            <div class="tools-group">
+              <details class="tool" open>
+                <summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">修改</span><span class="target">Assets/Scripts/Save/SaveManager.cs</span><span class="end"><span class="stat-add">+22</span><span class="stat-del">−4</span></span></summary>
+                <div class="detail">
+                  <div class="diff" style="margin:0" aria-label="SaveManager.cs 内联改动">
+                    <div class="ln d"><span>44</span><span></span><span>−</span><span>        File.WriteAllText(SavePath, json);</span></div>
+                    <div class="ln a"><span></span><span>45</span><span>+</span><span>        var tmpPath = SavePath + ".tmp";</span></div>
+                    <div class="ln a"><span></span><span>47</span><span>+</span><span>        WriteAndFlush(tmpPath, Encoding.UTF8.GetBytes(json));</span></div>
+                    <div class="ln a"><span></span><span>48</span><span>+</span><span>        ReplaceAtomically(tmpPath, SavePath);</span></div>
+                  </div>
+                  <div class="foot">已折叠 18 行<span class="grow"></span><button class="btn sm ghost" data-action="side" data-tab="t-diff">在改动面板中查看</button></div>
+                </div>
+              </details>
+              <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">新建</span><span class="target">Assets/Tests/EditMode/SaveManagerTests.cs</span><span class="end"><span class="stat-add">+46</span></span></summary></details>
+              <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">修改</span><span class="target">Assets/Scripts/Platform/SteamCloudSync.cs</span><span class="end"><span class="stat-add">+3</span><span class="stat-del">−2</span></span></summary></details>
+              <details class="tool failed">
+                <summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">执行失败</span><span class="target">dotnet build FogHarbor.sln</span><span class="end">退出码 1</span></summary>
+                <div class="detail">
+<pre>Assets/Scripts/Save/SaveManager.cs(61,17): error CS0103: The name 'Encoding' does not exist in the current context
+构建失败。1 个错误，0 个警告。</pre>
+                  <div class="foot">显示最后 2 行，共 48 行<span class="grow"></span><button class="btn sm ghost"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg>复制输出</button></div>
+                </div>
+              </details>
+              <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">修改</span><span class="target">SaveManager.cs：补上 using System.Text</span><span class="end"><span class="stat-add">+1</span></span></summary></details>
+              <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">执行</span><span class="target">dotnet build FogHarbor.sln</span><span class="end"><span class="status ok"><span class="dot"></span>成功</span>8.9 秒</span></summary></details>
+            </div>
+
+            <article class="msg">
+              <div class="who"><span class="ag claude" title="Claude Code">C</span></div>
+              <div>
+                <div class="head"><b>Claude Code</b><span>Opus 5.5</span><span>14:11</span></div>
+                <div class="text"><p>编译通过。接下来用 Unity 命令行跑存档相关的 EditMode 测试，确认老存档能读、写入中断时能回退到 .bak。</p></div>
+              </div>
+            </article>
+
+            <section class="approval" id="approval" aria-labelledby="ap-title" tabindex="-1">
+              <div class="ah"><svg class="i" aria-hidden="true"><use href="#i-shield"/></svg><span id="ap-title">Claude Code 请求执行命令</span><span class="meta">已等待 3 分钟，27 分钟后自动暂停</span></div>
+              <p class="why">运行存档系统的 EditMode 测试，大约 1 分钟，会在工作副本里生成测试报告。</p>
+<pre class="mono">"C:\Program Files\Unity\Hub\Editor\6000.0.32f1\Editor\Unity.exe" -batchmode -projectPath . -runTests -testPlatform EditMode -testFilter SaveManagerTests -testResults Temp\save-tests.xml</pre>
+              <dl class="facts">
+                <dt>运行位置</dt><dd class="mono" style="font-size:12px">%LOCALAPPDATA%\AI_Console\worktrees\FogHarbor\t8f2</dd>
+                <dt>为什么要审批</dt><dd>当前权限级别为“需审批”：执行命令都要确认</dd>
+              </dl>
+              <div class="acts">
+                <button class="btn attn">允许 <kbd>Enter</kbd></button>
+                <button class="btn" title="将生成项目规则：允许以 Unity.exe -runTests 开头的命令">总是允许此类命令</button>
+                <span class="grow"></span>
+                <button class="btn danger" onclick="document.getElementById('rr').hidden=false;document.getElementById('rr-input').focus()">拒绝… <kbd>Esc</kbd></button>
+              </div>
+              <div class="reject-reason" id="rr" hidden>
+                <label for="rr-input" class="sr-only">拒绝理由</label>
+                <input class="input" id="rr-input" placeholder="告诉 Agent 为什么拒绝、应该怎么做（可选），例如：先只跑 LoadLegacy 用例">
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <div class="composer">
+          <div class="composer-inner">
+            <div class="pending-strip" role="status">
+              <svg class="i" aria-hidden="true"><use href="#i-shield"/></svg>
+              <span>有 1 项审批等你处理：执行 Unity 测试命令</span>
+              <span class="grow"></span>
+              <a class="btn sm ghost" href="#approval" onclick="setTimeout(()=>document.getElementById('approval').focus())">跳到审批</a>
+            </div>
+            <div class="compose-box">
+              <label for="prompt" class="sr-only">给 Agent 发消息</label>
+              <textarea id="prompt" placeholder="继续对话，或补充要求。Enter 发送，Shift+Enter 换行"></textarea>
+              <div class="compose-bar">
+                <button class="btn ghost icon sm" aria-label="添加附件"><svg class="i" aria-hidden="true"><use href="#i-clip"/></svg></button>
+                <div class="switcher" role="group" aria-label="当前 Agent、账号与模型">
+                  <button data-popover="pop-switch" aria-expanded="false" aria-label="切换 Agent，当前 Claude Code"><span class="ag claude" aria-hidden="true" style="width:16px;height:16px;font-size:9px">C</span>Claude Code<svg class="i" aria-hidden="true"><use href="#i-down"/></svg></button>
+                  <button data-popover="pop-switch" aria-expanded="false" aria-label="切换账号，当前 个人订阅" class="hide-narrow"><span class="muted">个人订阅</span><svg class="i" aria-hidden="true"><use href="#i-down"/></svg></button>
+                  <button data-popover="pop-switch" aria-expanded="false" aria-label="切换模型，当前 Opus 5.5">Opus 5.5<svg class="i" aria-hidden="true"><use href="#i-down"/></svg></button>
+                </div>
+                <button class="perm-chip hide-narrow" aria-label="权限级别：需审批"><svg class="i" aria-hidden="true"><use href="#i-shield"/></svg>需审批</button>
+                <button class="perm-chip mcp-chip hide-narrow" id="mcp-chip" data-popover="pop-mcp" aria-haspopup="dialog" aria-expanded="false" aria-label="本任务可用的 MCP：12 个。点击临时停用"><svg class="i" aria-hidden="true"><use href="#i-plug"/></svg>MCP 12</button>
+                <span class="grow"></span>
+                <button class="btn primary" aria-label="发送"><svg class="i" aria-hidden="true"><use href="#i-send"/></svg>发送</button>
+              </div>
+            </div>
+
+            <div class="popover" id="pop-switch" hidden role="dialog" aria-label="切换 Agent、账号与模型" style="bottom: 110px; left: 32px;">
+              <div class="group-label">Agent</div>
+              <div class="opt" aria-selected="true"><span class="ag claude">C</span>Claude Code<span class="meta">当前</span></div>
+              <div class="opt"><span class="ag codex">X</span>Codex<span class="meta" style="color:var(--attn)">登录已过期</span></div>
+              <div class="opt"><span class="ag codebuddy">B</span>CodeBuddy<span class="meta">空闲</span></div>
+              <div class="opt"><span class="ag zcode">Z</span>ZCode<span class="meta">未连接</span></div>
+              <div class="group-label">账号</div>
+              <div class="opt" aria-selected="true">个人订阅<span class="meta">本周已用 46%</span></div>
+              <div class="opt">工作室 API Key<span class="meta">按量计费</span></div>
+              <div class="group-label">模型</div>
+              <div class="opt" aria-selected="true">Opus 5.5<span class="meta">会话内切换（无损）</span></div>
+              <div class="opt">Sonnet 5<span class="meta">会话内切换（无损）</span></div>
+              <div class="hint">换模型或账号会保留完整上下文。换到其他 Agent 会生成交接包并开启新会话，发送前可以检查和编辑。</div>
+            </div>
+            <div class="popover mcp-pop" id="pop-mcp" hidden role="dialog" aria-label="本任务可用的 MCP" style="bottom: 110px; right: 0;"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <div class="resizer"></div>
+
+  <aside class="side" aria-label="上下文面板">
+    <div class="side-head">
+      <div class="tabs" role="tablist" aria-label="上下文面板">
+        <button role="tab" aria-selected="true" aria-controls="p-diff" id="t-diff">改动 <span class="count">3</span></button>
+        <button role="tab" aria-selected="false" aria-controls="p-plan" id="t-plan" tabindex="-1">计划</button>
+        <button role="tab" aria-selected="false" aria-controls="p-preview" id="t-preview" tabindex="-1">预览</button>
+        <button role="tab" aria-selected="false" aria-controls="p-side" id="t-side" tabindex="-1">侧聊</button>
+      </div>
+      <span class="grow"></span>
+      <button class="btn ghost icon sm" data-action="side-close" aria-label="收起右侧面板" title="收起 Ctrl+J"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+    </div>
+
+    <div id="p-diff" role="tabpanel" aria-labelledby="t-diff" class="side-body col">
+      <div class="review-head"><span>相对 <span class="mono" style="font-size:12px">main</span> 的全部改动</span><span class="add">+72</span><span class="del">−6</span><span class="grow"></span><button class="btn sm ghost">左右对比</button></div>
+      <ul class="filelist" aria-label="改动的文件">
+        <li aria-current="true"><span class="kind m" title="修改">M</span><span class="path"><span class="dir">Assets/Scripts/Save/</span>SaveManager.cs</span><span class="n"><span class="add">+23</span> <span class="del">−4</span></span></li>
+        <li><span class="kind a" title="新增">A</span><span class="path"><span class="dir">Assets/Tests/EditMode/</span>SaveManagerTests.cs</span><span class="n"><span class="add">+46</span></span></li>
+        <li><span class="kind m" title="修改">M</span><span class="path"><span class="dir">Assets/Scripts/Platform/</span>SteamCloudSync.cs</span><span class="n"><span class="add">+3</span> <span class="del">−2</span></span></li>
+      </ul>
+      <div class="diff" id="diff-save">
+        <div class="fh"><span class="mono" style="font-size:12px">SaveManager.cs</span><span class="grow"></span><button class="btn sm ghost" title="撤销这个文件的全部改动"><svg class="i" aria-hidden="true"><use href="#i-undo"/></svg>还原文件</button><button class="btn sm ghost">评论</button></div>
+        <div class="hunk">@@ -1,6 +1,7 @@</div>
+        <div class="ln"><span>1</span><span>1</span><span></span><span><span class="tok-k">using</span> System.IO;</span></div>
+        <div class="ln a"><span></span><span>2</span><span>+</span><span><span class="tok-k">using</span> System.Text;</span></div>
+        <div class="ln"><span>2</span><span>3</span><span></span><span><span class="tok-k">using</span> UnityEngine;</span></div>
+        <div class="hunk">@@ -41,8 +42,26 @@ public class SaveManager</div>
+        <div class="ln"><span>41</span><span>42</span><span></span><span>    <span class="tok-k">public void</span> Save(<span class="tok-t">SaveData</span> data)</span></div>
+        <div class="ln"><span>42</span><span>43</span><span></span><span>    {</span></div>
+        <div class="ln"><span>43</span><span>44</span><span></span><span>        <span class="tok-k">var</span> json = <span class="tok-t">JsonUtility</span>.ToJson(data);</span></div>
+        <div class="ln d"><span>44</span><span></span><span>−</span><span>        <mark>File.WriteAllText(SavePath, json);</mark></span></div>
+        <div class="ln a"><span></span><span>45</span><span>+</span><span>        <span class="tok-k">var</span> tmpPath = SavePath + <span class="tok-s">".tmp"</span>;</span></div>
+        <div class="ln a"><span></span><span>46</span><span>+</span><span>        <span class="tok-c">// 先写临时文件并落盘，再原子替换</span></span></div>
+        <div class="ln a"><span></span><span>47</span><span>+</span><span>        WriteAndFlush(tmpPath, <span class="tok-t">Encoding</span>.UTF8.GetBytes(json));</span></div>
+        <div class="ln a"><span></span><span>48</span><span>+</span><span>        ReplaceAtomically(tmpPath, SavePath);</span></div>
+        <div class="ln"><span>45</span><span>49</span><span></span><span>    }</span></div>
+        <div class="ln a"><span></span><span>51</span><span>+</span><span>    <span class="tok-k">static void</span> ReplaceAtomically(<span class="tok-t">string</span> tmp, <span class="tok-t">string</span> target)</span></div>
+        <div class="ln a"><span></span><span>52</span><span>+</span><span>    {</span></div>
+        <div class="ln a"><span></span><span>53</span><span>+</span><span>        <span class="tok-k">if</span> (<span class="tok-t">File</span>.Exists(target)) <span class="tok-t">File</span>.Replace(tmp, target, target + <span class="tok-s">".bak"</span>);</span></div>
+        <div class="ln a"><span></span><span>54</span><span>+</span><span>        <span class="tok-k">else</span> <span class="tok-t">File</span>.Move(tmp, target);</span></div>
+        <div class="ln a"><span></span><span>55</span><span>+</span><span>    }</span></div>
+        <div class="hunk">@@ -58,7 +80,11 @@ public SaveData Load()</div>
+        <div class="ln d"><span>59</span><span></span><span>−</span><span>        <span class="tok-k">return</span> <span class="tok-t">JsonUtility</span>.FromJson&lt;<span class="tok-t">SaveData</span>&gt;(json);</span></div>
+        <div class="ln a"><span></span><span>81</span><span>+</span><span>        <span class="tok-k">var</span> data = TryParse(json);</span></div>
+        <div class="ln a"><span></span><span>82</span><span>+</span><span>        <span class="tok-k">if</span> (data == <span class="tok-k">null</span>) data = TryParse(ReadBackup());</span></div>
+        <div class="ln a"><span></span><span>83</span><span>+</span><span>        <span class="tok-k">return</span> data;</span></div>
+      </div>
+      <div class="review-foot">
+        <button class="btn danger">丢弃任务…</button>
+        <span class="grow"></span>
+        <button class="btn">在 IDE 中打开</button>
+        <button class="btn primary"><svg class="i" aria-hidden="true"><use href="#i-merge"/></svg>合并到 main…</button>
+      </div>
+    </div>
+
+    <div class="side-body pane-pad" id="p-plan" role="tabpanel" aria-labelledby="t-plan" hidden>
+      <ol class="plan" aria-label="Agent 计划">
+        <li class="done"><span class="mk"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg></span>定位截断原因（CodeBuddy 完成）</li>
+        <li class="done"><span class="mk"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg></span>写入改为临时文件 + 原子替换</li>
+        <li class="done"><span class="mk"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg></span>读取失败时回退到 .bak</li>
+        <li class="now"><span class="mk"></span>运行 EditMode 测试（等待审批）</li>
+        <li><span class="mk"></span>云同步前等待写入完成</li>
+        <li><span class="mk"></span>总结改动，写提交说明</li>
+      </ol>
+      <h3 style="font-size:var(--fs-13);margin:var(--sp-5) 0 var(--sp-2)">上下文</h3>
+      <dl style="display:grid;grid-template-columns:auto 1fr;gap:6px 14px;margin:0;font-size:var(--fs-13)">
+        <dt style="color:var(--fg-3)">工作区</dt><dd style="margin:0">git worktree，基于 main</dd>
+        <dt style="color:var(--fg-3)">会话</dt><dd style="margin:0">2 段（CodeBuddy → Claude Code）</dd>
+        <dt style="color:var(--fg-3)">上下文用量</dt><dd style="margin:0">38%（约 76k / 200k）</dd>
+      </dl>
+      <p style="margin-top:var(--sp-4)"><button class="btn sm">查看任务说明</button></p>
+    </div>
+
+    <div class="side-body" id="p-preview" role="tabpanel" aria-labelledby="t-preview" hidden>
+      <div class="empty"><h3>这个任务没有可预览的资产</h3><p>Agent 修改模型、贴图或音频时，会在这里自动打开预览。也可以在资产页选一个文件预览。</p><a class="btn" href="asset-mode.html">去资产页</a></div>
+    </div>
+
+    <div class="side-body sc" id="p-side" role="tabpanel" aria-labelledby="t-side" data-wired="1" hidden></div>
+  </aside>
+</div>
+<script src="assets/app.js"></script>
+<script src="assets/interact.js"></script>
+<script src="assets/capabilities.js"></script>
+<script src="assets/sidechat.js"></script>
+</body>
+</html>

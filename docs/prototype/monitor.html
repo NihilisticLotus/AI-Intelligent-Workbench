@@ -1,0 +1,306 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>监控 - AI Console 原型</title>
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="stylesheet" href="assets/components.css">
+<link rel="stylesheet" href="assets/interact.css">
+<style>
+  /* 图表分类色：dataviz 参考色板 8 位，按固定顺序分配，已用 validate_palette.js 对 bg-2 校验（深色 #2e3035、浅色 #ffffff 全部通过；
+     深色第 6 位、浅色第 3/4/5 位对比度低于 3:1，所以每张图都有表格视图）。Agent 身份色亮度过高、彩度不足，校验不通过，不用于图表。 */
+  .viz { --series-1: #3987e5; --series-2: #d95926; --series-3: #199e70; --series-4: #c98500; --series-5: #d55181; --series-6: #008300; --series-7: #9085e9; --series-8: #e66767; }
+  :root[data-theme="light"] .viz { --series-1: #2a78d6; --series-2: #eb6834; --series-3: #1baf7a; --series-4: #eda100; --series-5: #e87ba4; --series-6: #008300; --series-7: #6250d6; --series-8: #e34948; }
+
+  /* 顶部标签 */
+  .main-head .tabs { margin-left: var(--sp-3); }
+
+  /* 调用统计 */
+  .st-filters { position: sticky; top: 0; z-index: 4; display: flex; align-items: center; gap: var(--sp-3) var(--sp-4); flex-wrap: wrap; padding: var(--sp-3) 0; background: var(--bg-1); }
+  @media (max-width: 600px) { .st-filters { position: static; } }
+  .st-filters .fgrp { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-12); color: var(--fg-2); }
+  .st-filters .grow { flex: 1; }
+  .st-filters .input, .st-filters .select { width: auto; height: 28px; padding: 2px 8px; font-size: var(--fs-12); }
+  .st-scope { margin: 0 0 var(--sp-3); font-size: var(--fs-12); color: var(--fg-3); }
+  .st-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: var(--sp-3); }
+  .st-tiles .tile .val { font-size: var(--fs-20); }
+  .mini-tiles { display: flex; flex-wrap: wrap; gap: var(--sp-2) var(--sp-5); margin: 0 0 var(--sp-3); padding: 0; list-style: none; font-size: var(--fs-12); color: var(--fg-2); }
+  .mini-tiles b { display: block; font-size: var(--fs-16); color: var(--fg-1); font-weight: 600; }
+  .cwrap { position: relative; }
+  .vz { display: block; width: 100%; height: auto; overflow: visible; }
+  .vz .grid { stroke: var(--bg-3); stroke-width: 1; }
+  .vz .axis { stroke: var(--line-strong); stroke-width: 1; }
+  .vz .tick { fill: var(--fg-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .vz .lbl { fill: var(--fg-2); font-size: 12px; }
+  .vz .vlabel { fill: var(--fg-1); font-size: 11px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .vz .mk { transition: opacity var(--dur-fast) var(--ease); }
+  .vz .mk.dim { opacity: 0.4; }
+  .vz .hit { fill: transparent; cursor: pointer; }
+  .vz .hit:focus-visible { outline: none; stroke: var(--accent); stroke-width: 2; }
+  .tip.st { top: 0; }
+  /* 每日调用量：2px 曲线，合计 3px 虚线；标记带 2px 底色描边；参考线和引线是细线 */
+  .vz .ln { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .vz .ln.total { stroke-width: 3; stroke-dasharray: 6 5; }
+  .vz .mkr { stroke: var(--bg-2); stroke-width: 2; }
+  .vz .mkr.hollow { fill: var(--bg-2); }
+  .vz .xhl, .vz .leader { stroke: var(--fg-3); stroke-width: 1; }
+  .vz .ann { fill: var(--fg-1); font-size: 11px; paint-order: stroke; stroke: var(--bg-2); stroke-width: 4px; stroke-linejoin: round; }
+  #daily-svg .hit { cursor: crosshair; }
+  #daily-svg .hit:focus-visible { stroke-dasharray: 4 3; }
+  .tip .key.dash { height: 3px; background: repeating-linear-gradient(90deg, var(--c) 0 4px, transparent 4px 7px); }
+  .lg-toggle .lgb { display: inline-flex; align-items: center; gap: 6px; padding: 2px 6px; border: 0; border-radius: 4px; background: none; color: var(--fg-2); font: inherit; cursor: pointer; }
+  .lg-toggle .lgb:hover { background: var(--bg-3); color: var(--fg-1); }
+  .lg-toggle .lgb:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .lg-toggle .lgb[aria-pressed="false"] { color: var(--fg-3); text-decoration: line-through; }
+  .lg-toggle .lgb[aria-pressed="false"] .lgk { opacity: 0.35; }
+  .lgk { overflow: visible; flex: none; }
+  .lgk .mkr { stroke-width: 1.5; }
+  .dtable tr.pick { cursor: pointer; }
+  .dtable tr.pick:hover, .dtable tr.pick:focus-within { background: var(--bg-3); }
+  .rowlink { border: 0; background: none; padding: 0; color: inherit; font: inherit; cursor: pointer; text-align: left; text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+  .rowlink:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 2px; }
+  .dtable .nr { color: var(--fg-3); font-style: italic; }
+  .dtable td .sub { display: block; margin: 0; }
+  #pane-st .dtable td { white-space: nowrap; }
+  #pane-st .dtable .lowtag { display: flex; margin-top: 2px; }
+  .lowtag { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-12); color: var(--attn); white-space: nowrap; }
+  .lowtag::before { content: ""; width: 7px; height: 7px; border-radius: 1px; transform: rotate(45deg); background: currentColor; }
+  .st-note { margin: 0 0 var(--sp-3); padding: 8px 12px; border-radius: var(--r-ctl); background: var(--bg-1); font-size: var(--fs-12); color: var(--fg-2); }
+  .unused { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+  .unused li { display: flex; align-items: center; gap: var(--sp-3); padding: 6px 4px; font-size: var(--fs-13); flex-wrap: wrap; }
+  .unused li .grow { flex: 1; }
+  .unused code { font-family: var(--font-code); font-size: 12px; }
+  .drill { position: fixed; top: 0; right: 0; bottom: 0; z-index: 30; width: min(440px, 100vw); display: flex; flex-direction: column; background: var(--bg-1); box-shadow: var(--shadow-pop); }
+  .drill[hidden] { display: none; }
+  .drill-head { display: flex; align-items: flex-start; gap: var(--sp-2); padding: var(--sp-4) var(--sp-3) var(--sp-3) var(--sp-4); }
+  .drill-head h2 { margin: 0; font-size: var(--fs-16); }
+  .drill-head h2:focus { outline: none; }
+  .drill-head .grow { flex: 1; min-width: 0; }
+  .drill-body { flex: 1; overflow: auto; padding: 0 var(--sp-4) var(--sp-4); }
+  .drill-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+  .drill-list li { background: var(--bg-2); border-radius: var(--r-card); padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; font-size: var(--fs-13); }
+  .drill-list a { color: var(--fg-1); font-weight: 600; }
+  .drill-list .row { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+
+  .page { max-width: 1120px; margin: 0 auto; padding: 0 var(--sp-5) var(--sp-7); transition: opacity var(--dur-base) var(--ease); }
+  .page.refetch { opacity: 0.55; }
+  .sub { display: block; font-size: var(--fs-12); color: var(--fg-3); font-weight: 400; }
+  .page h2 { font-size: var(--fs-16); margin: 0; display: flex; align-items: center; gap: var(--sp-2); }
+  .sec { margin-top: var(--sp-6); }
+  .sec-head { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-3); flex-wrap: wrap; }
+  .sec-head .grow { flex: 1; }
+  .sec-head .note { font-size: var(--fs-12); color: var(--fg-3); }
+  .card { background: var(--bg-2); border-radius: var(--r-card); padding: var(--sp-4); }
+  .two { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-5); }
+  @media (max-width: 1023px) { .two { grid-template-columns: 1fr; } }
+
+  /* 概览数字 */
+  #tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: var(--sp-3); }
+  .tile { background: var(--bg-2); border-radius: var(--r-card); padding: var(--sp-3) var(--sp-4); display: flex; flex-direction: column; gap: 2px; align-items: flex-start; }
+  .tile.wide { grid-column: span 2; }
+  .tile.needs { box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--attn) 60%, transparent), inset 4px 0 0 var(--attn); }
+  .tile h3 { margin: 0; font-size: var(--fs-13); font-weight: 400; color: var(--fg-2); }
+  .tile .val { margin: 0; font-size: var(--fs-26); font-weight: 600; line-height: 1.3; }
+  .tile .sub { margin: 0 0 6px; }
+  .tile .btn { margin-top: auto; }
+  @media (max-width: 600px) { .tile.wide { grid-column: auto; } }
+  .meters { list-style: none; margin: 4px 0 0; padding: 0; width: 100%; display: flex; flex-direction: column; gap: 8px; }
+  .meters .mt { display: flex; align-items: baseline; gap: 6px; font-size: var(--fs-13); }
+  .meters .mt .sub { display: inline; }
+  .meters .pct { margin-left: auto; font-variant-numeric: tabular-nums; display: inline-flex; align-items: center; }
+  .meter { display: block; height: 8px; border-radius: var(--r-pill); background: var(--accent-weak); overflow: hidden; margin: 3px 0 2px; }
+  .meter i { display: block; height: 100%; border-radius: var(--r-pill); background: var(--accent); }
+  .meter.hot { background: var(--attn-weak); } .meter.hot i { background: var(--attn); }
+
+  /* 用量图表 */
+  .ctrl-row { display: flex; gap: var(--sp-3); align-items: center; flex-wrap: wrap; margin-bottom: var(--sp-3); }
+  .legend { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: var(--fs-12); color: var(--fg-2); }
+  .legend li { display: inline-flex; align-items: center; gap: 6px; }
+  .legend .sw { width: 10px; height: 10px; border-radius: 2px; }
+  #chart-wrap { position: relative; }
+  #usage-svg { display: block; width: 100%; height: auto; overflow: visible; }
+  #usage-svg .grid { stroke: var(--bg-3); stroke-width: 1; }
+  #usage-svg .axis { stroke: var(--line-strong); stroke-width: 1; }
+  #usage-svg .tick { fill: var(--fg-3); font-size: 11px; font-variant-numeric: tabular-nums; }
+  #usage-svg .vlabel { fill: var(--fg-1); font-size: 11px; font-weight: 600; }
+  #usage-svg .col { transition: opacity var(--dur-fast) var(--ease); }
+  #usage-svg .col.dim { opacity: 0.4; }
+  #usage-svg .hit { fill: transparent; cursor: default; }
+  #usage-svg .hit:focus-visible { outline: none; stroke: var(--accent); stroke-width: 2; }
+  .tip { position: absolute; top: 0; z-index: 5; min-width: 160px; padding: 8px 10px; border-radius: var(--r-card); background: var(--bg-1); box-shadow: var(--shadow-pop); font-size: var(--fs-12); pointer-events: none; }
+  .tip .th { color: var(--fg-2); margin-bottom: 4px; }
+  .tip .tr { display: flex; align-items: center; gap: 8px; line-height: 1.7; }
+  .tip .key { width: 12px; height: 2px; border-radius: 1px; flex: none; }
+  .tip .tr b { color: var(--fg-1); font-variant-numeric: tabular-nums; min-width: 2.4em; }
+  .tip .tr span:last-child { color: var(--fg-2); }
+  .dtable { width: 100%; border-collapse: collapse; font-size: var(--fs-13); }
+  .dtable th, .dtable td { padding: 7px 10px; text-align: left; }
+  .dtable thead th { font-weight: 400; font-size: var(--fs-12); color: var(--fg-3); white-space: nowrap; }
+  .dtable tbody tr:nth-child(odd) { background: color-mix(in srgb, var(--bg-1) 55%, transparent); }
+  .dtable tbody th { font-weight: 400; white-space: nowrap; }
+  .dtable td, .dtable .num { font-variant-numeric: tabular-nums; }
+  .dtable .ag { width: 18px; height: 18px; font-size: 10px; border-radius: 4px; margin-right: 8px; vertical-align: -4px; }
+  .dtable .sub { display: inline; margin-left: 6px; }
+  .dtable .err-t { color: var(--fg-2); min-width: 14em; }
+  .dtable .acts { white-space: nowrap; text-align: right; }
+  .dtable .acts .btn + .btn { margin-left: 6px; }
+  .tscroll { overflow-x: auto; }
+
+  /* 卡住检测、准确度、规则、事件 */
+  .stuck, .rules, .events, .acc { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+  .stuck > li { background: var(--bg-2); border-radius: var(--r-card); padding: 10px 12px; display: flex; flex-direction: column; gap: 8px; }
+  .stuck .sh { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; font-size: var(--fs-13); }
+  .stuck .sh .sub { display: inline; }
+  .stuck .sh .grow { flex: 1; }
+  .stuck .ag { width: 18px; height: 18px; font-size: 10px; border-radius: 4px; }
+  .acc .mt { display: flex; align-items: baseline; gap: 8px; font-size: var(--fs-13); }
+  .acc .mt .sub { display: inline; }
+  .acc .pct { margin-left: auto; font-size: var(--fs-12); color: var(--fg-2); font-variant-numeric: tabular-nums; }
+  .rules > li { display: flex; align-items: center; gap: var(--sp-3); padding: 10px 12px; border-radius: var(--r-card); background: var(--bg-2); }
+  .rules > li.off .rb b { color: var(--fg-3); }
+  .rules .rb { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; font-size: var(--fs-13); }
+  .events > li { display: flex; align-items: flex-start; gap: var(--sp-3); padding: 8px 4px; font-size: var(--fs-13); }
+  .events > li > .status { margin-top: 5px; }
+  .events .eb { flex: 1; min-width: 0; }
+  .events .btn { flex: none; }
+  .chips { display: inline-flex; gap: 4px; flex-wrap: wrap; }
+  .chipsel { display: inline-flex; align-items: center; height: 26px; padding: 0 10px; border: 0; border-radius: var(--r-pill); background: transparent; color: var(--fg-2); font-size: var(--fs-12); cursor: pointer; }
+  .chipsel:hover { background: var(--bg-3); color: var(--fg-1); }
+  .chipsel[aria-pressed="true"] { background: var(--bg-3); color: var(--fg-1); }
+  .card .judge { background: var(--bg-1); }
+</style>
+</head>
+<body data-page="monitor">
+<div class="app">
+  <aside class="sidebar"></aside>
+  <main class="main">
+    <header class="main-head">
+      <h1>监控</h1>
+      <div class="tabs" role="tablist" aria-label="监控视图" id="mon-tabs">
+        <button role="tab" id="tab-ov" aria-controls="pane-ov" aria-selected="true">概览</button><button role="tab" id="tab-st" aria-controls="pane-st" aria-selected="false" tabindex="-1">调用统计</button>
+      </div>
+      <span class="meta hide-narrow"></span>
+      <span class="grow"></span>
+      <button class="btn" data-wired="1" data-refresh><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg>刷新</button>
+    </header>
+    <div class="content-scroll">
+      <div class="page">
+       <div id="pane-ov" role="tabpanel" aria-labelledby="tab-ov">
+        <section aria-label="概览"><div id="tiles"></div></section>
+
+        <section class="sec viz" id="usage" aria-labelledby="h-usage">
+          <div class="sec-head"><h2 id="h-usage">用量</h2><span class="note" id="usage-sum"></span></div>
+          <div class="card">
+            <div class="ctrl-row">
+              <div class="seg-mini" role="radiogroup" aria-label="用量按什么拆分" id="dim">
+                <button role="radio" data-wired="1" data-dim="agent" aria-checked="true">按 Agent</button><button role="radio" data-wired="1" data-dim="account" aria-checked="false">按账号</button><button role="radio" data-wired="1" data-dim="project" aria-checked="false">按项目</button>
+              </div>
+              <ul class="legend" id="legend" aria-label="图例"></ul>
+              <span style="flex:1"></span>
+              <div class="seg-mini" role="radiogroup" aria-label="显示方式" id="vmode">
+                <button role="radio" data-wired="1" data-mode="chart" aria-checked="true">图表</button><button role="radio" data-wired="1" data-mode="table" aria-checked="false">表格</button>
+              </div>
+            </div>
+            <div id="chart-wrap">
+              <svg id="usage-svg" viewBox="0 0 640 236" role="group" aria-label="近 7 天每日 token 用量，堆叠柱状图。用 Tab 逐天查看数值"></svg>
+              <div class="tip" id="tip" hidden aria-hidden="true"></div>
+            </div>
+            <div id="table-wrap" class="tscroll" hidden><table class="dtable" id="usage-table" aria-label="近 7 天每日用量，单位百万 token"></table></div>
+          </div>
+        </section>
+
+        <section class="sec" aria-labelledby="h-health">
+          <div class="sec-head"><h2 id="h-health">Agent 健康</h2><span class="note">进程每 10 秒检查一次</span></div>
+          <div class="card tscroll" style="padding:var(--sp-2)">
+            <table class="dtable" id="health"><thead><tr><th scope="col">Agent</th><th scope="col">进程</th><th scope="col">内存</th><th scope="col">会话</th><th scope="col">额度剩余</th><th scope="col">最近错误</th><th scope="col"><span class="sr-only">操作</span></th></tr></thead><tbody></tbody></table>
+          </div>
+        </section>
+
+        <div class="two">
+          <section class="sec" aria-labelledby="h-perf">
+            <div class="sec-head"><h2 id="h-perf">任务表现</h2><span class="note">近 7 天</span></div>
+            <div class="card tscroll" style="padding:var(--sp-2)">
+              <table class="dtable" id="perf"><thead><tr><th scope="col">Agent</th><th scope="col">成功率</th><th scope="col">平均耗时</th><th scope="col" title="10 分钟没有新输出算一次">卡住次数</th><th scope="col">被你拒绝的审批</th></tr></thead><tbody></tbody></table>
+              <p class="sub" style="margin:6px 10px 4px">卡住：连续 10 分钟没有新输出。</p>
+            </div>
+          </section>
+          <section class="sec" aria-labelledby="h-acc">
+            <div class="sec-head"><h2 id="h-acc">判断准确度</h2><span class="note">近 7 天被你纠正的比例</span></div>
+            <div class="card"><ul class="acc" id="acc"></ul>
+              <p class="sub" style="margin:var(--sp-3) 0 0">在任何一条快速判断上点 [不同意] 都会计入这里。某一类被纠正得多，阈值会调得更保守。</p></div>
+          </section>
+        </div>
+
+        <section class="sec" aria-labelledby="h-stuck">
+          <div class="sec-head"><h2 id="h-stuck">可能卡住或在原地打转</h2><span class="note">快速判断，只看运行中的任务</span></div>
+          <ul class="stuck" id="stuck"></ul>
+        </section>
+
+        <div class="two">
+          <section class="sec" aria-labelledby="h-rules">
+            <div class="sec-head"><h2 id="h-rules">告警规则</h2><span class="grow"></span><button class="btn sm" data-wired="1" data-new-rule><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>新建规则</button></div>
+            <ul class="rules" id="rules"></ul>
+          </section>
+          <section class="sec" id="ev-card" aria-labelledby="h-ev">
+            <div class="sec-head"><h2 id="h-ev">最近事件</h2><span class="grow"></span><span class="chips" id="ev-chips" role="group" aria-label="按类型筛选事件"></span></div>
+            <ul class="events" id="events" aria-live="polite"></ul>
+          </section>
+        </div>
+       </div>
+
+       <div id="pane-st" class="viz" role="tabpanel" aria-labelledby="tab-st" hidden>
+        <div class="st-filters" role="group" aria-label="统计筛选">
+          <div class="fgrp"><span id="lb-range">时间范围</span>
+            <div class="seg-mini" role="radiogroup" aria-labelledby="lb-range" id="st-range">
+              <button role="radio" data-wired="1" data-range="today" aria-checked="false" tabindex="-1">今天</button><button role="radio" data-wired="1" data-range="7" aria-checked="true">7 天</button><button role="radio" data-wired="1" data-range="30" aria-checked="false" tabindex="-1">30 天</button><button role="radio" data-wired="1" data-range="custom" aria-checked="false" tabindex="-1">自定义</button>
+            </div>
+          </div>
+          <div class="fgrp" id="st-custom" hidden>
+            <label for="st-from">从</label><input type="date" class="input" id="st-from">
+            <label for="st-to">到</label><input type="date" class="input" id="st-to">
+          </div>
+          <div class="fgrp"><label for="st-dim">分组维度</label>
+            <select class="select" id="st-dim">
+              <option value="agent">Agent</option><option value="model">模型</option><option value="account">账号</option><option value="project">项目</option><option value="group">分组</option><option value="gen">生成器</option><option value="source">来源（手动 / 自动化）</option>
+            </select>
+          </div>
+          <span class="grow"></span>
+          <button class="btn sm" data-wired="1" id="st-export"><svg class="i" aria-hidden="true"><use href="#i-download"/></svg>导出 CSV</button>
+        </div>
+        <p class="st-scope" id="st-scope" aria-live="polite"></p>
+        <section aria-label="调用统计概览数字"><div class="st-tiles" id="st-tiles"></div></section>
+        <section class="sec" id="blk-daily" aria-labelledby="h-st-daily">
+          <div class="sec-head"><h2 id="h-st-daily">每日调用量</h2><span class="note" id="daily-note"></span><span class="grow"></span>
+            <div class="seg-mini" role="radiogroup" aria-label="每日调用量：指标" id="daily-metric">
+              <button role="radio" data-wired="1" data-metric="task" aria-checked="true">任务数</button><button role="radio" data-wired="1" data-metric="round" aria-checked="false" tabindex="-1">轮次数</button><button role="radio" data-wired="1" data-metric="tool" aria-checked="false" tabindex="-1">工具调用数</button><button role="radio" data-wired="1" data-metric="mcp" aria-checked="false" tabindex="-1">MCP 调用数</button><button role="radio" data-wired="1" data-metric="token" aria-checked="false" tabindex="-1">token</button>
+            </div>
+            <div class="seg-mini" role="radiogroup" aria-label="每日调用量：显示方式" id="daily-vm">
+              <button role="radio" data-wired="1" data-vm="chart" aria-checked="true">图表</button><button role="radio" data-wired="1" data-vm="table" aria-checked="false" tabindex="-1">表格</button>
+            </div>
+          </div>
+          <div class="card">
+            <div class="chart-part">
+              <ul class="legend lg-toggle" id="daily-legend" aria-label="图例：点击隐藏或显示对应的线" style="margin-bottom:var(--sp-3)"></ul>
+              <div class="cwrap"><svg class="vz" id="daily-svg" role="group"></svg><div class="tip st" id="daily-tip" hidden aria-hidden="true"></div></div>
+            </div>
+            <div class="table-part tscroll" hidden><table class="dtable" id="daily-table"></table></div>
+          </div>
+        </section>
+        <div id="st-blocks"></div>
+        <p class="sub" style="margin-top:var(--sp-6)">数据来自本机事件库和快速判断记录，不另外埋点。费用按价格表估算；某个 Agent 不报告缓存或思考 token 时写“未报告”，不按 0 计算。原型里全部是示例数据。</p>
+       </div>
+      </div>
+    </div>
+  </main>
+</div>
+<aside class="drill" id="st-drill" role="dialog" aria-modal="false" aria-labelledby="drill-h" hidden>
+  <div class="drill-head"><div class="grow"><h2 id="drill-h" tabindex="-1"></h2><span class="sub" id="drill-sub"></span></div>
+    <button class="btn ghost icon sm" data-wired="1" id="drill-x" aria-label="关闭任务列表"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button></div>
+  <div class="drill-body"><ul class="drill-list" id="drill-list"></ul></div>
+</aside>
+<script src="assets/app.js"></script>
+<script src="assets/interact.js"></script>
+<script src="assets/monitor.js"></script>
+</body>
+</html>

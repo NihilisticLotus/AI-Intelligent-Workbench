@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>生成 - AI Console 原型</title>
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="stylesheet" href="assets/components.css">
+<link rel="stylesheet" href="assets/interact.css">
+<link rel="stylesheet" href="assets/generate.css">
+</head>
+<body data-page="generate">
+<div class="app">
+  <aside class="sidebar"></aside>
+  <main class="main">
+    <header class="main-head">
+      <h1>生成</h1>
+      <span class="meta hide-narrow">图片、音效、视频</span>
+      <span class="grow"></span>
+      <button class="gen-budget" id="gen-budget" data-wired="1"></button>
+    </header>
+    <div class="content-scroll">
+      <div class="gen-page" data-wired="1">
+        <section aria-labelledby="h-gens">
+          <h2 id="h-gens" class="sr-only">生成器</h2>
+          <div class="gen-cards" id="gen-cards" role="radiogroup" aria-label="选择生成器"></div>
+        </section>
+        <div class="gen-cols">
+          <section class="gen-form" aria-labelledby="h-form">
+            <h2 id="h-form">参数<span class="grow"></span><span class="sub" id="form-sub"></span></h2>
+            <form id="gen-form" novalidate></form>
+          </section>
+          <section class="gen-right" aria-labelledby="h-queue">
+            <h2 id="h-queue">队列<span class="grow"></span><span class="sub" id="queue-sub"></span></h2>
+            <ul class="queue" id="gen-queue" aria-label="生成队列"></ul>
+            <h2 id="h-res">结果<span class="grow"></span><span class="sub">只有“采用”的才写进项目</span></h2>
+            <div id="gen-results" aria-labelledby="h-res"></div>
+          </section>
+        </div>
+        <div class="sr-only" id="gen-live" aria-live="polite"></div>
+      </div>
+    </div>
+  </main>
+</div>
+<script src="assets/app.js"></script>
+<script src="assets/interact.js"></script>
+<script src="assets/generate.js"></script>
+</body>
+</html>

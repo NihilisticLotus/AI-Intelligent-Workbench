@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>资产预览 - AI Console 原型</title>
+<link rel="stylesheet" href="assets/styles.css">
+<link rel="stylesheet" href="assets/components.css">
+<link rel="stylesheet" href="assets/interact.css">
+<link rel="stylesheet" href="assets/generate.css">
+<!--
+  原型阶段说明：three.js 通过 CDN（jsDelivr）按版本号引入，只为让原型双击即可运行。
+  正式工程中 three.js 作为 npm 依赖打包进应用，不在运行时访问任何 CDN。
+-->
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/"
+} }
+</script>
+</head>
+<body data-page="assets" data-task="t7c3">
+<div class="app" data-side="open" style="--side-w: 480px">
+  <aside class="sidebar"></aside>
+
+  <main class="main">
+    <header class="main-head">
+      <h1>宝箱模型：箱盖改圆、补铁箍</h1>
+      <span class="status run"><span class="dot"></span>运行中</span>
+      <span class="grow"></span>
+      <nav class="viewswitch" aria-label="主区视图">
+        <a href="asset-mode.html" aria-current="page">对话</a>
+        <a href="kanban.html">看板</a>
+      </nav>
+      <button class="btn ghost icon" data-action="side" aria-label="显示或收起右侧面板" title="右侧面板 Ctrl+J"><svg class="i" aria-hidden="true"><use href="#i-panel"/></svg></button>
+    </header>
+
+    <div class="main-body">
+      <section class="content" aria-label="对话">
+        <div class="stream" tabindex="0" aria-label="对话记录">
+          <div class="stream-inner">
+            <article class="msg user">
+              <div class="who"><span class="me">黄</span></div>
+              <div>
+                <div class="head"><b>你</b><span>今天 15:20</span></div>
+                <div class="text"><p>chest.glb 的箱盖太方了，改成更圆的弧度；箱子上加三道铁箍，锁扣下面加个拉环。面数控制在 1000 以内，材质名不要改，Unity 里已经绑了。</p></div>
+              </div>
+            </article>
+            <article class="msg">
+              <div class="who"><span class="ag codebuddy" title="CodeBuddy">B</span></div>
+              <div>
+                <div class="head"><b>CodeBuddy</b><span>kimi-k2.5</span><span>15:24</span></div>
+                <div class="text"><p>箱盖分段从 6 段加到 20 段，加了三道铁箍和拉环，材质名保持 M_Chest_Wood、M_Chest_Iron。改完的模型在右侧预览里，可以和任务前对比。</p></div>
+              </div>
+            </article>
+            <div class="tools-group">
+              <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">执行</span><span class="target">blender --background --python scripts/chest_rework.py</span><span class="end"><span class="status ok"><span class="dot"></span>成功</span>14 秒</span></summary></details>
+              <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">修改</span><span class="target">Assets/Art/Props/Chest/chest.glb</span><span class="end">412 KB → 486 KB</span></summary></details>
+            </div>
+            <button class="asset-card" data-action="side" data-tab="t-preview" aria-label="在右侧预览 chest.glb">
+              <span class="thumb"><svg class="i" aria-hidden="true"><use href="#i-cube"/></svg></span>
+              <span><b>chest.glb</b><span id="card-sub">已修改，点击预览</span></span>
+            </button>
+            <article class="msg">
+              <div class="who"><span class="ag codebuddy" title="CodeBuddy">B</span></div>
+              <div>
+                <div class="head"><b>CodeBuddy</b><span>kimi-k2.5</span><span>15:25</span></div>
+                <div class="text"><p>接下来生成 LOD1，目标是当前面数的 50%。</p></div>
+              </div>
+            </article>
+          </div>
+        </div>
+        <div class="composer">
+          <div class="composer-inner">
+            <div class="compose-box">
+              <label for="prompt" class="sr-only">给 Agent 发消息</label>
+              <textarea id="prompt" placeholder="例如：拉环再小一点，铁箍颜色暗一些"></textarea>
+              <div class="compose-bar">
+                <button class="btn ghost icon sm" aria-label="添加附件"><svg class="i" aria-hidden="true"><use href="#i-clip"/></svg></button>
+                <span id="attached" class="attach" hidden style="margin:0"><svg class="i" aria-hidden="true"><use href="#i-image"/></svg>预览截图.png</span>
+                <span class="grow"></span>
+                <button class="btn primary"><svg class="i" aria-hidden="true"><use href="#i-send"/></svg>发送</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <div class="resizer"></div>
+
+  <aside class="side" aria-label="上下文面板">
+    <div class="side-head">
+      <div class="tabs" role="tablist" aria-label="上下文面板">
+        <button role="tab" aria-selected="false" aria-controls="p-diff" id="t-diff" tabindex="-1">改动 <span class="count">1</span></button>
+        <button role="tab" aria-selected="false" aria-controls="p-plan" id="t-plan" tabindex="-1">计划</button>
+        <button role="tab" aria-selected="true" aria-controls="p-preview" id="t-preview">预览</button>
+        <button role="tab" aria-selected="false" aria-controls="p-side" id="t-side" tabindex="-1">侧聊</button>
+      </div>
+      <span class="grow"></span>
+      <button class="btn ghost icon sm" data-action="side-close" aria-label="收起右侧面板"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+    </div>
+
+    <div class="side-body" id="p-diff" role="tabpanel" aria-labelledby="t-diff" hidden>
+      <ul class="filelist" aria-label="改动的文件">
+        <li aria-current="true"><span class="kind m" title="修改">M</span><span class="path"><span class="dir">Assets/Art/Props/Chest/</span>chest.glb</span><span class="n">412 KB → 486 KB</span></li>
+      </ul>
+      <div class="pane-pad"><div class="alert info"><svg class="i" aria-hidden="true"><use href="#i-cube"/></svg><div class="body"><strong>模型文件没有文本改动可看</strong><p>用三维对比查看任务前和现在的差别。</p><div class="actions" style="margin-top:8px"><button class="btn sm primary" data-open-viewer="compare">前后对比</button></div></div></div></div>
+    </div>
+
+    <div class="side-body pane-pad" id="p-plan" role="tabpanel" aria-labelledby="t-plan" hidden>
+      <ol class="plan" aria-label="Agent 计划">
+        <li class="done"><span class="mk"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg></span>箱盖弧度从 6 段加到 20 段</li>
+        <li class="done"><span class="mk"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg></span>加三道铁箍和拉环，保留材质名</li>
+        <li class="now"><span class="mk"></span>生成 LOD1（50% 面数）</li>
+        <li><span class="mk"></span>导出并在 Unity 中检查材质绑定</li>
+      </ol>
+    </div>
+
+    <div class="side-body" id="p-preview" role="tabpanel" aria-labelledby="t-preview">
+      <div class="preview-stage" id="stage" role="img" aria-label="chest.glb 三维预览。拖动旋转，滚轮缩放">
+        <div class="over">
+          <button class="chip-dark" aria-pressed="true" data-shade="mat">材质</button>
+          <button class="chip-dark" aria-pressed="false" data-shade="wire">线框</button>
+          <span style="flex:1"></span>
+          <button class="chip-dark icon" data-open-viewer="single" aria-label="全屏查看" title="全屏查看"><svg class="i" aria-hidden="true"><use href="#i-max"/></svg></button>
+        </div>
+        <div class="stats" id="stats">加载中…</div>
+      </div>
+      <div class="preview-meta">
+        <dl>
+          <dt>文件</dt><dd class="mono" style="font-size:12px">Assets/Art/Props/Chest/chest.glb</dd>
+          <dt>三角面</dt><dd id="m-tris">—</dd>
+          <dt>材质</dt><dd>M_Chest_Wood、M_Chest_Iron（未改名）</dd>
+          <dt>尺寸</dt><dd>0.92 × 0.64 × 0.58 米</dd>
+          <dt>更新</dt><dd id="m-ver">第 2 版，CodeBuddy 写入</dd>
+        </dl>
+      </div>
+      <div class="preview-actions">
+        <button class="btn sm" data-open-viewer="compare"><svg class="i" aria-hidden="true"><use href="#i-split"/></svg>和任务前对比</button>
+        <button class="btn sm" id="snap"><svg class="i" aria-hidden="true"><use href="#i-image"/></svg>截图发给 Agent</button>
+        <a class="btn sm" href="generate.html?ref=chest.glb" data-wired="1" title="打开生成页，把这个模型的预览截图预先选为参考图"><svg class="i" aria-hidden="true"><use href="#i-wand"/></svg>用它生成变体</a>
+        <button class="btn sm ghost" id="simulate" title="原型演示：模拟 Agent 再次写入这个文件">模拟 Agent 写入</button>
+      </div>
+      <div class="pane-pad" id="vp-error" hidden>
+        <div class="alert err">
+          <svg class="i" aria-hidden="true"><use href="#i-warn"/></svg>
+          <div class="body"><strong>三维预览没有加载出来</strong><p>原型从网络加载 three.js，当前无法访问 cdn.jsdelivr.net。连上网络后刷新页面。正式版本把三维组件打包在应用里，不需要联网。</p>
+          <div class="actions" style="margin-top:8px"><button class="btn sm" onclick="location.reload()">刷新页面</button></div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="side-body sc" id="p-side" role="tabpanel" aria-labelledby="t-side" data-wired="1" hidden></div>
+  </aside>
+</div>
+
+<!-- 全屏查看器 -->
+<div class="viewer" id="viewer" role="dialog" aria-modal="true" aria-labelledby="viewer-title" hidden>
+  <div class="viewer-bar">
+    <span class="title" id="viewer-title">chest.glb</span>
+    <button class="chip-dark" aria-pressed="true" data-shade="mat">材质</button>
+    <button class="chip-dark" aria-pressed="false" data-shade="solid">实体</button>
+    <button class="chip-dark" aria-pressed="false" data-shade="wire">线框</button>
+    <button class="chip-dark" aria-pressed="false" id="cmp-toggle"><svg class="i" aria-hidden="true"><use href="#i-split"/></svg>和任务前对比</button>
+    <button class="chip-dark" id="reset">重置视角</button>
+    <span class="grow"></span>
+    <button class="chip-dark" id="snap2"><svg class="i" aria-hidden="true"><use href="#i-image"/></svg>截图发给 Agent</button>
+    <button class="chip-dark icon" id="viewer-close" aria-label="关闭全屏查看（Esc）" title="关闭 Esc"><svg class="i" aria-hidden="true"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="viewer-stage" id="viewer-stage">
+    <div class="cmp-divider" id="cmp-divider" hidden></div>
+    <div class="cmp-labels" id="cmp-labels" hidden><span>任务前（第 1 版）</span><span>现在（第 2 版）</span></div>
+    <div class="hint">拖动旋转，右键平移，滚轮缩放，Esc 关闭</div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"><svg class="i" aria-hidden="true"><use href="#i-refresh"/></svg><span id="toast-text"></span></div>
+
+<script src="assets/app.js"></script>
+<script src="assets/interact.js"></script>
+<script src="assets/sidechat.js"></script>
+<script src="assets/generate.js"></script>
+<script type="module">
+// 示例模型：用基本几何体拼一个宝箱。“任务前”是旧版（6 段、无铁箍），“现在”是 Agent 改过的版本。
+// 正式版本会通过 GLTFLoader 加载 /assets/:id/content?v=<version>。
+const stage = document.getElementById('stage');
+const viewerStage = document.getElementById('viewer-stage');
+const statsEl = document.getElementById('stats');
+let THREE, OrbitControls;
+try {
+  THREE = await import('three');
+  ({ OrbitControls } = await import('three/addons/controls/OrbitControls.js'));
+} catch (e) {
+  stage.hidden = true;
+  document.querySelector('.preview-meta').hidden = true;
+  document.querySelector('.preview-actions').hidden = true;
+  document.getElementById('vp-error').hidden = false;
+  throw new Error('three.js 未能加载（原型需要联网访问 CDN）');
+}
+
+const renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+stage.prepend(renderer.domElement);
+
+const viewportBg = () => getComputedStyle(document.documentElement).getPropertyValue('--bg-viewport').trim() || '#333333';
+function makeScene() {
+  const s = new THREE.Scene();
+  s.background = new THREE.Color(viewportBg());
+  s.add(new THREE.HemisphereLight(0xdfe6ff, 0x3a3328, 1.1));
+  const key = new THREE.DirectionalLight(0xffffff, 2.2); key.position.set(1.5, 3, 2.5); s.add(key);
+  const rim = new THREE.DirectionalLight(0x9fb4ff, 0.8); rim.position.set(-2, 1.5, -2); s.add(rim);
+  s.add(new THREE.GridHelper(4, 16, 0x5a5a5a, 0x444444));
+  return s;
+}
+const sceneNow = makeScene(), sceneBefore = makeScene();
+document.addEventListener('themechange', () => { sceneNow.background.set(viewportBg()); sceneBefore.background.set(viewportBg()); });
+
+const camera = new THREE.PerspectiveCamera(40, 1, 0.01, 100);
+const home = new THREE.Vector3(2.3, 1.6, 2.7);
+camera.position.copy(home);
+let controls;
+function attachControls(el) {
+  controls?.dispose();
+  controls = new OrbitControls(camera, el);
+  controls.target.set(0, 0.3, 0);
+  controls.enableDamping = true;
+  controls.autoRotate = !matchMedia('(prefers-reduced-motion: reduce)').matches;
+  controls.autoRotateSpeed = 1.2;
+}
+attachControls(renderer.domElement);
+
+const wood = new THREE.MeshStandardMaterial({ color: 0x7a5232, roughness: 0.78, flatShading: true });
+const iron = new THREE.MeshStandardMaterial({ color: 0x8d8f94, roughness: 0.45, metalness: 0.45, flatShading: true });
+const gold = new THREE.MeshStandardMaterial({ color: 0xd6a640, roughness: 0.35, metalness: 0.4, flatShading: true });
+
+function buildChest({ seg, bands, ring, ringSize = 0.03 }) {
+  const g = new THREE.Group();
+  const W = 0.92, D = 0.58, H = 0.4, R = D / 2;
+  const body = new THREE.Mesh(new THREE.BoxGeometry(W, H, D), wood); body.position.y = H / 2; g.add(body);
+  const lid = new THREE.Mesh(new THREE.CylinderGeometry(R, R, W, seg, 1, false, 0, Math.PI), wood);
+  lid.rotation.z = Math.PI / 2; lid.position.y = H; g.add(lid);
+  if (bands) [-0.36, 0, 0.36].forEach((x) => {
+    const band = new THREE.Mesh(new THREE.BoxGeometry(0.05, H + 0.01, D + 0.02), iron); band.position.set(x, H / 2, 0); g.add(band);
+    const arc = new THREE.Mesh(new THREE.CylinderGeometry(R + 0.012, R + 0.012, 0.05, seg, 1, true, 0, Math.PI), iron);
+    arc.rotation.z = Math.PI / 2; arc.position.set(x, H, 0); g.add(arc);
+  });
+  const lock = new THREE.Mesh(new THREE.BoxGeometry(0.11, 0.14, 0.04), gold); lock.position.set(0, H - 0.02, D / 2 + 0.03); g.add(lock);
+  if (ring) { const r = new THREE.Mesh(new THREE.TorusGeometry(ringSize, 0.009, 6, 12), gold); r.position.set(0, H - 0.1, D / 2 + 0.055); g.add(r); }
+  g.traverse((o) => { if (o.isMesh) o.userData.baseMat = o.material; });
+  return g;
+}
+const triCount = (obj) => { let n = 0; obj.traverse((o) => { if (o.isMesh) { const gm = o.geometry; n += (gm.index ? gm.index.count : gm.attributes.position.count) / 3; } }); return Math.round(n); };
+
+let version = 2, chestNow, chestBefore = buildChest({ seg: 6, bands: false, ring: false });
+sceneBefore.add(chestBefore);
+let shade = 'mat';
+const solidMat = new THREE.MeshStandardMaterial({ color: 0xb8b8b8, roughness: 0.9, flatShading: true });
+const wireMat = new THREE.MeshBasicMaterial({ color: 0xd8dcff, wireframe: true });
+function applyShade(obj) { obj.traverse((o) => { if (o.isMesh) o.material = shade === 'mat' ? o.userData.baseMat : shade === 'solid' ? solidMat : wireMat; }); }
+function loadNow() {
+  if (chestNow) sceneNow.remove(chestNow);
+  chestNow = buildChest({ seg: 20, bands: true, ring: true, ringSize: version > 2 ? 0.024 : 0.03 });
+  sceneNow.add(chestNow);
+  applyShade(chestNow); applyShade(chestBefore);
+  const t = triCount(chestNow);
+  statsEl.textContent = `三角面 ${t.toLocaleString('zh-CN')}  WebGL 2`;
+  document.getElementById('m-tris').textContent = `${t.toLocaleString('zh-CN')}（任务前 ${triCount(chestBefore).toLocaleString('zh-CN')}）`;
+  document.getElementById('m-ver').textContent = `第 ${version} 版，CodeBuddy 写入`;
+  document.querySelector('#cmp-labels span:last-child').textContent = `现在（第 ${version} 版）`;
+}
+loadNow();
+
+document.querySelectorAll('[data-shade]').forEach((b) => b.addEventListener('click', () => {
+  shade = b.dataset.shade;
+  document.querySelectorAll('[data-shade]').forEach((x) => x.setAttribute('aria-pressed', String(x.dataset.shade === shade)));
+  applyShade(chestNow); applyShade(chestBefore);
+}));
+
+// 提示
+const toast = document.getElementById('toast');
+let tt;
+function notify(text) { document.getElementById('toast-text').textContent = text; toast.classList.add('show'); clearTimeout(tt); tt = setTimeout(() => toast.classList.remove('show'), 2800); }
+
+// 模拟收到 asset.changed：按新版本重新加载，保持相机位置
+document.getElementById('simulate').addEventListener('click', () => {
+  version += 1; loadNow();
+  document.getElementById('card-sub').textContent = `第 ${version} 版，刚刚更新`;
+  notify(`CodeBuddy 更新了 chest.glb（第 ${version} 版），预览已刷新，视角保持不变`);
+});
+// 截图：把当前画面放进输入框附件
+const snap = () => {
+  renderer.domElement.toDataURL('image/png');
+  document.getElementById('attached').hidden = false;
+  notify('已把预览截图附到输入框');
+};
+document.getElementById('snap').addEventListener('click', snap);
+document.getElementById('snap2').addEventListener('click', snap);
+document.getElementById('reset').addEventListener('click', () => { camera.position.copy(home); controls.target.set(0, 0.3, 0); });
+
+// 全屏查看器：把同一块画布移进去，关闭时移回；Esc 关闭并把焦点还给触发按钮
+const viewer = document.getElementById('viewer');
+let compare = false, lastTrigger = null;
+const setCompare = (on) => {
+  compare = on;
+  document.getElementById('cmp-toggle').setAttribute('aria-pressed', String(on));
+  document.getElementById('cmp-divider').hidden = !on;
+  document.getElementById('cmp-labels').hidden = !on;
+};
+function openViewer(mode, trigger) {
+  lastTrigger = trigger;
+  viewer.hidden = false;
+  viewerStage.prepend(renderer.domElement);
+  attachControls(renderer.domElement);
+  setCompare(mode === 'compare');
+  resize();
+  document.getElementById('viewer-close').focus();
+}
+function closeViewer() {
+  viewer.hidden = true;
+  setCompare(false);
+  stage.prepend(renderer.domElement);
+  attachControls(renderer.domElement);
+  resize();
+  lastTrigger?.focus();
+}
+document.querySelectorAll('[data-open-viewer]').forEach((b) => b.addEventListener('click', () => {
+  if (document.getElementById('p-preview').hidden) document.getElementById('t-preview').click();
+  openViewer(b.dataset.openViewer, b);
+}));
+document.getElementById('cmp-toggle').addEventListener('click', () => setCompare(!compare));
+document.getElementById('viewer-close').addEventListener('click', closeViewer);
+viewer.addEventListener('keydown', (e) => {
+  if (e.key === 'Tab') { // 焦点留在查看器内
+    const f = [...viewer.querySelectorAll('button')]; const i = f.indexOf(document.activeElement);
+    if (e.shiftKey && i <= 0) { f[f.length - 1].focus(); e.preventDefault(); }
+    else if (!e.shiftKey && i === f.length - 1) { f[0].focus(); e.preventDefault(); }
+  }
+});
+
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !viewer.hidden) closeViewer(); });
+
+function host() { return viewer.hidden ? stage : viewerStage; }
+function resize() {
+  const h = host(); const w = h.clientWidth, hh = h.clientHeight;
+  if (!w || !hh) return;
+  renderer.setSize(w, hh, false);
+  camera.aspect = (compare ? w / 2 : w) / hh;
+  camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(stage);
+new ResizeObserver(resize).observe(viewerStage);
+renderer.setAnimationLoop(() => {
+  controls.update();
+  const c = renderer.domElement; const w = c.clientWidth, h = c.clientHeight;
+  if (!w || !h) return;
+  const aspect = (compare ? w / 2 : w) / h;
+  if (Math.abs(camera.aspect - aspect) > 1e-3) { camera.aspect = aspect; camera.updateProjectionMatrix(); }
+  if (compare) {
+    renderer.setScissorTest(true);
+    renderer.setViewport(0, 0, w / 2, h); renderer.setScissor(0, 0, w / 2, h); renderer.render(sceneBefore, camera);
+    renderer.setViewport(w / 2, 0, w / 2, h); renderer.setScissor(w / 2, 0, w / 2, h); renderer.render(sceneNow, camera);
+    renderer.setScissorTest(false);
+  } else {
+    renderer.setViewport(0, 0, w, h);
+    renderer.render(sceneNow, camera);
+  }
+});
+</script>
+</body>
+</html>

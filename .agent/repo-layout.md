@@ -15,7 +15,7 @@ AI-Intelligent-Workbench/
 ├─ docs/              所有文档（见 records.md）
 │  ├─ design/  research/  plans/  prototype/
 │  └─ acceptance/  devlog/  issues/
-├─ scripts/           开发和运维脚本（启动脚本以外的）
+├─ scripts/           启动脚本调用的 start.mjs、开发脚本 dev/（例如原型预览）
 ├─ AGENTS.md          指向 .agent/ 的入口（Codex 等工具会自动读取）
 ├─ README.md          项目介绍和使用方法
 ├─ 启动 AI Console.bat  双击启动（给用户用的唯一入口）

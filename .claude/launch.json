@@ -1,0 +1,22 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "prototype",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["scripts/dev/preview-prototype.js"],
+      "port": 8765
+    },
+    {
+      "name": "app",
+      "runtimeExecutable": "node",
+      "runtimeArgs": ["node_modules/tsx/dist/cli.mjs", "--disable-warning=ExperimentalWarning", "packages/gateway/src/server.ts"],
+      "port": 17890,
+      "env": {
+        "AIC_NO_BROWSER": "1",
+        "AIC_DATA_DIR": ".aic-data",
+        "AIC_DEV": "1"
+      }
+    }
+  ]
+}

@@ -3,10 +3,11 @@
 // 凭据由 getAuthHeaders 提供（见 credentials.ts）：浏览器是 HttpOnly Cookie（credentials: 'include'）+ X-AIC-Key，
 // 桌面和手机应用是 Authorization: Bearer。
 import {
-  AgentInfo, API_BASE, ApiError, Approval, Device, ErrorCode, EventEnvelope, FsBrowseResult, Group, Hello,
-  Page, PairingCompleteResult, PairingStartResult, Project, Task, type DeviceKind,
+  AgentInfo, AgentLoginResult, AgentProfile, AgentTestResult, API_BASE, ApiError, Approval, DeleteProfileResult, Device, ErrorCode, EventEnvelope,
+  FsBrowseResult, Group, Hello, OkResult, Page, PairingCompleteResult, PairingStartResult, Project, RedetectResult, Task,
+  type AgentKind, type AgentLoginBody, type CreateProfileBody, type DeviceKind, type PatchAgentBody, type PatchProfileBody,
 } from '@aic/protocol';
-import type { z } from 'zod';
+import { z } from 'zod';
 
 /** 客户端自己产生的错误码（网络断开、超时等），不在服务端协议里 */
 export const ClientErrorCode = {
@@ -57,6 +58,23 @@ const listOf = <T extends z.ZodTypeAny>(item: T) => ({
 const oneOf = <T extends z.ZodTypeAny>(schema: T) => ({
   parse(raw: unknown): z.infer<T> { return schema.parse(raw); },
 });
+
+/**
+ * 历史事件分页：逐条解析，不认识的事件（新版 Gateway 加的类型）跳过，和 WebSocket 一样处理（phase-1.md 第 2 节）。
+ * 只有分页外壳不对时才报错。rawCount、lastSeq 按原始条数算，分页不会因为跳过的事件卡住
+ */
+export function parseEventPage(raw: unknown): { items: EventEnvelope[]; nextCursor: string | null; rawCount: number; lastSeq: number | null; skipped: number } {
+  const shell = Page(z.unknown()).parse(raw);
+  const items: EventEnvelope[] = [];
+  let lastSeq: number | null = null;
+  for (const it of shell.items) {
+    const seq = (it as { seq?: unknown } | null)?.seq;
+    if (typeof seq === 'number') lastSeq = seq;
+    const p = EventEnvelope.safeParse(it);
+    if (p.success) items.push(p.data);
+  }
+  return { items, nextCursor: shell.nextCursor, rawCount: shell.items.length, lastSeq, skipped: shell.items.length - items.length };
+}
 
 export class HttpClient {
   readonly baseUrl: string;
@@ -166,14 +184,57 @@ export class HttpClient {
   createTask(body: {
     projectId: string; groupId: string | null; prompt: string; title?: string;
     agent: string; model: string | null; effort: string | null; permission: string;
+    /** 1.2：不传或 null 表示用该 Agent 的默认账号 */
+    profileId?: string | null;
   }) { return this.request('POST', '/tasks', { body, parse: oneOf(Task) }); }
-  patchTask(id: string, body: { title?: string; groupId?: string | null; permission?: string }) {
+  patchTask(id: string, body: { title?: string; groupId?: string | null; permission?: string; profileId?: string | null }) {
     return this.request('PATCH', `/tasks/${encodeURIComponent(id)}`, { body, parse: oneOf(Task) });
   }
-  /** 任务历史事件：after 之后最多 limit 条 */
+  /** 任务历史事件：after 之后最多 limit 条（不认识的事件类型跳过） */
   taskEvents(id: string, after: number, limit = 500) {
-    return this.request('GET', `/tasks/${encodeURIComponent(id)}/events`, { query: { after, limit }, parse: listOf(EventEnvelope) });
+    return this.request('GET', `/tasks/${encodeURIComponent(id)}/events`, { query: { after, limit }, parse: { parse: parseEventPage } });
   }
   agents() { return this.request('GET', '/agents', { parse: listOf(AgentInfo) }).then((r) => r.items); }
+
+  // ---------- 1.2：真实 Agent、登录、账号（phase-1.md 6.6.2） ----------
+  /** 重新检测全部 Agent（版本、登录、能力缓存失效） */
+  redetectAgents() { return this.request('POST', '/agents/redetect', { body: {}, parse: RedetectResult }).then((r) => r.items); }
+  /** 返回值以服务端为准：给了 AgentInfo 就用，否则返回 null，由调用方重新拉 /agents */
+  patchAgent(kind: AgentKind, body: PatchAgentBody) {
+    return this.request('PATCH', `/agents/${encodeURIComponent(kind)}`, { body }).then((raw) => {
+      const p = AgentInfo.safeParse(raw);
+      return p.success ? p.data : null;
+    });
+  }
+  startLogin(kind: AgentKind, body: AgentLoginBody) {
+    return this.request('POST', `/agents/${encodeURIComponent(kind)}/login`, { body, parse: AgentLoginResult });
+  }
+  cancelLogin(kind: AgentKind, loginId: string) {
+    return this.request('POST', `/agents/${encodeURIComponent(kind)}/login/${encodeURIComponent(loginId)}/cancel`, { body: {}, parse: OkResult });
+  }
+  sendLoginCode(kind: AgentKind, loginId: string, code: string) {
+    return this.request('POST', `/agents/${encodeURIComponent(kind)}/login/${encodeURIComponent(loginId)}/code`, { body: { code }, parse: OkResult });
+  }
+  testAgent(kind: AgentKind, body: { profileId?: string; sendMessage?: boolean }) {
+    return this.request('POST', `/agents/${encodeURIComponent(kind)}/test`, { body, parse: AgentTestResult });
+  }
+  /** 账号列表：按游标翻完所有页 */
+  async profiles(agent?: AgentKind): Promise<AgentProfile[]> {
+    const all: AgentProfile[] = [];
+    let cursor: string | null = null;
+    for (let i = 0; i < 20; i++) {
+      const page: { items: AgentProfile[]; nextCursor: string | null } = await this.request('GET', '/profiles', { query: { agent, cursor }, parse: listOf(AgentProfile) });
+      all.push(...page.items);
+      if (!page.nextCursor) break;
+      cursor = page.nextCursor;
+    }
+    return all;
+  }
+  /** apiKey 只在这个请求体里出现一次；响应里只有 hasSecret 和末 4 位 */
+  createProfile(body: CreateProfileBody) { return this.request('POST', '/profiles', { body, parse: oneOf(AgentProfile) }); }
+  patchProfile(id: string, body: PatchProfileBody) { return this.request('PATCH', `/profiles/${encodeURIComponent(id)}`, { body, parse: oneOf(AgentProfile) }); }
+  /** keptDir：账号的独立配置目录（登录信息）保留在磁盘上，界面据此提示 */
+  deleteProfile(id: string) { return this.request('DELETE', `/profiles/${encodeURIComponent(id)}`, { parse: DeleteProfileResult }); }
+  refreshProfileModels(id: string) { return this.request('POST', `/profiles/${encodeURIComponent(id)}/models/refresh`, { body: {}, parse: oneOf(AgentProfile) }); }
   pendingApprovals() { return this.request('GET', '/approvals', { query: { status: 'pending' }, parse: listOf(Approval) }).then((r) => r.items); }
 }

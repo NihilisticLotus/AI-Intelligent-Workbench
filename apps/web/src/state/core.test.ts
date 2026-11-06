@@ -2,7 +2,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Approval, EventEnvelope, Task } from '@aic/protocol';
 import {
-  applyEvent, applyEvents, applyTaskSnapshot, buildTimeline, emptyCore, insertBySeq, latestPlan, mergeRestTask,
+  applyEvent, applyEvents, applyTaskSnapshot, blockingError, buildTimeline, emptyCore, insertBySeq, lastUserText, latestPlan, mergeRestTask,
+  sessionConfig,
 } from './core';
 
 const task = (over: Partial<Task> = {}): Task => ({
@@ -177,5 +178,58 @@ describe('复核修复', () => {
     expect(ap?.kind === 'approval' && ap.resolved).toEqual({ status: 'rejected', decidedBy: 'd1', decidedByName: '制作人的电脑' });
     const s = applyEvents(emptyCore(), [b(2, 'approval.requested', { approval: approval() }), b(3, 'approval.resolved', { approvalId: 'a1', status: 'allowed', decidedBy: 'd1', optionId: 'allow', decidedByName: '平板' })]);
     expect(s.approvals.a1).toMatchObject({ status: 'allowed', decidedByName: '平板' });
+  });
+});
+
+describe('1.2：真实 Agent', () => {
+  const b = (seq: number, type: string, data: unknown, taskId: string | null = 't1'): EventEnvelope =>
+    ({ seq, ts: ts++, taskId, sessionId: taskId ? 's1' : null, type, data } as EventEnvelope);
+
+  it('agent.login 是全局事件：按 loginId 记最新状态，旧事件不覆盖新状态', () => {
+    let s = applyEvents(emptyCore(), [
+      b(1, 'agent.login', { loginId: 'l1', kind: 'codex', profileId: null, state: 'started' }, null),
+      b(3, 'agent.login', { loginId: 'l1', kind: 'codex', profileId: null, state: 'waiting_browser', authUrl: 'https://auth.openai.com/x' }, null),
+    ]);
+    s = applyEvent(s, b(2, 'agent.login', { loginId: 'l1', kind: 'codex', profileId: null, state: 'started' }, null));
+    expect(s.logins.l1).toMatchObject({ state: 'waiting_browser', authUrl: 'https://auth.openai.com/x' });
+    s = applyEvent(s, b(4, 'agent.login', { loginId: 'l1', kind: 'codex', profileId: null, state: 'succeeded' }, null));
+    expect(s.logins.l1!.state).toBe('succeeded');
+    expect(s.globalLog.map((e) => e.seq)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('session.notice 显示为提示行；恢复会话留一行说明', () => {
+    const tl = buildTimeline([
+      b(1, 'session.started', { agent: 'codex', model: 'gpt-5' }),
+      b(2, 'session.started', { agent: 'codex', model: 'gpt-5', resumed: true }),
+      b(3, 'session.notice', { level: 'warn', text: '原来的会话无法恢复，已新建会话；Agent 不记得之前的对话。' }),
+    ]);
+    const notes = tl.filter((x) => x.kind === 'note');
+    expect(notes.map((n) => n.kind === 'note' && n.text)).toEqual(['已恢复原来的会话，Agent 记得之前的对话', '原来的会话无法恢复，已新建会话；Agent 不记得之前的对话。']);
+    expect(notes[1]?.kind === 'note' && notes[1].level).toBe('warn');
+  });
+
+  it('会话配置：可选模型和思考强度以最新的 session.config 为准；用量随新会话清空', () => {
+    const t = task({ agent: 'claude', model: null, effort: null, profileId: null });
+    const models = [{ id: 'opus', name: 'Opus', contextWindow: null }, { id: 'sonnet', name: 'Sonnet', contextWindow: null }];
+    const cfg = sessionConfig(t, [
+      b(1, 'session.started', { agent: 'claude', model: 'default', profileId: 'pf2' }),
+      b(2, 'session.config', { model: 'opus', effort: 'high', models, efforts: ['low', 'high', 'max'] }),
+      b(3, 'session.usage', { used: 1000, size: 200000 }),
+      b(4, 'session.config', { model: 'sonnet', effort: 'medium', efforts: ['low', 'medium'] }),
+    ]);
+    expect(cfg).toMatchObject({ model: 'sonnet', effort: 'medium', models, efforts: ['low', 'medium'], profileId: 'pf2', usage: { used: 1000 } });
+    const again = sessionConfig(t, [b(1, 'session.usage', { used: 5, size: 10 }), b(2, 'session.started', { agent: 'claude', model: null })]);
+    expect(again.usage).toBeUndefined();
+    // 老版本的 session.config 没有 models / efforts：界面回落到 /agents 的缓存
+    expect(sessionConfig(t, [b(1, 'session.config', { model: 'x', effort: null })]).models).toBeUndefined();
+  });
+
+  it('中断错误：只认最后一条用户消息之后的 error，且任务处于暂停 / 中断 / 失败', () => {
+    const err = { code: 'agent.auth_required', message: 'Codex 登录已过期', actions: [] };
+    const log = [b(1, 'message.user', { messageId: 'u1', text: '修一下跳跃' }), b(2, 'error', { error: err })];
+    expect(blockingError(task({ status: 'paused' }), log)?.data.error.code).toBe('agent.auth_required');
+    expect(blockingError(task({ status: 'running' }), log)).toBeNull();
+    expect(blockingError(task({ status: 'paused' }), [...log, b(3, 'message.user', { messageId: 'u2', text: '继续' })])).toBeNull();
+    expect(lastUserText(log)).toBe('修一下跳跃');
   });
 });

@@ -37,6 +37,13 @@ export function createBrowserPlatform(baseUrl = ''): Platform {
     async openInIde() {
       throw new Error('浏览器里不能直接打开 IDE，桌面版提供');
     },
+    async openExternal(url) {
+      // 带 noopener 时 window.open 总是返回 null，拿不到“是否被拦截”，只能认为已打开
+      try { window.open(url, '_blank', 'noopener,noreferrer'); return true; } catch { return false; }
+    },
+    async copyText(text) {
+      try { await navigator.clipboard.writeText(text); return true; } catch { return false; }
+    },
     prefs: { get: ls.get, set: ls.set },
     secureStorage: {
       secure: false,

@@ -23,9 +23,9 @@
 2. 接口带版本号。`GET /api/v1/hello` 返回服务端版本、协议版本、功能开关和本机信息。客户端连上后先调用它，按功能开关决定显示哪些功能。
 3. 所有类型定义只写在 `packages/protocol` 一处，Gateway 和网页都从这里引用。请求和事件在边界上用 zod 校验，不信任客户端传来的任何数据。
 4. 鉴权从第一天就有：每个请求都必须带令牌，本机也不例外。同时校验 Host 和 Origin 头，不开 CORS。令牌按设备发放，设备列表里可以吊销（16.3、16.4）。
-5. 实时数据只走事件：每个事件都有全局递增的 `seq`。客户端重连时带上 `lastSeq`，服务端补发缺失的事件。客户端发出的每条指令都带 `id`，服务端用 `ack` 回应，重复的 `id` 不会重复执行。
+5. 实时数据只走事件：每个事件都有全局递增的 `seq`。客户端重连时带上 `lastSeq`，服务端补发缺失的事件。客户端发出的每条指令都带 `id`，服务端用 `ack` 回应，重复的 `id` 不会重复执行。事件类型只增不改：客户端必须忽略不认识的事件类型（WebSocket 推送和 `GET /tasks/:id/events` 历史分页都一样，逐条解析、跳过不认识的，不能让整页失败；分页按原始条数和 `seq` 翻页）。
 6. 客户端不接触本机路径和进程：选文件夹走 `GET /fs/browse`，读文件走 `GET /tasks/:id/files/*`，大文件用 HTTP Range。客户端代码里不出现 Windows 路径拼接。
-7. 和运行环境相关的能力（通知、选文件夹、在 IDE 中打开、安全存储）都封装在网页的 `Platform` 接口里。现在只实现浏览器版本，以后桌面软件和手机应用各自提供一份实现。
+7. 和运行环境相关的能力（通知、选文件夹、在 IDE 中打开、打开外部链接、复制到剪贴板、安全存储）都封装在网页的 `Platform` 接口里。现在只实现浏览器版本，以后桌面软件和手机应用各自提供一份实现。
 8. 统一错误格式：`{ code, message, hint, actions[] }`。`message` 写给用户看，`actions` 是界面可以直接渲染的按钮，例如“重新登录”。
 9. ID 一律是不透明字符串，时间一律是毫秒时间戳，文本一律 UTF-8。分页用游标，不用页码。
 10. 不在接口里假设网络位置：客户端只认一个基础地址。以后通过局域网或外网中转访问时，只是换了这个地址。
@@ -63,3 +63,474 @@ AI_Console/
 - 每一步结束都做三件事：自动测试全部通过；在浏览器里按完成标准实际点一遍；独立审查（找 bug、找接口规则违例、找安全问题）。
 - 数据库结构从 1.1 起就用版本号迁移，后面加表不需要删库。
 - 代码进 git，本地提交，不推送到任何远程仓库。
+
+## 6. 1.2 实现规格
+
+> 2026-11-06 · 依据：本文第 1.2 步与第 2 节；design.md 6、7.4、9；ISSUE-0001；三个 Agent 的本机实测（未调用 `session/prompt`，未验证项汇总在 6.9）。
+> 实测环境：Windows 11、Node 24.14；claude-agent-acp 0.100.0（自带 claude.exe 2.1.316）、codex-acp 2.5.0（自带 codex 0.165.0）、CodeBuddy 引擎 2.115.0。
+
+### 6.1 总体与约束
+
+- 新建 `packages/adapters`（`@aic/adapters`），Gateway 依赖它。适配器接口从 `packages/gateway/src/agents/registry.ts` 移到 `packages/adapters/src/types.ts`；`registry.ts` 只保留 `AgentRegistry`，并重新导出这些类型，Gateway 里现有的引用路径不变。演示 Agent `fake.ts` 一并移入（第 4 节已约定），行为不变。
+- 依赖精确锁定：`@agentclientprotocol/sdk` 2.4.0、`@agentclientprotocol/claude-agent-acp` 0.100.0、`@agentclientprotocol/codex-acp` 2.5.0。适配器的传递依赖里带着引擎（`@anthropic-ai/claude-agent-sdk` 与 `-win32-x64` 0.3.316，`@openai/codex` 与 `-win32-x64` ^0.165.0），在根 `package.json` 的 `overrides` 里钉成精确版本，并在验收记录里写下 lockfile 中的实际版本。
+  - 安装时不得使用 `--omit=optional`，否则没有 win32 二进制。
+  - codex-acp 自带一份嵌套的 SDK ~2.1.0，和我们的 2.4.0 并存，不处理。
+  - 自带的 claude.exe 约 335MB，只在 `node_modules` 里，不进仓库。
+- SDK 2.4.0 已删除 `ClientSideConnection`。客户端统一这样写：`acp.client({ name, version }).onRequest(...).onNotification(...).connect(acp.ndJsonStream(Writable.toWeb(stdin), Readable.toWeb(stdout)))`，得到长连接（`.agent / .closed / .close()`）。handler 收到的是 ctx，参数在 `ctx.params`。`session/resume`、`session/close`、`session/set_config_option` 等从 `@agentclientprotocol/sdk/unstable` 引入；`session/set_model` 不在 `methods` 常量里，用字符串调用。
+- 本步任务的 cwd 直接是项目目录（工作副本在 1.3 才有）。真实 Agent 默认权限为“需审批”，并且只开放“只读”和“需审批”两档（6.3.4）。
+- 注入 MCP：本步 `mcpServers` 一律传 `[]`（`aic_history` 在 1.4）。以后注入的服务名一律带 `aic-` 前缀，因为 Codex 会静默跳过与用户配置同名的服务（ISSUE-0001）。
+- 凭据边界：Gateway 和适配器不读取、不复制任何 Agent 自己的凭据文件（`~/.claude`、`~/.codex/auth.json`、`~/.codebuddy`、`~/.workbuddy`）。登录状态只通过 Agent 自己的命令或 ACP 方法判断，并且只取“是否已登录 / 登录方式”这类字段。
+
+### 6.2 `packages/adapters` 结构
+
+```
+packages/adapters/
+├─ package.json
+├─ src/
+│  ├─ index.ts            createAdapters()、类型导出
+│  ├─ types.ts            AgentAdapter / AgentConnection / AgentUpdate / AgentCaps（自 gateway 迁入并扩展）
+│  ├─ fake.ts             演示 Agent（自 gateway 迁入）
+│  ├─ verified.ts         已验证版本表
+│  ├─ redact.ts           日志与错误文本脱敏
+│  ├─ acp/
+│  │  ├─ launch.ts        启动方式解析、spawn、进程树清理
+│  │  ├─ connection.ts    AcpConnection：进程 + ACP 客户端 + 超时 + stderr
+│  │  ├─ session.ts       AcpSession：实现 AgentConnection，三家共用
+│  │  ├─ updates.ts       session/update → AgentUpdate
+│  │  ├─ permissions.ts   request_permission 选项归一化
+│  │  ├─ config.ts        configOptions 解析（按 category 找模型、思考强度、模式）
+│  │  └─ errors.ts        ACP 错误 → ApiError（登录失效、额度、找不到会话）
+│  ├─ claude/index.ts
+│  ├─ codex/index.ts
+│  └─ codebuddy/index.ts
+└─ test/
+   ├─ fixtures/fake-acp-agent.mjs   假 ACP Agent 进程（6.8）
+   ├─ *.test.ts                     契约测试
+   └─ real.smoke.test.ts            真实 Agent 冒烟（AIC_REAL_AGENTS=1 才运行）
+```
+
+在 1.1 的接口上只增不改：
+
+- `SpawnOptions` 增加 `env`（Gateway 算好的账号环境变量，6.4）、`resume?: { agentSessionId }`、`signal?`。
+- `AgentConnection` 增加：`caps`；`config()`，返回当前的模型、思考强度、模式及各自的可选项（`SessionConfigState`）；`onExit(cb)`，进程意外退出时回调；`resumed`，表示这次是恢复的还是新建的。
+- `AgentUpdate` 增加 `usage { used, size, cost? }`、`mode { modeId }`、`config_options { state }`、`notice { level, text }`。
+- `buildEnv(profile, secret: string | null)`：密钥由 Gateway 解密后传入，适配器不接触密钥存储。
+- `DetectResult` 增加 `adapterVersion`、`engineVersion`、`engineSource`（`bundled` / `local` / `app`）、`verified`、`authMethods`（归一化后的登录方式，6.3）。
+
+#### 6.2.1 AcpConnection（三家共用）
+
+启动（`launch.ts`）：
+
+- 一律用 Gateway 自己的 Node 运行 js 入口：`spawn(process.execPath, [入口 js, ...args], { shell: false, windowsHide: true, stdio: 'pipe', cwd, env })`。
+  - Claude：`require.resolve('@agentclientprotocol/claude-agent-acp/dist/index.js')`。
+  - Codex：`require.resolve('@agentclientprotocol/codex-acp/dist/index.js')`。
+  - CodeBuddy：`%LOCALAPPDATA%\Programs\WorkBuddy\resources\app.asar.unpacked\cli\dist\codebuddy.js`，参数 `--acp`。
+- 不启动 `.cmd` / `.bat`。Node 24 不经 shell 启动 `.cmd` 会报 EINVAL（CVE-2024-27980 的修复），而 `shell: true` 有命令注入风险。遇到 npm shim 时，解析出它最终执行的 js 入口或 exe 再启动。例如 `CLAUDE_CODE_EXECUTABLE` 只能指向 `claude.exe`，不能指向 `claude` / `claude.cmd`。
+- 环境变量：以 `process.env` 为底，先删掉会串号的变量，再叠加 `SpawnOptions.env`。删除清单：`ANTHROPIC_*`、`CLAUDE_CODE_USE_*`、`CLAUDE_CONFIG_DIR`、`CLAUDE_CODE_EXECUTABLE`、`OPENAI_*`、`CODEX_*`、`CODEBUDDY_*`、`NO_BROWSER`、`SSH_CONNECTION` / `SSH_CLIENT` / `SSH_TTY`、`CLAUDE_CODE_REMOTE`、`APP_SERVER_LOGS`、`ACC_PRODUCT_CONFIG*`。这样用户在命令行里用 `claude-api` 之类工具设的全局变量不会混进来，`SSH_*` 也不会让 Claude 只剩 TUI 登录。
+- 日志里只写入口、参数和环境变量的名字，不写值。
+
+进程树清理：
+
+- 进程树：Claude 是 node → claude.exe → MCP；Codex 是 node → node(codex.js) → codex.exe → MCP；CodeBuddy 是 node → MCP。实测结束顶层进程后子进程都退出了，但仍要兜底。
+- `close()` 的顺序：支持 `session/close` 就先调用（-32002 视为成功）→ 关闭 stdin → 等 3 秒 → `child.kill()` → 再等 2 秒还在，就 `execFile('taskkill', ['/PID', pid, '/T', '/F'])`。
+- Gateway 退出时（SIGINT、SIGTERM、`beforeExit`、未捕获异常），对所有存活的 Agent 进程同步执行 `taskkill /T /F`。
+- 新表 `agent_processes(pid, created_at, agent, session_id)` 记录启动过的进程。Gateway 下次启动时，对仍然存在且创建时间一致的 pid 执行 `taskkill /T /F`，然后清表。创建时间用 `Get-CimInstance Win32_Process` 的 `CreationDate` 核对，防止 pid 被复用后误杀。
+
+stderr：
+
+- 按行读取，每行截断到 2000 字符，经 `redact.ts` 脱敏后写进 Gateway 日志，前缀 `[agent:<kind>:<sessionId>]`。内存里保留最后 200 行，供崩溃诊断用。stderr 不进事件库，也不发给客户端。
+- 脱敏规则：本次启动注入的每个密钥原文；`sk-[A-Za-z0-9_-]{16,}`；`Bearer\s+\S+`；`(api[_-]?key|token|secret|password)\W*[:=]\s*\S+`。命中的一律替换为 `***`。事件里的 `error.message` 也走同一个函数。
+- stdout 只应有 NDJSON。出现非 JSON 行时记一条警告（前 200 字符，脱敏后），跳过该行，不断开连接。
+
+超时：
+
+| 阶段 | 超时 | 超时后 |
+|---|---|---|
+| 进程启动到 `initialize` 返回 | 30 秒（实测 0.3–1.4 秒，留出首次启动的余量） | 结束进程树，报 `agent.start_timeout` |
+| `session/new` | 60 秒（Codex 还要在后台拉起 10 多个全局 MCP） | 同上 |
+| `session/resume` / `session/load` | 60 秒 | 同上，然后按“无法恢复”处理（6.5.4） |
+| `set_config_option` / `set_mode` | 15 秒 | 报错，界面保留切换前的值 |
+| `session/prompt` | 不设总超时 | 用户点 [停止] 时发 `session/cancel`；10 秒内没有返回就结束进程树 |
+
+initialize：
+
+- clientCapabilities 为 `{ fs: { readTextFile: false, writeTextFile: false }, terminal: false }`；Claude 额外加 `auth: { terminal: true }`，否则拿不到 authMethods。
+- 三家都请求 `protocolVersion: 1`，不启用 ACP v2。
+
+Agent 发来的请求和通知：
+
+- 只处理 `session/request_permission`。`fs/*`、`terminal/*` 没有声明，收到就回 -32601；`elicitation/*` 本步也回 -32601，表单卡片放到后续。
+- `onNotification('*')` 接住所有私有通知（`_auth/status_update`、`_codebuddy.ai/*` 等）。认识的交给适配器处理，不认识的只记类型名，不报错。
+
+#### 6.2.2 session/update → 协议事件
+
+| ACP `sessionUpdate` | AgentUpdate | 协议事件 | 规则 |
+|---|---|---|---|
+| `agent_message_chunk` | `message` | `message.delta` | 只取 `content.type == "text"`；图片、资源块写成“[图片]”“[附件：名称]”。有 `messageId` 就用；没有就由 AcpSession 为每段连续回复生成一个。遇到其他类型的更新或回合结束时补发 `message_done` → `message.done` |
+| `agent_thought_chunk` | `thought` | `thought.delta` | 同上。收到第一条后把 `caps.thoughts` 置为 true，写回能力缓存 |
+| `user_message_chunk` | — | — | 正常回合里丢弃（用户消息已由 Gateway 记录）；`session/load` 回放期间同样丢弃（6.5.4） |
+| `tool_call` | `tool_start` | `tool.start` | `toolCallId` 加会话前缀作为 toolId，避免跨会话撞号。kind：read→read，edit / move→edit，delete→delete，search→search，execute→execute，fetch→fetch，think→think，其他（含 switch_mode、缺省）→other。target 取 `locations[0].path`，没有时依次取 `rawInput.command` / `file_path` / `path`，都没有为 null。如果 status 已经是 completed / failed，紧接着补一条 `tool_end` |
+| `tool_call_update` | `tool_output` / `tool_end` | `tool.output` / `tool.end` | content 里的 text 块 → `tool.output`；diff 块 → `tool.output`，内容写“修改 <path>（+a −b）”，diff 正文留给 1.3 的 diff 面板；terminal 块不会出现（没有声明 terminal）。status completed → `ok=true`；failed → `ok=false`；如果这个工具的审批被拒绝过，带 `rejected: true`。toolCallId 没见过时，先补一条 `tool.start`（title 用 update 里的 title，没有就写“工具调用”）。只改 title 的 update 丢弃 |
+| `plan` | `plan` | `plan.update` | `entries[].content / status` 直接对应，priority 丢弃 |
+| `usage_update` | `usage` | `session.usage`（新增） | `{ used, size, cost? }`。7.4 换模型时据此判断新模型的窗口够不够 |
+| `current_mode_update` | `mode` | `session.config`（新增可选字段 `agentMode`） | 同时检查模式漂移：Agent 的模式比当前权限级别映射到的模式更宽松时（例如退出计划模式时选了 bypass），立即用 `set_mode` 改回映射值，并发一条 `notice` |
+| `config_option_update` | `config_options` | `session.config`（新增可选字段 `models`、`efforts`） | 用推送的全量 configOptions 覆盖 AcpSession 的配置状态。CodeBuddy 一次切换可能连发 2–3 条，100ms 内的合并成一条事件 |
+| `available_commands_update` | — | — | 只把命令名存进能力缓存，本步界面不用 |
+| `session_info_update` | — | — | 只用来识别 CodeBuddy 的回放边界（`_meta["codebuddy.ai/historyReplay"]` 的 start / end），其余丢弃 |
+| 未知类型 | — | — | 不报错。日志记一条 debug（只记类型名），按类型计数存进能力缓存的 `unknownUpdates`，Agent 测试页能看到 |
+
+回合结束时 stopReason 的映射：end_turn→end_turn，cancelled→cancelled，refusal→refusal；max_tokens 和 max_turn_requests 也映射为 end_turn，另发一条 `notice`：“回复达到长度上限，可以让它继续”。
+
+#### 6.2.3 request_permission → 工作台审批
+
+每个请求生成一张 `approval.requested` 卡片：
+
+- title 用 `toolCall.title`；没有时按工具生成，例如“Claude Code 请求执行命令”。CodeBuddy 的请求里没有 title 和 kind，用 `_meta["codebuddy.ai/toolName"]` 生成。
+- detail 是完整的命令或文件路径（来自 `rawInput`），cwd 是任务目录。
+- 用户点击后，回传 Agent 给的原始 `optionId`。
+
+选项 kind 的对应关系：
+
+| Agent 给的 kind | 卡片 kind | 说明 |
+|---|---|---|
+| `allow_once` | `allow_once` | |
+| `allow_always` | `allow_always` | 本步隐藏，见下 |
+| `reject_once` | `reject_once` | |
+| `reject_always` | `reject_always` | 本步隐藏 |
+| `allow`（CodeBuddy 沙箱拦截时用的非标准值） | optionId 含 `session` 或 `always` → `allow_always`，否则 `allow_once` | 归一化后按上面的规则显示 |
+| `reject`（同上） | `reject_once` | |
+| 其他未知值 | 丢弃该选项并记警告 | 一个可选项都不剩时，自动选一个 reject 类选项（没有就回 `cancelled`），并发 `error` 事件说明 |
+
+- 隐藏“总是”类选项有两个原因：本步还没有自己的规则引擎（ISSUE-0006）；Agent 自己的“总是允许”会写进它的配置文件（例如 Claude 的 `allow-with-updates` 会改 settings），违反 design 6.4“不修改用户的全局配置”。例外：没有任何 `allow_once` 时保留 allow_always。例如 Claude 退出计划模式时，只显示 allow_once 的 `exit-plan-default`，其余 `exit-plan-*` 都不显示。
+- 如果 SDK 2.4.0 对非标准 kind 做 schema 校验并拒绝请求，就改用 `onRequest('*')` 宽松接收，再自己校验。假 Agent 的 `nonstandard-kinds` 场景（6.8）锁定这个行为。
+- 权限级别层面的自动决定（两层同时生效，取更严格的一方，design 9.3）：
+  - 只读：所有请求自动选 reject 类选项，不弹卡片，对话里记为 `tool.end rejected`。
+  - 需审批：全部弹卡片。
+- 超时沿用 1.1 的 30 分钟，到期回 `cancelled`，任务暂停。Agent 进程崩溃或 Gateway 退出时，未决审批一律 `expired`。
+- 用户填写的拒绝理由（`note`）ACP 不支持回传，本步只存在审批记录里。
+
+#### 6.2.4 能力探测与缓存
+
+- 新表 `agent_caps(agent, profile_id, adapter_version, engine_version, caps_json, catalog_json, commands_json, probed_at)`，主键 `(agent, profile_id)`。
+- `caps_json` 由 initialize 结果和 session/new 的返回推导：
+  - `loadSession`、`resume / list / close / fork`：取自 `sessionCapabilities`。
+  - `modelSwitch`：有 category 为 model 的 configOption → `configOption`；只有 `models` 字段 → `unstableSetModel`；都没有 → `none`。
+  - `modes`、`prompt`、`mcp`：照抄。
+  - `extensions`：私有前缀，例如 `_codebuddy.ai/*`。
+  - `thoughts`：收到第一条思考后更新。
+- `catalog_json` 是最近一次拿到的模型列表、思考强度列表和模式列表（6.3.2）。
+- 缓存失效条件：adapter 或引擎版本变了；用户点了 [重新检测]；距上次探测超过 24 小时（design 6.6 的每日探测）。
+- 每次真实的 `session/new` / `resume` 都顺带刷新缓存，不额外花钱。
+- 已验证版本表（`verified.ts`）：claude-agent-acp 0.100.0 + claude 2.1.316；codex-acp 2.5.0 + codex 0.165.0；CodeBuddy 2.115.0。版本不在表里时照常使用，但 `verified=false`，卡片标黄“未验证版本”（design 6.3）。
+
+### 6.3 三个适配器
+
+#### 6.3.1 总表
+
+| | Claude Code | Codex | CodeBuddy |
+|---|---|---|---|
+| 启动 | `node claude-agent-acp/dist/index.js` | `node codex-acp/dist/index.js` | `node <WorkBuddy>/…/cli/dist/codebuddy.js --acp` |
+| 引擎 | 默认用适配器自带的 claude.exe（版本和适配器一起锁定、一起测过）。Agent 设置里可以改成“使用本机 Claude Code”：注入 `CLAUDE_CODE_EXECUTABLE=<npm 全局>\node_modules\@anthropic-ai\claude-code\bin\claude.exe`。两者读同一个配置目录，登录态共享 | 只用适配器自带的 codex 0.165，不设 `CODEX_PATH`。本机全局 0.120 读不了当前的 `~/.codex/config.toml`（ISSUE-0009）；两者共用 `CODEX_HOME`，登录态相同 | WorkBuddy 内置引擎。找不到时扫描 `%LOCALAPPDATA%\Programs` 下的同名目录（design 6.3），仍找不到就让用户点选安装目录 |
+| detect：是否安装 | 适配器包能 resolve，并且引擎 exe 存在 | 适配器包能 resolve，并且自带的 `codex.js` 存在 | `codebuddy.js` 存在 |
+| detect：版本 | adapter 读 `package.json`；引擎执行 `claude.exe --version` | adapter 读 `package.json`；引擎读 `@openai/codex/package.json` | 读 `cli/package.json` 的 `version` |
+| detect：是否已登录 | `claude.exe auth status --json`，只解析 `loggedIn`、`authMethod`、`apiProvider`，其余字段丢弃，stdout 不写日志；运行时再以 `_auth/status_update` 的 `kind` 校正（`none` 表示未登录） | `node codex.js login status`，只用正则匹配 `^Logged in using (ChatGPT|an API key)`，不写日志；运行时以 session/new 是否返回 -32000 为准 | initialize 后调用扩展方法 `_codebuddy.ai/getUserInfo`，看有没有 `userInfo.userId`；结果只保留“已登录”这个布尔值，不存用户信息。这个检查要启动一次引擎，结果缓存 10 分钟，只在 Gateway 启动、[重新检测] 和登录完成时执行（ISSUE-0008） |
+| 登录方式（来自 initialize） | `claude-ai-login`（订阅）、`console-login`（Console，按 API 计费），type 都是 terminal | `chat-gpt`、`api-key` | `iOA`、`external`（Google / GitHub）、`internal`（微信）、`selfhosted`（企业域名） |
+| 模型 | configOption `model`（default / opus / fable / sonnet / haiku）；未登录时也能拿到 | configOption `model`；本机只有 1 项，来自用户自定义的 provider | configOption `model`（auto、glm-5.1 等）；`models.availableModels[]._meta` 带 supportsImages / supportsReasoning |
+| 思考强度 | configOption `effort`，category `thought_level`；选项随模型变化 | configOption `reasoning_effort`，category `thought_level` | configOption `thought_level`；选项随模型变化，非法组合会报 -32603 |
+| 其他配置项 | `ultracode`（model_config）、`agent`（人格）：本步不显示，保持默认 | `collaboration_mode`：本步不显示，保持 default | `sandbox`：本步不显示，保持 Agent 默认值 |
+| 恢复 | `resume`（首选）、`load` | `resume`（首选）、`load` | 只用 `load`（sessionCapabilities 没有声明 resume / close / list） |
+| 关闭 | `session/close` | `session/close` | 不支持，只能结束进程 |
+| 每个进程的会话数 | 1（统一按每个任务会话一个进程） | 1 | 1（引擎内部只有一个 `sessionDeferred`，并发 session/new 可能冲突） |
+
+#### 6.3.2 模型和思考强度（三家共用）
+
+- 一律按 category 找配置项，不写死 id：category `model` 是模型，`thought_level` 是思考强度，`mode` 是模式。
+- 列表来源的优先级：
+  1. 当前会话最新的 configOptions（session/new、resume、每次 set 的返回、`config_option_update` 推送）。
+  2. 能力缓存里的 `catalog_json`。
+  3. 旧字段 `models.availableModels`。Codex 的旧字段是 `<model>[<effort>]` 组合 id，要拆开：方括号前是模型，方括号里是强度，去重后使用。
+  4. 都没有：模型列表为空，界面只显示“Agent 默认模型”（`model = null`，不下发）；思考强度为 null，界面不提供调节。
+- 没有会话时（新建任务的下拉框）从缓存取。缓存为空时：
+  - Claude：自动做一次探测会话。session/new 不花钱、不需要登录，cwd 是 `.aic-data/probe/<随机>`，用完删除。
+  - Codex、CodeBuddy：不自动探测。前者会拉起全部全局 MCP，后者需要登录，且登录态脆弱（ISSUE-0008）。只在用户点 [测试连接] 或 [重新检测]，以及第一次真实会话时探测；在那之前界面显示“首次使用后显示模型列表”。
+- 思考强度的可选项随模型变化：每次切换模型后，以返回的 configOptions 为准重新渲染。如果原来选的强度不在新列表里，改用新的 `currentValue`，并发 `notice`：“新模型不支持 xx，已改为 yy”。
+- 切换（H0，design 7.4）：
+  - `caps.modelSwitch == 'configOption'` → `session/set_config_option { configId: <model 项的 id>, value }`。
+  - `unstableSetModel` → `session/set_model`。
+  - `none` → 走 H1：结束进程 → 带新参数重启 → resume / load → 重新下发配置。
+  - 每次 set 返回全量 configOptions，直接覆盖会话状态，并发 `session.config`。
+  - 非法值（-32602 / -32603）：保留原值，把 Agent 给的说明放进 `error.hint`。
+- 恢复之后重新下发一遍任务保存的模型、思考强度和模式。实测 Codex 在没跑过回合的情况下 resume 后，配置会回到默认值。
+
+#### 6.3.3 登录
+
+总原则：用户在界面上点一个按钮完成登录，不出现命令行窗口。能用 ACP `authenticate` 就用；需要浏览器授权的，由 Gateway 在本机打开浏览器，同时把授权链接推给界面（`agent.login` 事件），界面显示“浏览器没有自动打开？点这里”。
+
+| Agent | 方法 | 做法 | 已知限制 |
+|---|---|---|---|
+| Claude | `claude-ai-login` / `console-login`（terminal 类型，ACP `authenticate` 不支持） | Gateway 以隐藏子进程运行 authMethod 里声明的参数：`node <adapter>/dist/index.js --cli auth login --claudeai`（或 `--console`），注入账号的环境变量，不注入 `NO_BROWSER` / `SSH_*`。CLI 会打开浏览器走 OAuth，回调到 localhost。Gateway 从 stdout 里只提取 `https://claude.ai/`、`https://console.anthropic.com/`、`https://platform.claude.com/` 开头的链接推给界面，其余输出不记录。进程退出码为 0 后再跑一次 `auth status` 确认。最长等 10 分钟，界面有 [取消] | 是否会要求在终端里按回车或粘贴授权码，没有实测（ISSUE-0007）。如果需要粘贴，界面显示输入框，经 `POST …/login/:id/code` 写入子进程的 stdin。完全走不通时，引导用户添加“官方 API Key”账号 |
+| Codex | `chat-gpt` | ACP `authenticate { methodId: 'chat-gpt' }`。适配器先检查现有的 ChatGPT 登录，有效就直接返回；否则用本机默认浏览器打开授权页，等完成通知后返回 | 浏览器开在 Gateway 所在的电脑上。手机或局域网场景要用 `chat-gpt-device-code`（需要客户端支持 URL elicitation），放到 1.5 |
+| Codex | `api-key` | 不调用 `authenticate`，因为它会把密钥写进 `CODEX_HOME/auth.json`。改用账号配置（6.4）在启动时注入 | — |
+| CodeBuddy | `external` / `internal` / `iOA` | ACP `authenticate { methodId }`。引擎会先发 `_codebuddy.ai/authUrl` 通知（转成 `agent.login` 事件推给界面），再打开系统浏览器，等用户登录完才返回。返回里的 `_meta["codebuddy.ai/userinfo"]` 只取“是否有 userId”，其余丢弃 | 对已登录的用户调用 `authenticate` 会先登出。所以只在 getUserInfo 确认未登录时才显示 [登录]；“换账号”要二次确认，文案写明“会同时退出 WorkBuddy 里的账号”（两者共用 `~/.codebuddy`）。另提供 [在 WorkBuddy 中登录]：由 Gateway 启动 WorkBuddy.exe，用户在 WorkBuddy 里登录后回来点 [重新检测] |
+| CodeBuddy | `selfhosted` | 本步不提供：企业域名怎么传入，源码里没有确认 | 记在 ISSUE-0008 |
+
+- 登录的生命周期：`POST /agents/:kind/login` 返回 `loginId` → 事件 `agent.login`（started → waiting_browser → succeeded / failed / cancelled，可能带 `authUrl`）→ 完成后重新 detect，并推送 `agent.status`。同一个 Agent 同时只允许一个登录流程，重复请求返回进行中的那个 `loginId`。
+- 登出：本步不做（ACP 有 `logout` 能力，放到账号管理完善时再做）。
+
+#### 6.3.4 权限级别 → Agent 模式
+
+| 级别 | Claude | Codex | CodeBuddy | 本步是否开放 |
+|---|---|---|---|---|
+| 只读 | `plan` | `read-only` | `plan` | 开放；Gateway 另外自动拒绝所有权限请求（6.2.3） |
+| 需审批（默认） | `default` | `read-only`（on-request：写文件和越出沙箱的命令都要申请，正好对应“修改、执行要审批”；`workspace-write` 下工作区内的修改不会询问，不符合 9.1） | `default` | 开放 |
+| 工作区内自动 | `acceptEdits` | `workspace-write` | `acceptEdits` | 不开放 |
+| 全自动 | `bypassPermissions` | `agent-full-access` | `bypassPermissions`（不用 `fullAccess`） | 不开放 |
+
+- 本步不开放后两档。原因：cwd 就是项目目录，没有工作副本可以丢弃；而且 Agent 在这两档下不再发权限请求，Gateway 的“始终禁止”清单拦不住（规则引擎在 1.3）。真实 Agent 的任务选这两档时，接口返回 `permission.level_unavailable`，界面把这两档置灰，并提示“第 1.3 步有了工作副本后开放”。演示 Agent 不受影响。
+- 不使用的模式：Claude 的 `auto`，Codex 的 `agent`（auto_review），CodeBuddy 的 `auto`、`dontAsk`、`fullAccess`。
+- 模式用 `session/set_config_option { configId: <mode 项的 id> }` 设置，失败时退回 `session/set_mode`。会话建立、恢复、改权限级别后都要设置一次，并且以 `current_mode_update` 校验（模式漂移的处理见 6.2.2）。
+- Claude 的初始模式会受用户 settings 里 `permissions.defaultMode` 影响，所以 session/new 之后总是显式设置一次，不依赖默认值。
+- 待实测：Codex 在 Windows 上的 `read-only` 沙箱是否真能拦住写操作（6.9）。拦不住的话，需审批级别改用 Gateway 自动拒绝 + 卡片的组合，并开问题单。
+
+### 6.4 账号配置（design.md 6.4）
+
+#### 6.4.1 表结构（数据库迁移 v3，只追加）
+
+```sql
+CREATE TABLE agent_profiles (
+  id TEXT PRIMARY KEY, agent TEXT NOT NULL, name TEXT NOT NULL,
+  kind TEXT NOT NULL,              -- 'subscription' | 'apiKey' | 'customEndpoint'
+  config_dir TEXT NOT NULL,        -- 'shared'：用 Agent 的默认配置目录；'isolated'：.aic-data/profiles/<id>/
+  base_url TEXT,                   -- customEndpoint 必填
+  auth_header TEXT,                -- customEndpoint：'x-api-key' | 'bearer'
+  models_json TEXT,                -- 手填或从 /models 拉取的模型列表
+  secret_id TEXT,                  -- 指向 secrets.id；subscription 为空
+  is_default INTEGER NOT NULL DEFAULT 0,
+  last_test_at INTEGER, last_test_ok INTEGER,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX idx_profiles_default ON agent_profiles(agent) WHERE is_default = 1;
+CREATE TABLE secrets (
+  id TEXT PRIMARY KEY, scheme TEXT NOT NULL,  -- 'dpapi-user-v1'
+  blob TEXT NOT NULL,                         -- base64 密文
+  hint TEXT NOT NULL,                         -- 末 4 位，界面显示“结尾 …7Q2c”
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE agent_processes (pid INTEGER NOT NULL, created_at TEXT NOT NULL, agent TEXT NOT NULL, session_id TEXT);
+-- agent_caps 见 6.2.4；tasks 增加 profile_id（可空，空 = 该 Agent 的默认账号）
+ALTER TABLE tasks ADD COLUMN profile_id TEXT;
+```
+
+- 每个 Agent 首次检测时自动建一个默认账号“本机登录”（`subscription`，`config_dir = shared`），也就是用户在这台电脑上已有的登录状态。CodeBuddy 的这个账号显示为“沿用 WorkBuddy 登录”。
+- 删除账号：有运行中的会话时拒绝（`profile.in_use`）；引用它的任务改为使用默认账号；对应的 secrets 一并删除；`isolated` 的目录保留，界面提示可以手动删除（避免误删会话记录）。
+- `sessions.profile_id` 1.1 已有，开始写入。
+
+#### 6.4.2 各类账号注入的环境变量
+
+只在启动 Agent 进程时注入（`SpawnOptions.env`），不写进任何配置文件，不修改用户的全局配置。所有账号都先经过 6.2.1 的删除清单，再注入下表的变量。
+
+| | 订阅登录 | 官方 API Key | 自定义地址（第三方中转） |
+|---|---|---|---|
+| Claude | `shared`：不注入；`isolated`（第二个订阅账号）：`CLAUDE_CONFIG_DIR=<profile 目录>/claude`，然后在这个目录里走 6.3.3 的登录 | `ANTHROPIC_API_KEY=<密钥>`；配置目录 `shared`，保留用户的设置、技能和 MCP | `ANTHROPIC_BASE_URL=<base_url>`；鉴权头为 x-api-key 时注入 `ANTHROPIC_API_KEY`，为 bearer 时注入 `ANTHROPIC_AUTH_TOKEN`；如果手填了模型，注入 `ANTHROPIC_CUSTOM_MODEL_OPTION=<第一个模型>` |
+| Codex | `shared`：不注入（`CODEX_HOME` 默认 `~/.codex`，和 Codex 桌面版共用）；`isolated`：`CODEX_HOME=<profile 目录>/codex`，在这个目录里走 chat-gpt 登录 | `CODEX_HOME=<profile 目录>/codex`；`CODEX_CONFIG` 里声明一个 provider `aic`（`base_url` 为官方地址，`env_key: "AIC_PROVIDER_KEY"`），并注入 `AIC_PROVIDER_KEY=<密钥>` | 同左，`base_url` 换成用户填的地址，`wire_api` 由用户选（默认 `responses`） |
+| CodeBuddy | `shared`：不注入（沿用 WorkBuddy）；`isolated`：`CODEBUDDY_CONFIG_DIR=<profile 目录>/codebuddy` | `CODEBUDDY_API_KEY=<密钥>`（实验性） | `CODEBUDDY_BASE_URL` + `CODEBUDDY_API_KEY`（或 `CODEBUDDY_AUTH_TOKEN`）（实验性） |
+
+- Codex 的 API Key 方案用 provider 的 `env_key` 从环境变量读密钥，目的是不让密钥落盘。`CODEX_CONFIG` 与用户 config.toml 的合并方式还没有实测（6.9）；实测不通时退回“在 isolated `CODEX_HOME` 里调用 `authenticate api-key`”，这样密钥会以 Codex 自己的格式存在 `.aic-data/profiles/<id>/codex/auth.json`，需在界面和问题单里写明。
+- CodeBuddy 的 API Key 和自定义地址只有源码依据，没有实测，界面标“实验”。
+- 自定义地址的模型列表：先请求 `<base_url>/models`（10 秒超时，带同一个密钥）；拿不到就用手填列表。账号卡片上有 [刷新模型列表]。
+- 账号环境变量的值不进日志、不进事件；日志里只写变量名。
+
+#### 6.4.3 密钥存储：Windows DPAPI
+
+- 实现：`SecretStore` 接口有两个实现。`DpapiSecretStore` 用于 win32；`MemorySecretStore` 只用于测试。非 Windows 平台第一阶段不支持保存密钥（返回 `secret.unavailable`）。
+- 加密：`execFile('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-Command', <固定脚本>])`。脚本里 `Add-Type -AssemblyName System.Security`，然后调用 `[System.Security.Cryptography.ProtectedData]::Protect(bytes, entropy, 'CurrentUser')`。
+  - 明文和 entropy 通过 stdin 传入（base64），绝不放在命令行参数里，因为命令行参数在进程列表里谁都能看到。
+  - 输出 base64 密文到 stdout；解密的流程对称。
+  - entropy 是安装时生成的 32 字节随机数，存在 `meta` 表里。这样密文同时绑定 Windows 用户和这份数据目录。
+  - 用 Windows PowerShell 5.1（系统自带），不依赖 PowerShell 7。不用 `ConvertTo-SecureString`：底层同样是 DPAPI，但取回明文还要绕道 `Marshal`，脚本更长，并不更安全。
+- 解密时机：只在启动 Agent 进程、请求 `/models`、[测试连接] 时解密。明文只存在于传给 `spawn` 的 env 对象和这次请求里，不缓存，不写日志。
+- 为什么不用 Windows 凭据管理器：Node 没有原生绑定，常用的 keytar 需要编译原生模块，而且已经不再维护，违背“不需要编译原生模块”的选择（第 3 节）；`cmdkey` 能写不能读；PowerShell 自带的命令里没有读取凭据的命令，要靠第三方模块或 WinRT 的 `PasswordVault`，在 5.1 和 7 之间行为不一致。凭据管理器底层也是用户级 DPAPI，换成它并不会更安全。
+- 安全性：
+  - 能防住的：数据库文件被复制到别的电脑或别的 Windows 用户下、进了备份或网盘、被误提交——这些情况下密文都解不开。
+  - 防不住的：以同一 Windows 用户身份运行的恶意程序可以调用 DPAPI 解密（凭据管理器也一样）。这一点在设置页的“安全说明”里写明。
+  - 接口不返回明文：GET 只返回 `hasSecret` 和 `hint`（末 4 位）；修改密钥只能整个替换。
+- 原型 agents.html 里“保存在 Windows 凭据管理器”的文案，实现时改为“已加密保存在本机（Windows 数据保护）”。
+
+### 6.5 Gateway 的变化
+
+#### 6.5.1 会话运行时
+
+- `AgentRegistry` 注册 fake、claude、codex、codebuddy 四个适配器。`TaskService.ensureRuntime` 不变，仍是 `adapterFor → spawn → probeCapabilities`，只是多了几步：
+  - 解析任务的账号（`tasks.profile_id`，为空用默认账号）。
+  - 解密密钥，调用 `buildEnv`。
+  - 查上一个会话：同一个任务存在 `sessions` 记录，且 `agent_session_id` 非空、agent 和账号都相同时，带上 `resume`（6.5.4）。
+- 测试时通过 `createServices({ adapters })` 注入假 Agent，默认测试不注册真实适配器（6.8）。
+- 并发上限：每个 Agent 同时最多 2 个会话进程（Agent 设置里可以改为 1–4）。超出时任务进入 `queued`，有进程空出来就按排队顺序启动。
+- 空闲回收：会话 30 分钟没有活动（没有回合、没有未决审批）就关闭进程，下次发消息时自动恢复（6.5.4）。会话不结束，只是进程没了。
+- `/hello` 的功能开关：`agents.real = true`；新增 `agents.profiles = true`。
+
+#### 6.5.2 cwd 与权限
+
+- cwd 直接用项目目录（1.3 起改为工作副本）。
+- 新建任务时，选了真实 Agent，界面在发送按钮上方显示：“这个任务会直接修改项目里的文件（第 1.3 步起改为在独立的工作副本里修改）。”
+- 权限默认“需审批”，只开放“只读”和“需审批”（6.3.4）。`POST /tasks` 和 `PATCH /tasks/:id` 对真实 Agent 校验这一点，不满足时返回 `permission.level_unavailable`。
+
+#### 6.5.3 异常处理
+
+| 情况 | 识别方式 | 任务状态 | 界面 |
+|---|---|---|---|
+| 进程意外退出 | `child.on('exit')`，且不是我们主动关闭的 | 回合进行中 → `interrupted`；空闲 → 不变 | `error`：`agent.crashed`，“Claude Code 意外退出”，按钮 [继续]（重新发消息时自动恢复会话）。stderr 的最后 200 行写进 Gateway 日志，不进事件。未决审批改为 `expired`。会话记录 `status = ended`，`agent_session_id` 保留，用于恢复 |
+| 启动或握手超时 | 6.2.1 的超时表 | `failed` | `agent.start_timeout`，按钮 [再试一次]、[测试连接] |
+| 登录失效 | ACP 错误码 -32000 / authRequired；CodeBuddy 的 `data.category == "auth"`；Claude 推送 `_auth/status_update` 且 kind 为 none | `paused` | `agent.auth_required`，按钮 [去登录]（打开 Agent 页对应的账号）。同时推送 `agent.status`（`needs_login`），这个 Agent 的能力缓存里登录状态失效 |
+| 额度或限流 | 错误信息或 `data` 里匹配 `rate.?limit\|quota\|usage limit\|429\|insufficient\|credit\|余额\|额度` | `paused` | `agent.quota_exceeded`，能解析出重置时间就写进 `hint`；按钮 [换模型]、[换账号] |
+| 会话不存在 | resume / load 返回 -32002 或 Resource not found | 不变 | 见 6.5.4 |
+| 其他 ACP 错误 | 其余 JSON-RPC 错误 | `failed` | `agent.failed`（1.1 已有）；message 经过脱敏 |
+
+不自动重试，不自动换账号或模型。额度错误后任务暂停（design 10.1 的 TaskScheduler 职责），等用户决定。
+
+#### 6.5.4 重启后恢复（H1）
+
+- Gateway 启动时：沿用 1.1 的 `recoverOnStartup`（运行中的任务改为 `interrupted`，未决审批作废），另外清理遗留的 Agent 进程（6.2.1）。不在启动时预先拉起 Agent。
+- 用户在中断或空闲回收过的任务里发下一条消息时，`ensureRuntime` 执行恢复：
+  1. `caps.resume` 为真 → `session/resume { sessionId: agent_session_id, cwd, mcpServers: [] }`。Agent 不回放历史，Gateway 的事件库里本来就有完整对话。
+  2. 否则 `caps.loadSession` 为真 → `session/load`。回放期间收到的 `session/update` 全部丢弃，直到 load 返回；CodeBuddy 另外用 historyReplay 的 start / end 标记界定回放范围。
+  3. 恢复成功后重新下发模型、思考强度、模式（6.3.2），新的 `sessions` 记录写 `parent_session_id`，`session.started` 带 `resumed: true`。
+  4. 返回 -32002 / Resource not found（例如 Claude 从没 prompt 过的会话），或恢复超时：新建会话，并发 `session.notice`：“原来的会话无法恢复，已新建会话；Agent 不记得之前的对话。”（自动交接 H2 在 1.4 做，到时候这里改为走交接。）
+- 换账号（同一个 Agent）：结束进程 → 用新账号的环境变量重启 → resume。如果新账号的配置目录不同、会话不存在，本步直接返回 `session.not_recoverable`，提示“换账号需要交接，第 1.4 步提供”。
+- 跨 Agent 切换：沿用 1.1 的行为，返回 `agent.unavailable`（1.4 做）。
+
+### 6.6 接口（全部写在 `packages/protocol`，只增不改）
+
+已有字段一律不改名、不改类型；新增字段都是 optional，老客户端可以忽略。
+
+#### 6.6.1 类型
+
+```ts
+// AgentInfo 增加的可选字段
+adapterVersion?: string | null;  engineVersion?: string | null;
+engineSource?: 'bundled' | 'local' | 'app';
+engineLocation?: string | null;  // 只用于展示的文本，客户端不解析、不拼接
+authMethods?: { id: string; name: string; description: string | null;
+                flow: 'browser' | 'apiKey' | 'external_app' }[];
+caps?: { loadSession; resume; close; modelSwitch; thoughts; modes: {id,name}[];
+         prompt: {image,audio,embeddedContext} };
+modelsSource?: 'session' | 'cache' | 'manual' | 'none';
+runningSessions?: number;  concurrencyLimit?: number;
+checkedAt?: Ts;
+profiles?: ProfileSummary[];     // 该 Agent 的账号概要
+
+// 账号（不含密钥明文）
+AgentProfile = { id, agent: AgentKind, name, kind: 'subscription'|'apiKey'|'customEndpoint',
+                 configDir: 'shared'|'isolated', baseUrl: string|null, authHeader: 'x-api-key'|'bearer'|null,
+                 models: ModelInfo[], hasSecret: boolean, secretHint: string|null,
+                 isDefault: boolean, loggedIn: boolean|null, experimental: boolean,
+                 lastTestAt: Ts|null, lastTestOk: boolean|null, createdAt: Ts, updatedAt: Ts }
+
+AgentTestResult = { ok: boolean; steps: { ts: Ts; label: string; ok: boolean; ms: number; detail?: string }[] }
+
+// Task 增加 profileId?: Id | null；CreateTaskBody、PatchTaskBody、switch 指令增加 profileId?
+```
+
+ModelInfo 不改：`contextWindow` 来自 configOption 时为 null，等模型资料表（design 6.6）再填。
+
+#### 6.6.2 REST
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/agents` | 已有。返回的 AgentInfo 带上 6.6.1 的扩展字段；读缓存，不触发探测 |
+| POST | `/agents/redetect` | 重新检测全部 Agent（版本、登录、能力缓存失效）。返回 `{ items: AgentInfo[] }`，同时为每个 Agent 推送 `agent.status` |
+| POST | `/agents/:kind/login` | body：`{ profileId?, methodId }`；`methodId` 用 AgentInfo.authMethods 里的 id，CodeBuddy 另有 `workbuddy-app`（启动 WorkBuddy）。返回 202 `{ loginId }`，进度走 `agent.login` 事件。CodeBuddy 已登录时返回 409 `resource.conflict`，必须带 `force: true`（界面二次确认后）才执行 |
+| POST | `/agents/:kind/login/:loginId/cancel` | 取消登录，结束登录子进程 |
+| POST | `/agents/:kind/login/:loginId/code` | body：`{ code }`；给需要粘贴授权码的登录流程（ISSUE-0007 的备选） |
+| POST | `/agents/:kind/test` | body：`{ profileId?, sendMessage?: boolean }`。依次执行：找到引擎 → initialize → session/new（临时目录，不注入 MCP）→ 读模型列表 → 关闭。`sendMessage: true` 时多发一条“只回复 OK”（会产生少量费用，界面按钮写“发送测试消息（会产生少量费用）”）。返回 `AgentTestResult`，对应原型里的测试日志 |
+| PATCH | `/agents/:kind` | body：`{ concurrencyLimit?, engine?: 'bundled' \| 'local' }`（`engine` 只对 Claude 有效） |
+| GET | `/profiles` | query：`agent?`。返回 `Page<AgentProfile>` |
+| POST | `/profiles` | body：`{ agent, name, kind, configDir?, baseUrl?, authHeader?, apiKey?, models? }`。`apiKey` 只在请求体里出现一次，Gateway 收到后立即 DPAPI 加密，不进日志、不进审计详情。`baseUrl` 必须是 `https://`，或者 `http://` 加 127.0.0.1 / localhost |
+| PATCH | `/profiles/:id` | 同上，字段都可选；`apiKey` 传入就整个替换；`isDefault: true` 设为默认账号 |
+| DELETE | `/profiles/:id` | 有运行中的会话时返回 409 `profile.in_use`；默认的“本机登录”账号不能删除 |
+| POST | `/profiles/:id/models/refresh` | 只对自定义地址：请求 `<baseUrl>/models`，返回更新后的 AgentProfile |
+
+全部接口沿用 1.1 的鉴权（设备令牌 + Host + Origin），请求体用 zod 校验。登录、建账号、删账号、改密钥写审计日志（`audit_log`），详情里只写账号 ID 和名称。
+
+#### 6.6.3 事件与指令
+
+| 事件 | data | 说明 |
+|---|---|---|
+| `agent.login`（新增） | `{ loginId, kind, profileId, state: 'started'\|'waiting_browser'\|'need_code'\|'succeeded'\|'failed'\|'cancelled', authUrl?, message? }` | 全局事件（taskId 为空）。`authUrl` 只放从 Agent 输出里提取并且过了白名单的链接 |
+| `session.usage`（新增） | `{ used, size, cost?: { amount, currency } }` | 来自 `usage_update` |
+| `session.notice`（新增） | `{ level: 'info'\|'warn', text }` | 降级、恢复失败、强度被重置等需要告诉用户的情况，显示为对话里的灰色提示行 |
+| `session.started`（扩展） | 增加可选的 `profileId`、`resumed` | |
+| `session.config`（扩展） | 增加可选的 `agentMode`、`models: ModelInfo[]`、`efforts: string[] \| null` | 切换器用 `models`、`efforts` 渲染当前会话的可选项 |
+| `agent.status`（已有） | — | 检测结果、登录状态变化时推送 |
+| `switch` 指令（扩展） | 增加可选的 `profileId` | 同 Agent 换账号（6.5.4） |
+
+ErrorCode 增加：`agent.auth_required`、`agent.quota_exceeded`、`agent.crashed`、`agent.start_timeout`、`agent.protocol_error`、`permission.level_unavailable`、`profile.in_use`、`secret.unavailable`、`session.not_recoverable`。FeatureKey 增加 `agents.profiles`。
+
+### 6.7 界面（参照 `docs/prototype/agents.html` 和 workbench.html 的切换器）
+
+- Agent 管理页：每个 Agent 一张卡片，显示状态（就绪 / 需要登录 / 未安装 / 出错）、版本（未验证时标黄）、引擎来源、账号、运行中的会话数。顶部有 [重新检测] 和“上次检测：…”。
+- 详情区：
+  - 账号列表，[添加账号] 下面三种方式：订阅登录 / 官方 API Key / 自定义地址。密钥输入框是 password 类型，保存后只显示结尾 4 位。
+  - 登录进行中显示“已在浏览器中打开授权页面”和备用链接，[取消]；需要授权码时显示输入框。
+  - 默认模型、并发上限、引擎（仅 Claude：自带 / 本机）。
+  - [测试连接] 和测试日志。
+- 工作台切换器（H0）：模型和思考强度两个下拉框，选项来自 `session.config.models / efforts`（没有会话时用 AgentInfo 里的缓存）。切换后等 ack；失败时恢复原值，并显示 error 的 message。思考强度为 null 时隐藏强度下拉框。
+- 新建任务：真实 Agent 下“工作区内自动”和“全自动”置灰，并显示原因；发送按钮上方显示“会直接修改项目文件”的提示（6.5.2）。
+- 所有错误按 `actions` 渲染按钮（[去登录]、[换模型]、[继续]）。网页不拼本机路径：引擎位置只显示 AgentInfo 的 `engineLocation` 文本。
+
+### 6.8 测试策略
+
+默认的 `npm test` 不启动任何真实 Agent，不联网，不花钱。
+
+假 ACP Agent 进程（`packages/adapters/test/fixtures/fake-acp-agent.mjs`）：
+
+- 用 `@agentclientprotocol/sdk` 2.4.0 的 Agent 端（`acp.agent()` / `AgentApp`）写成一个真正的子进程，走和真实 Agent 一样的 `AcpConnection`（spawn、NDJSON、stderr、超时、进程树清理）。
+- 剧本通过环境变量 `AIC_FAKE_SCENARIO=<剧本 JSON 路径>` 传入。剧本描述 initialize 的返回、configOptions，以及每轮 prompt 依次发出的 update、权限请求和结束方式。
+
+| 场景 | 覆盖的内容 |
+|---|---|
+| `basic` | 消息、思考、tool_call / tool_call_update（含 diff、失败）、plan、usage_update → 6.2.2 每一行的事件；未知 sessionUpdate 类型被计数、不报错 |
+| `permission` | allow_once / allow_always / reject_once 的显示与隐藏规则；回传原始 optionId；拒绝后 `tool.end rejected`；只读级别自动拒绝；30 分钟超时回 `cancelled`（用假时钟） |
+| `nonstandard-kinds` | CodeBuddy 式的 `kind: "allow" / "reject"` 能被接收和归一化；全是未知 kind 时自动拒绝 |
+| `switch` | set_config_option 返回全量 configOptions；思考强度选项随模型变化，原强度失效时改用 currentValue 并发 `session.notice`；非法值报错后保留原值；只有 `models` 旧字段时走 `session/set_model`；Codex 式的 `<model>[<effort>]` 组合 id 能拆开 |
+| `mode-drift` | Agent 自己把模式改宽后，Gateway 用 set_mode 改回 |
+| `crash` | 回合中 `process.exit(1)` → `agent.crashed`、任务 `interrupted`、未决审批 `expired`；下一条消息触发 resume |
+| `grandchild` | 假 Agent 再拉起一个子进程；`close()` 和 Gateway 退出后两个进程都不在（Windows 上用 `tasklist` 核对） |
+| `hang` | initialize 不返回 → 30 秒超时（测试里把超时改小）→ 进程树被结束 |
+| `noise` | stdout 夹杂非 JSON 行、stderr 输出含 `sk-…` 和注入密钥的行 → 连接不断，日志里只有 `***` |
+| `auth` | session/new 返回 -32000 → `agent.auth_required`、任务 `paused`、`agent.status` 变为需要登录 |
+| `quota` | prompt 返回额度错误 → `agent.quota_exceeded`、任务 `paused` |
+| `resume` | resume 成功（不回放，重新下发配置）；resume 返回 -32002 → 新建会话并发 `session.notice`；只支持 load 时回放期间的 update 被丢弃 |
+
+其他测试：
+
+- Gateway 集成测试：用假 Agent 进程注册成一个真实形态的适配器，经 WebSocket 走完“建任务 → 对话 → 审批 → 换模型 → 崩溃 → 恢复”，断言事件序列和 1.1 的契约一致。
+- 协议包：新增 schema 的正反例；老版本事件（没有新字段）仍能通过校验。
+- 账号与密钥：`MemorySecretStore` 下的 REST 契约（响应里永远没有明文，`hint` 正确）；env 构建是纯函数，逐格对照 6.4.2 的表；删除清单生效。
+- DPAPI：只在 win32 上运行（其他平台跳过）。往返加解密一致；数据库文件里搜不到明文；PowerShell 的命令行参数里没有明文。
+- 真实 Agent 冒烟测试 `real.smoke.test.ts`：只在 `AIC_REAL_AGENTS=1` 时运行，可用 `AIC_REAL_AGENTS_ONLY=claude,codex` 只跑一部分。每个 Agent：detect → initialize → session/new（临时目录，“需审批”，注入 `aic-echo` 只检查能否拉起）→ 一条“只回复 OK” → 一条“新建 hello.txt”（应出现一次审批，允许后文件确实生成）→ 切换模型和思考强度 → 再一条“只回复 OK” → close → resume（不再发消息）。每个 Agent 最多 3 条极短的消息；让模型调用 `aic-echo` 工具不在冒烟测试里做（联调时为控制费用调整，见 devlog 2026-11-06“第 1.2 步联调与真实冒烟”）。结果写进验收记录，不进默认测试。会产生少量费用，运行前在验收记录里注明。
+
+### 6.9 未验证项与问题单
+
+以下都需要真实 prompt 才能确认，放进冒烟测试和 1.2 验收：
+
+- 三家：未登录时 prompt 的错误形态；已有对话的会话能否 resume / load；resume 后切换过的配置是否保留；模型能否真正调用注入的 MCP 工具（ISSUE-0001）；实际弹出的权限选项。
+- Claude：订阅登录能否完全在后台子进程里完成（ISSUE-0007）；用 API Key 时 `auth status` 是否显示为 API 计费。
+- Codex：`read-only` 沙箱在 Windows 上能否拦住写操作（6.3.4）；`CODEX_CONFIG` 与用户 config.toml 的合并方式，以及 `env_key` 方案（6.4.2）。
+- CodeBuddy：登录态为什么会在探测中失效、我们的检查会不会让 WorkBuddy 掉线（ISSUE-0008）；API Key 环境变量；一个进程能否跑多个会话。
+
+问题单（本次新开）：
+
+- ISSUE-0007：Claude 订阅登录没有 ACP authenticate，只能由 Gateway 代跑 `auth login` 子进程，能否全程图形化未实测。
+- ISSUE-0008：CodeBuddy 登录态在探测中失效，并与 WorkBuddy 共用登录。
+- ISSUE-0009：本机全局 codex 0.120 读不了当前的 config.toml，改用 codex-acp 自带的 0.165（design.md 6.1 写的“用 `CODEX_PATH` 指向本机版本”待更新）。
+- ISSUE-0001 的实测结论已追加到该问题单的时间线。
+
+### 6.10 开发顺序
+
+1. 协议包：6.6 的类型、事件、错误码，以及测试。
+2. `packages/adapters`：接口迁移、AcpConnection、映射、假 ACP Agent 和契约测试（6.8 全部场景先通过）。
+3. 三个适配器的 detect / login / 模型 / 权限映射；冒烟测试脚本。
+4. Gateway：迁移 v3、账号与 DPAPI、REST、运行时接入、异常处理、恢复。
+5. 网页：Agent 管理页、账号、登录流程、切换器、新建任务的提示。
+6. 冒烟测试（`AIC_REAL_AGENTS=1`）与浏览器验收，写 `docs/acceptance/step-1.2.md`，6.9 里没通过的项开问题单。

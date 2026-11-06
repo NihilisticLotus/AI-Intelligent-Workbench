@@ -7,6 +7,8 @@ import { useApp } from '../state/app';
 import { PlanList } from './Chat';
 import { Icon } from './Icon';
 import { useAgentName } from './ui';
+import type { SessionCfg } from '../state/core';
+import { isRealAgent } from '../lib/agents';
 
 const MIN_W = 320;
 const maxW = () => Math.round(window.innerWidth * 0.62);
@@ -34,11 +36,16 @@ export function Resizer() {
   );
 }
 
-export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'plan.update'> | null; config: { model: string | null; effort: string | null } }) {
+export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'plan.update'> | null; config: SessionCfg }) {
   const tab = usePref('sideTab');
   const project = useApp((s) => s.projects.find((p) => p.id === task.projectId));
   const agentName = useAgentName(task.agent);
-  const modelName = useApp((s) => s.agents.find((a) => a.kind === task.agent)?.models.find((m) => m.id === config.model)?.name) ?? config.model;
+  const modelName = useApp((s) => s.agents.find((a) => a.kind === task.agent)?.models.find((m) => m.id === config.model)?.name) ?? config.models?.find((m) => m.id === config.model)?.name ?? config.model;
+  const profileId = config.profileId ?? task.profileId ?? null;
+  const profileName = useApp((s) => {
+    const list = s.agents.find((a) => a.kind === task.agent)?.profiles;
+    return (profileId ? list?.find((p) => p.id === profileId) : list?.find((p) => p.isDefault))?.name ?? null;
+  });
   const tabs: Array<[SideTab, string]> = [['plan', '计划'], ['diff', '改动']];
   const select = (t: SideTab) => setPref('sideTab', t);
   return (
@@ -72,8 +79,13 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
           <dt>项目</dt><dd title={project?.path}>{project?.name ?? '—'}</dd>
           <dt>Agent</dt><dd>{agentName}</dd>
           <dt>模型</dt><dd>{modelName ?? '默认'}{config.effort ? `，思考强度 ${config.effort}` : ''}</dd>
+          {profileName ? <><dt>账号</dt><dd>{profileName}</dd></> : null}
+          {config.usage && config.usage.size > 0 ? (
+            <><dt>上下文</dt><dd>已用 {Math.round((config.usage.used / config.usage.size) * 100)}%（{fmtTokens(config.usage.used)} / {fmtTokens(config.usage.size)}）
+              {config.usage.cost ? `，花费 ${config.usage.cost.amount.toFixed(2)} ${config.usage.cost.currency}` : ''}</dd></>
+          ) : null}
           <dt>权限</dt><dd>{permInfo[task.permission].label}</dd>
-          <dt>工作区</dt><dd>独立工作副本在第 1.3 步提供</dd>
+          <dt>工作区</dt><dd>{isRealAgent(task.agent) ? '直接在项目目录里修改；独立工作副本在第 1.3 步提供' : '独立工作副本在第 1.3 步提供'}</dd>
         </dl>
       </div>
 
@@ -82,4 +94,11 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
       </div>
     </aside>
   );
+}
+
+/** 上下文用量：1234 → 1.2k，1234567 → 1.2M */
+function fmtTokens(n: number): string {
+  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
+  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
+  return String(Math.round(n));
 }

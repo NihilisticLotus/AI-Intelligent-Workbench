@@ -1,6 +1,7 @@
 // 对话页：头部（标题、状态、项目、面板开关）+ 对话流 + 输入区 + 右侧面板。
 import { useEffect, useMemo } from 'react';
-import { buildTimeline, latestPlan, sessionConfig } from '../state/core';
+import { blockingError, buildTimeline, latestPlan, sessionConfig, type SessionCfg } from '../state/core';
+import { isRealAgent } from '../lib/agents';
 import { loadHistory, useApp } from '../state/app';
 import { setPref, usePref } from '../state/prefs';
 import { taskStatusText } from '../lib/format';
@@ -25,7 +26,8 @@ export function TaskView({ taskId }: { taskId: string }) {
 
   const items = useMemo(() => buildTimeline(log), [log]);
   const plan = useMemo(() => latestPlan(log), [log]);
-  const config = useMemo(() => (task ? sessionConfig(task, log) : { model: null, effort: null }), [task, log]);
+  const config = useMemo<SessionCfg>(() => (task ? sessionConfig(task, log) : { model: null, effort: null }), [task, log]);
+  const blocking = useMemo(() => (task ? blockingError(task, log)?.data.error ?? null : null), [task, log]);
   const pending = useMemo(() => Object.values(approvals).filter((a) => a.taskId === taskId && a.status === 'pending').sort((a, b) => a.createdAt - b.createdAt), [approvals, taskId]);
 
   if (!task) {
@@ -47,11 +49,19 @@ export function TaskView({ taskId }: { taskId: string }) {
           <button type="button" className="btn ghost icon" aria-label={sideOpen ? '收起右侧面板' : '显示右侧面板'} aria-expanded={sideOpen}
             title="右侧面板 Ctrl+J" onClick={() => setPref('sideOpen', !sideOpen)}><Icon name="panel" /></button>
         </header>
+        {isRealAgent(task.agent) ? (
+          <div className="direct-edit-note" role="note">
+            <Icon name={task.permission === 'readonly' ? 'eye' : 'warn'} />
+            <span>{task.permission === 'readonly'
+              ? '这个任务直接在项目目录里运行。当前是“只读”，Agent 不会修改文件；改成其他权限后会直接修改项目文件，建议用“需审批”。'
+              : `会直接修改项目文件：这个任务直接在项目目录里运行（第 1.3 步起改为独立的工作副本）。建议权限保持“需审批”${task.permission === 'ask' ? '（当前就是）' : ''}。`}</span>
+          </div>
+        ) : null}
         <div className="main-body">
           <section className="content" aria-label="对话">
             {history === 'error' ? <div style={{ padding: '0 var(--sp-5)' }}><ErrorNotice error={{ code: 'client.history', message: '对话记录没有载入完整', hint: '刷新页面再试一次。', actions: [{ label: '刷新页面', action: 'reload' }] }} /></div> : null}
             <Stream task={task} items={items} loading={history !== 'done'} onOpenPlan={() => { setPref('sideOpen', true); setPref('sideTab', 'plan'); }} />
-            <Composer key={task.id} task={task} pending={pending} config={config} />
+            <Composer key={task.id} task={task} pending={pending} config={config} blocking={blocking} />
           </section>
         </div>
       </main>

@@ -3,13 +3,18 @@
 //  1. 同一个 seq 只应用一次（重连补发、历史与实时重叠都不会重复）。
 //  2. 乱序到达按 seq 处理：任务日志始终按 seq 升序；实体（任务、审批、Agent）只接受比上次更新更新的事件。
 //  3. 这里全是纯函数，不碰网络和界面，方便测试。
-import type { AgentInfo, ApiError, Approval, EventEnvelope, EventOf, Task } from '@aic/protocol';
+import type { AgentInfo, ApiError, Approval, EventEnvelope, EventOf, ModelInfo, Task } from '@aic/protocol';
+
+/** 1.2：登录流程的最新状态（agent.login 事件），键为 loginId */
+export type LoginInfo = EventOf<'agent.login'>['data'] & { ts: number };
 
 export interface CoreState {
   tasks: Record<string, Task>;
   approvals: Record<string, Approval>;
   agents: AgentInfo[];
-  /** 实体最后一次被更新时的 seq，键为 't:任务' 'a:审批' 'g:Agent' */
+  /** 登录流程（全局事件），只增不删；界面按 Agent 取最近的一个 */
+  logins: Record<string, LoginInfo>;
+  /** 实体最后一次被更新时的 seq，键为 't:任务' 'a:审批' 'g:Agent' 'l:登录' */
   entitySeq: Record<string, number>;
   /** 每个任务的事件：按 seq 升序、无重复 */
   logs: Record<string, EventEnvelope[]>;
@@ -20,7 +25,7 @@ export interface CoreState {
 }
 
 export const emptyCore = (): CoreState => ({
-  tasks: {}, approvals: {}, agents: [], entitySeq: {}, logs: {}, globalLog: [], wsSeq: 0,
+  tasks: {}, approvals: {}, agents: [], logins: {}, entitySeq: {}, logs: {}, globalLog: [], wsSeq: 0,
 });
 
 /** 按 seq 插入有序数组；seq 已存在时原样返回同一个数组（调用方据此判断是否重复） */
@@ -99,6 +104,12 @@ function applyEntity(s: CoreState, ev: EventEnvelope): CoreState {
       const agents = idx >= 0 ? s.agents.map((x, i) => (i === idx ? ag : x)) : [...s.agents, ag];
       return { ...s, agents, entitySeq: { ...s.entitySeq, [key]: ev.seq } };
     }
+    case 'agent.login': {
+      const d = ev.data;
+      const key = 'l:' + d.loginId;
+      if (!newer(s, key, ev.seq)) return s;
+      return { ...s, logins: { ...s.logins, [d.loginId]: { ...d, ts: ev.ts } }, entitySeq: { ...s.entitySeq, [key]: ev.seq } };
+    }
     default:
       return s;
   }
@@ -161,7 +172,7 @@ export type TimelineItem =
   | { kind: 'tools'; key: string; tools: ToolItem[] }
   | { kind: 'plan'; key: string; items: PlanEntry[]; ts: number }
   | { kind: 'approval'; key: string; approval: Approval; resolved: ResolvedInfo | null }
-  | { kind: 'note'; key: string; text: string; ts: number }
+  | { kind: 'note'; key: string; text: string; ts: number; level?: 'info' | 'warn' }
   /** 会话配置变化（换模型、思考强度）；显示名由界面按 /agents 换算 */
   | { kind: 'config'; key: string; model: string | null; effort: string | null; agent: string | null; ts: number }
   | { kind: 'error'; key: string; error: ApiError; ts: number };
@@ -199,7 +210,13 @@ export function buildTimeline(events: readonly EventEnvelope[]): TimelineItem[] 
   for (const ev of events) {
     switch (ev.type) {
       case 'session.started':
-        agent = ev.data.agent; model = ev.data.model; break;
+        agent = ev.data.agent; model = ev.data.model;
+        // 1.2：恢复原来的会话（H1）时留一行提示；恢复失败、新建会话由 Gateway 发 session.notice 说明
+        if (ev.data.resumed) push({ kind: 'note', key: 'r:' + ev.seq, text: '已恢复原来的会话，Agent 记得之前的对话', ts: ev.ts });
+        break;
+      case 'session.notice':
+        push({ kind: 'note', key: 'n:' + ev.seq, text: ev.data.text, ts: ev.ts, level: ev.data.level });
+        break;
       case 'session.config': {
         // 只在真的变了时留一行提示（有的实现每次开会话都会报一次完整配置）
         const d = ev.data;
@@ -290,13 +307,60 @@ export function latestPlan(events: readonly EventEnvelope[]): EventOf<'plan.upda
   return null;
 }
 
+/** 任务当前会话的配置（切换器、右侧面板用） */
+export interface SessionCfg {
+  model: string | null;
+  effort: string | null;
+  /** 1.2：当前会话给出的可选模型 / 思考强度；undefined 表示会话没给，界面用 /agents 的缓存 */
+  models?: ModelInfo[];
+  efforts?: string[] | null;
+  agentMode?: string | null;
+  /** 1.2：当前会话使用的账号；undefined 表示不知道（用任务上的 profileId） */
+  profileId?: string | null;
+  /** 1.2：上下文用量（usage_update） */
+  usage?: EventOf<'session.usage'>['data'];
+}
+
 /** 任务的当前会话配置（切换器显示用）：从日志里最近的 session.started / session.config 推导，缺省回落到任务本身 */
-export function sessionConfig(task: Task, events: readonly EventEnvelope[]): { model: string | null; effort: string | null } {
-  let model = task.model;
-  let effort = task.effort;
+export function sessionConfig(task: Task, events: readonly EventEnvelope[]): SessionCfg {
+  const cfg: SessionCfg = { model: task.model, effort: task.effort };
+  if (task.profileId !== undefined) cfg.profileId = task.profileId;
   for (const ev of events) {
-    if (ev.type === 'session.started') model = ev.data.model ?? model;
-    if (ev.type === 'session.config') { if (ev.data.model !== undefined) model = ev.data.model; if (ev.data.effort !== undefined) effort = ev.data.effort; }
+    if (ev.type === 'session.started') {
+      cfg.model = ev.data.model ?? cfg.model;
+      if (ev.data.profileId !== undefined) cfg.profileId = ev.data.profileId;
+      // 新会话：上一个会话的用量不再适用
+      delete cfg.usage;
+    }
+    if (ev.type === 'session.config') {
+      const d = ev.data;
+      if (d.model !== undefined) cfg.model = d.model;
+      if (d.effort !== undefined) cfg.effort = d.effort;
+      if (d.models !== undefined) cfg.models = d.models;
+      if (d.efforts !== undefined) cfg.efforts = d.efforts;
+      if (d.agentMode !== undefined) cfg.agentMode = d.agentMode;
+    }
+    if (ev.type === 'session.usage') cfg.usage = ev.data;
   }
-  return { model, effort };
+  return cfg;
+}
+
+/** 让任务停下来的错误（进程退出、登录失效、额度用完等）：最后一条用户消息之后的最后一个 error，任务处于暂停 / 中断 / 失败时才算 */
+export function blockingError(task: Task, events: readonly EventEnvelope[]): EventOf<'error'> | null {
+  if (task.status !== 'paused' && task.status !== 'interrupted' && task.status !== 'failed') return null;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i]!;
+    if (ev.type === 'message.user') return null;
+    if (ev.type === 'error') return ev;
+  }
+  return null;
+}
+
+/** 最后一条用户消息（“再试一次”用） */
+export function lastUserText(events: readonly EventEnvelope[]): string | null {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i]!;
+    if (ev.type === 'message.user') return ev.data.text;
+  }
+  return null;
 }

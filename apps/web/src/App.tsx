@@ -7,7 +7,7 @@ import { navigate, routeStore } from './state/ui';
 import { useStore } from './state/store';
 import { Sidebar } from './components/Sidebar';
 import { TaskView } from './components/TaskView';
-import { Announcer, DialogHost, ErrorNotice, MenuHost, Toasts } from './components/ui';
+import { Announcer, DialogHost, ErrorAlerts, ErrorNotice, MenuHost, Toasts } from './components/ui';
 import { openPalette } from './components/Palette';
 import { openNewTask } from './components/dialogs';
 import { requestFocusApproval } from './components/focus';
@@ -35,6 +35,7 @@ export function App() {
       {bootState === 'ready' ? <Shell /> : null}
       <DialogHost />
       <MenuHost />
+      <ErrorAlerts />
       <Toasts />
       <Announcer />
     </>

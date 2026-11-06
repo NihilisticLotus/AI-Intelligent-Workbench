@@ -7,3 +7,14 @@ let n = 0;
 export function requestFocusApproval(id: string) {
   focusApprovalStore.set(() => ({ id, n: ++n }));
 }
+
+// 1.2：错误按钮“换模型”“换账号”打开输入框的切换器；“测试连接”打开 Agent 页并开始测试
+export type SwitcherSection = 'model' | 'profile';
+export const switcherRequestStore = createStore<{ taskId: string; section: SwitcherSection; n: number } | null>(null);
+export function requestOpenSwitcher(taskId: string, section: SwitcherSection) {
+  switcherRequestStore.set(() => ({ taskId, section, n: ++n }));
+}
+export const agentTestRequestStore = createStore<{ kind: string; n: number } | null>(null);
+export function requestAgentTest(kind: string) {
+  agentTestRequestStore.set(() => ({ kind, n: ++n }));
+}

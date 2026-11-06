@@ -1,19 +1,34 @@
 // 对话流：用户消息、Agent 消息（含思考过程）、工具调用、计划、审批卡片、系统提示。
-import { Fragment, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import type { Approval, Task } from '@aic/protocol';
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import type { ApiError, Approval, Task } from '@aic/protocol';
 import type { PlanEntry, ResolvedInfo, TimelineItem, ToolItem } from '../state/core';
 import { approve, loadDevices, useApp } from '../state/app';
 import { usePref } from '../state/prefs';
 import { useStore } from '../state/store';
 import { clock, durationText, permInfo, toolVerb } from '../lib/format';
-import { AgentBadge, ErrorNotice, toastErrorOf, useAgentName } from './ui';
+import { modelSwitchKind, switchKindText, withDefaultActions } from '../lib/agents';
+import { AgentBadge, ErrorNotice, actionNeedsIdle, toastErrorOf, useAgentName } from './ui';
 import { Icon } from './Icon';
 import { useNow } from './hooks';
 import { focusApprovalStore } from './focus';
 
+const busyStatuses = new Set<Task['status']>(['running', 'waiting', 'queued']);
+
+/**
+ * 任务里的错误：统一格式，actions 渲染成按钮（重新登录、继续、换模型……）；Gateway 没给按钮时按错误码补上默认的。
+ * stale：后面已经有新的消息了，会发消息的按钮（继续、再试一次）不再显示，免得点了旧错误重复发送
+ */
+export function TaskError({ error, task, compact, stale }: { error: ApiError; task: Task; compact?: boolean; stale?: boolean }) {
+  let e = withDefaultActions(error, { taskId: task.id, kind: task.agent });
+  if (stale) e = { ...e, actions: e.actions.filter((a) => !actionNeedsIdle(a.action)) };
+  return <ErrorNotice error={e} compact={compact} ctx={{ taskId: task.id, kind: task.agent, busy: busyStatuses.has(task.status) }} />;
+}
+
 export function Stream({ task, items, loading, onOpenPlan }: { task: Task; items: TimelineItem[]; loading: boolean; onOpenPlan: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  /** 最后一条用户消息的位置：它之后的错误才是“当前的” */
+  const lastUserIdx = useMemo(() => { for (let i = items.length - 1; i >= 0; i--) if (items[i]!.kind === 'user') return i; return -1; }, [items]);
   // 用户在底部附近时，新内容到来自动滚到底；往上翻看时不打扰
   useLayoutEffect(() => {
     const el = ref.current;
@@ -35,30 +50,33 @@ export function Stream({ task, items, loading, onOpenPlan }: { task: Task; items
       <div className="stream-inner">
         {!items.length ? (
           <div className="empty stream-empty">{loading ? <p>正在载入对话…</p> : <><h3>还没有消息</h3><p>在下面的输入框里告诉 Agent 要做什么。</p></>}</div>
-        ) : items.map((it) => <Item key={it.key} it={it} task={task} onOpenPlan={onOpenPlan} />)}
+        ) : items.map((it, i) => <Item key={it.key} it={it} task={task} onOpenPlan={onOpenPlan} live={i > lastUserIdx} />)}
       </div>
     </div>
   );
 }
 
-function Item({ it, task, onOpenPlan }: { it: TimelineItem; task: Task; onOpenPlan: () => void }) {
+function Item({ it, task, onOpenPlan, live }: { it: TimelineItem; task: Task; onOpenPlan: () => void; live: boolean }) {
   switch (it.kind) {
     case 'user': return <UserMsg text={it.text} ts={it.ts} />;
     case 'agent': return <AgentMsg it={it} fallbackAgent={task.agent} />;
     case 'tools': return <div className="tools-group">{it.tools.map((t) => <ToolRow key={t.id} t={t} />)}</div>;
     case 'plan': return <PlanInline items={it.items} onOpen={onOpenPlan} />;
     case 'approval': return <ApprovalCard approval={it.approval} resolvedInLog={it.resolved} task={task} />;
-    case 'note': return <div className="sysnote" role="note"><span>{it.text}</span></div>;
+    case 'note': return <div className={'sysnote' + (it.level === 'warn' ? ' warn' : '')} role="note"><span>{it.level === 'warn' ? <Icon name="warn" size={13} /> : null}{it.text}</span></div>;
     case 'config': return <ConfigNote it={it} fallbackAgent={task.agent} />;
-    case 'error': return <div className="stream-alert"><ErrorNotice error={it.error} /></div>;
+    case 'error': return <div className="stream-alert"><TaskError error={it.error} task={task} stale={!live} /></div>;
   }
 }
 
 function ConfigNote({ it, fallbackAgent }: { it: Extract<TimelineItem, { kind: 'config' }>; fallbackAgent: string }) {
   const kind = it.agent ?? fallbackAgent;
   const modelName = useApp((s) => s.agents.find((a) => a.kind === kind)?.models.find((m) => m.id === it.model)?.name) ?? it.model;
+  const caps = useApp((s) => s.agents.find((a) => a.kind === kind)?.caps);
   const parts = [modelName ? `模型 ${modelName}` : null, it.effort ? `思考强度 ${it.effort}` : null].filter(Boolean);
-  return <div className="sysnote" role="note"><span>已切换为{parts.join('，')}（会话内切换，无损），从下一条消息生效</span></div>;
+  // 只换思考强度总是会话内完成；换模型按 Agent 的能力：会话内切换或恢复会话
+  const how = it.model ? switchKindText[modelSwitchKind(caps)] : switchKindText.in_session;
+  return <div className="sysnote" role="note"><span>已切换为{parts.join('，')}（{how.replace('（', '，').replace('）', '')}），从下一条消息生效</span></div>;
 }
 
 function UserMsg({ text, ts }: { text: string; ts: number }) {

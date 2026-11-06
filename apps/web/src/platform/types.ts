@@ -39,6 +39,13 @@ export interface Platform {
   /** 在 IDE 中打开 */
   readonly canOpenInIde: boolean;
   openInIde(target: { projectId: string; taskId?: string }): Promise<void>;
+  /**
+   * 用系统浏览器打开外部链接（登录授权页等）。浏览器版开新标签页；桌面版交给系统浏览器。
+   * 返回 false 表示没能打开（例如被拦截），界面提示用户复制链接
+   */
+  openExternal(url: string): Promise<boolean>;
+  /** 复制文字到剪贴板；返回 false 表示复制失败（没有权限等） */
+  copyText(text: string): Promise<boolean>;
   /** 本机偏好设置（同步读写，界面启动时就要用） */
   prefs: { get(key: string): string | null; set(key: string, value: string): void };
   secureStorage: SecureStorage;

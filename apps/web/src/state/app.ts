@@ -1,7 +1,8 @@
 // 应用状态与操作：启动、配对、REST 快照、WebSocket 实时事件、各种用户操作。
 // 网页界面也只是 /api/v1 的普通客户端，这里不做任何“只有本机才能用”的捷径。
 import {
-  ErrorCode, type ApiError, type Device, type EventEnvelope, type Group, type Hello, type PermissionLevel,
+  ErrorCode, type AgentKind, type AgentLoginBody, type AgentProfile, type ApiError, type CreateProfileBody, type Device,
+  type EventEnvelope, type Group, type Hello, type PatchAgentBody, type PatchProfileBody, type PermissionLevel,
   type Project, type Task,
 } from '@aic/protocol';
 import { ApiRequestError, HttpClient, toApiError } from '../api/http';
@@ -30,11 +31,13 @@ export interface AppState extends CoreState {
   /** 任务历史是否已经从 REST 取回 */
   history: Record<string, 'loading' | 'done' | 'error'>;
   devices: Device[] | null;
+  /** 1.2：各 Agent 的账号列表（按需从 /profiles 拉取，没拉过时没有这个键） */
+  profiles: Partial<Record<AgentKind, AgentProfile[]>>;
 }
 
 export const appStore = createStore<AppState>({
   ...emptyCore(), boot: 'loading', bootError: null, pairRequested: false, hello: null, conn: 'idle',
-  projects: [], groups: [], history: {}, devices: null,
+  projects: [], groups: [], history: {}, devices: null, profiles: {},
 });
 export const useApp = <S>(sel: (s: AppState) => S) => useStore(appStore, sel);
 const set = (fn: (s: AppState) => AppState) => appStore.set(fn);
@@ -57,9 +60,12 @@ function enqueueEvent(ev: EventEnvelope) {
   queue.push(ev);
   if (flushScheduled) return;
   flushScheduled = true;
-  const run = () => { flushScheduled = false; flushEvents(); };
+  let done = false;
+  const run = () => { if (done) return; done = true; flushScheduled = false; flushEvents(); };
+  // 优先跟随动画帧合并；但窗口被遮挡或最小化时浏览器可能停发动画帧，而 visibilityState 仍是 visible
+  // （联调时实测：审批卡片一直不出现），所以同时设一个 100ms 的兜底，谁先到用谁。
   if (typeof requestAnimationFrame !== 'undefined' && document.visibilityState === 'visible') requestAnimationFrame(run);
-  else setTimeout(run, 16);
+  setTimeout(run, typeof requestAnimationFrame !== 'undefined' && document.visibilityState === 'visible' ? 100 : 16);
 }
 function flushEvents() {
   if (!queue.length) return;
@@ -82,6 +88,18 @@ function sideEffects(before: AppState, batch: EventEnvelope[]) {
       });
     }
     if (ev.type === 'message.done') announce('消息完成');
+    // 1.2：登录完成后刷新账号列表（登录状态变了）；Agent 状态变化时已经拉过的账号列表也刷新一次
+    if (ev.type === 'agent.login') {
+      const d = ev.data;
+      const prev = before.logins[d.loginId];
+      if (prev?.state !== d.state && (d.state === 'succeeded' || d.state === 'failed')) {
+        announce(d.state === 'succeeded' ? '登录成功' : '登录没有完成');
+        if (appStore.get().profiles[d.kind]) void loadProfiles(d.kind).catch(() => { /* 下次再说 */ });
+      }
+    }
+    if (ev.type === 'agent.status' && appStore.get().profiles[ev.data.agent.kind]) {
+      void loadProfiles(ev.data.agent.kind).catch(() => { /* 下次再说 */ });
+    }
   }
 }
 
@@ -191,7 +209,7 @@ async function resetAndRestart() {
   ws = null;
   queue = [];
   firstOnline = true;
-  set((s) => ({ ...s, ...emptyCore(), history: {}, devices: null }));
+  set((s) => ({ ...s, ...emptyCore(), history: {}, devices: null, profiles: {} }));
   await startOrFail();
 }
 
@@ -235,9 +253,9 @@ export async function loadHistory(taskId: string) {
     for (let i = 0; i < 200; i++) {
       const page = await api.taskEvents(taskId, after, 500);
       if (page.items.length) set((s) => ({ ...s, ...applyEvents(s, page.items, 'history') }));
-      const last = page.items[page.items.length - 1];
-      if (!last || page.items.length < 500) break;
-      after = last.seq;
+      // 按原始条数和 seq 翻页：跳过的（不认识的）事件不会让分页卡住
+      if (page.lastSeq === null || page.rawCount < 500) break;
+      after = page.lastSeq;
     }
     set((s) => ({ ...s, history: { ...s.history, [taskId]: 'done' } }));
   } catch (e) {
@@ -252,7 +270,7 @@ export const sendPrompt = (taskId: string, text: string) => (ws ? ws.request('pr
 export const cancelTask = (taskId: string) => (ws ? ws.request('cancel', { taskId }) : notConnected());
 export const approve = (approvalId: string, optionId: string, note?: string) =>
   ws ? ws.request('approve', note ? { approvalId, optionId, note } : { approvalId, optionId }) : notConnected();
-export const switchConfig = (taskId: string, patch: { model?: string; effort?: string }) =>
+export const switchConfig = (taskId: string, patch: { model?: string; effort?: string; profileId?: string }) =>
   ws ? ws.request('switch', { taskId, ...patch }) : notConnected();
 
 // ---------- REST 操作 ----------
@@ -273,7 +291,7 @@ export async function createTask(body: Parameters<HttpClient['createTask']>[0]) 
   putTask(t);
   return t;
 }
-export async function patchTask(id: string, body: { title?: string; groupId?: string | null; permission?: PermissionLevel }) {
+export async function patchTask(id: string, body: { title?: string; groupId?: string | null; permission?: PermissionLevel; profileId?: string | null }) {
   const t = await api.patchTask(id, body);
   putTask(t);
   return t;
@@ -315,6 +333,78 @@ export async function deleteGroup(id: string) {
 export async function refreshAgents() {
   const agents = await api.agents();
   set((s) => ({ ...s, ...applyAgentSnapshot(s, agents, s.wsSeq) }));
+}
+
+// ---------- 1.2：真实 Agent、登录、账号 ----------
+/** 重新检测全部 Agent。连的是还没有 /agents/redetect 的旧版 Gateway 时退回重新读取列表 */
+export async function redetectAgents() {
+  let agents;
+  try {
+    agents = await api.redetectAgents();
+  } catch (e) {
+    if (!(e instanceof ApiRequestError && e.status === 404)) throw e;
+    agents = await api.agents();
+  }
+  set((s) => ({ ...s, ...applyAgentSnapshot(s, agents, s.wsSeq) }));
+  // 登录状态可能变了：已经拉过的账号列表一并刷新
+  await Promise.all(Object.keys(appStore.get().profiles).map((k) => loadProfiles(k as AgentKind).catch(() => undefined)));
+}
+export async function patchAgent(kind: AgentKind, body: PatchAgentBody) {
+  const a = await api.patchAgent(kind, body);
+  if (a) {
+    set((s) => ({ ...s, agents: s.agents.map((x) => (x.kind === kind ? a : x)) }));
+  } else {
+    await refreshAgents();
+  }
+}
+export async function loadProfiles(kind: AgentKind) {
+  const list = await api.profiles(kind);
+  set((s) => ({ ...s, profiles: { ...s.profiles, [kind]: list.filter((p) => p.agent === kind) } }));
+  return list;
+}
+const putProfile = (p: AgentProfile) => set((s) => {
+  let list = upsert(s.profiles[p.agent] ?? [], p);
+  // 设为默认后，同一个 Agent 的其他账号不再是默认
+  if (p.isDefault) list = list.map((x) => (x.id !== p.id && x.isDefault ? { ...x, isDefault: false } : x));
+  return { ...s, profiles: { ...s.profiles, [p.agent]: list } };
+});
+/** 账号变了：AgentInfo.profiles（卡片、新建任务、切换器用的账号概要）以服务端为准，重新读一次 /agents（只读缓存，不触发探测） */
+const refreshAgentsQuietly = () => { void refreshAgents().catch(() => { /* 等下一次 agent.status */ }); };
+export async function createProfile(body: CreateProfileBody) {
+  const p = await api.createProfile(body);
+  putProfile(p);
+  refreshAgentsQuietly();
+  return p;
+}
+export async function patchProfile(id: string, body: PatchProfileBody) {
+  const p = await api.patchProfile(id, body);
+  putProfile(p);
+  // 默认账号变了：卡片上的账号概要由 agent.status 更新，这里顺手拉一次列表保证一致
+  if (body.isDefault) await loadProfiles(p.agent).catch(() => undefined);
+  if (body.isDefault || body.name !== undefined) refreshAgentsQuietly();
+  return p;
+}
+/** 返回 Gateway 给的 keptDir：账号的独立配置目录是否保留在磁盘上 */
+export async function deleteProfile(p: AgentProfile): Promise<{ keptDir: boolean }> {
+  const r = await api.deleteProfile(p.id);
+  set((s) => ({ ...s, profiles: { ...s.profiles, [p.agent]: (s.profiles[p.agent] ?? []).filter((x) => x.id !== p.id) } }));
+  refreshAgentsQuietly();
+  return { keptDir: r.keptDir };
+}
+export async function refreshProfileModels(id: string) {
+  const p = await api.refreshProfileModels(id);
+  putProfile(p);
+  return p;
+}
+export const startLogin = (kind: AgentKind, body: AgentLoginBody) => api.startLogin(kind, body);
+export const cancelLogin = (kind: AgentKind, loginId: string) => api.cancelLogin(kind, loginId);
+export const sendLoginCode = (kind: AgentKind, loginId: string, code: string) => api.sendLoginCode(kind, loginId, code);
+export async function testAgent(kind: AgentKind, body: { profileId?: string; sendMessage?: boolean }) {
+  const r = await api.testAgent(kind, body);
+  // 测试结果会写回账号的 lastTestAt / lastTestOk；测试时读到的模型列表会进能力缓存，卡片也刷新一次
+  if (appStore.get().profiles[kind]) void loadProfiles(kind).catch(() => undefined);
+  refreshAgentsQuietly();
+  return r;
 }
 export async function loadDevices() {
   const devices = await api.devices();

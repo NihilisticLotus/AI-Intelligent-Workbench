@@ -68,6 +68,35 @@ const MIGRATIONS: string[] = [
   UPDATE devices SET revoked = 1 WHERE kind = 'browser' AND revoked = 0;
   INSERT INTO audit_log (device_id, action, detail, ts) VALUES (NULL, 'migration.v2', '作废只靠 Cookie 的浏览器设备', CAST(strftime('%s','now') AS INTEGER) * 1000);
   `,
+  // v3：1.2 接入真实 Agent（phase-1.md 6.4.1、6.2.4）：账号、加密的密钥、Agent 进程登记、能力缓存
+  `
+  CREATE TABLE agent_profiles (
+    id TEXT PRIMARY KEY, agent TEXT NOT NULL, name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    config_dir TEXT NOT NULL,
+    base_url TEXT,
+    auth_header TEXT,
+    models_json TEXT,
+    secret_id TEXT,
+    is_default INTEGER NOT NULL DEFAULT 0,
+    last_test_at INTEGER, last_test_ok INTEGER,
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  );
+  CREATE UNIQUE INDEX idx_profiles_default ON agent_profiles(agent) WHERE is_default = 1;
+  CREATE TABLE secrets (
+    id TEXT PRIMARY KEY, scheme TEXT NOT NULL,
+    blob TEXT NOT NULL,
+    hint TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  );
+  CREATE TABLE agent_processes (pid INTEGER NOT NULL, created_at TEXT NOT NULL, agent TEXT NOT NULL, session_id TEXT);
+  CREATE TABLE agent_caps (
+    agent TEXT NOT NULL, profile_id TEXT NOT NULL, adapter_version TEXT, engine_version TEXT,
+    caps_json TEXT, catalog_json TEXT, commands_json TEXT, probed_at INTEGER NOT NULL,
+    PRIMARY KEY (agent, profile_id)
+  );
+  ALTER TABLE tasks ADD COLUMN profile_id TEXT;
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

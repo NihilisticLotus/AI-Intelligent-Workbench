@@ -22,7 +22,7 @@ export function taskRoutes(s: Services) {
     return c.json({ items, nextCursor: items.length === q.limit && last ? String(last.seq) : null });
   });
 
-  r.get('/agents', async (c) => c.json({ items: await s.agents.list(), nextCursor: null }));
+  // GET /agents 1.2 起在 http/agents.ts（带缓存、账号、能力）
 
   r.get('/approvals', (c) => c.json({ items: s.tasks.listApprovals(parseQuery(c, ApprovalsQuery).status), nextCursor: null }));
 

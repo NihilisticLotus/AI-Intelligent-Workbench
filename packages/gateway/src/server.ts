@@ -4,11 +4,16 @@ import type { Server } from 'node:http';
 import { hostname } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createAdaptorServer } from '@hono/node-server';
+import { createAdapters, type AcpRuntime, type AcpTimeouts, type AgentAdapter, type LogFn } from '@aic/adapters';
 import { AgentRegistry } from './agents/registry';
 import { createFakeAdapter } from './agents/fake';
+import { AgentService } from './agents/service';
+import { ProcessRegistry } from './processes';
+import { ProfileService } from './profiles';
+import { defaultSecretStore, SecretService, type SecretStore } from './secrets';
 import { AuthService, type AuthOptions } from './auth';
 import { openDb } from './db';
 import { acquireInstanceLock, AlreadyRunningError, probeGateway } from './instance-lock';
@@ -18,9 +23,30 @@ import { GroupService, ProjectService } from './projects';
 import type { Services } from './services';
 import { TaskService } from './tasks';
 import { newId } from './util';
+
+const delay = (ms: number) => new Promise<void>((r) => { const t = setTimeout(r, ms); t.unref?.(); });
 import { attachWs } from './ws';
 
 export const VERSION = '0.1.0';
+
+/**
+ * Agent 日志：写进数据目录的 logs/agents.log（stderr 已脱敏）；info 及以上同时打印到终端。
+ * 超过 10MB 时轮换成 agents.log.1。
+ */
+function agentLogger(dataDir: string, print: (m: string) => void): LogFn {
+  const dir = path.join(dataDir, 'logs');
+  const file = path.join(dir, 'agents.log');
+  try { mkdirSync(dir, { recursive: true }); } catch { /* 下面写入时再报 */ }
+  let n = 0;
+  return (level, msg) => {
+    const line = `${new Date().toISOString()} ${level.toUpperCase()} ${msg}\n`;
+    try {
+      if (++n % 200 === 0 && statSync(file).size > 10 * 1024 * 1024) renameSync(file, `${file}.1`);
+      appendFileSync(file, line);
+    } catch { /* 日志写不进去不影响运行 */ }
+    if (level !== 'debug' || process.env.AIC_DEBUG === '1') print(msg);
+  };
+}
 export const DEFAULT_PORT = 17890;
 const PORT_ATTEMPTS = 10;
 const HOST = '127.0.0.1';
@@ -45,6 +71,19 @@ export interface GatewayOptions {
   approvalTimeoutMs?: number;
   /** 演示 Agent 的节奏倍率，测试里设为 0 */
   fakeSpeed?: number;
+  /**
+   * 1.2：是否注册真实 Agent（Claude Code、Codex、CodeBuddy）。默认注册；设 AIC_NO_REAL_AGENTS=1 或传 false 时只有演示 Agent。
+   * 测试里默认不注册，不启动任何真实 Agent（phase-1.md 6.8）。
+   */
+  realAgents?: boolean;
+  /** 额外注册的适配器（测试里注入接假 ACP Agent 的适配器） */
+  adapters?: AgentAdapter[] | ((rt: AcpRuntime) => AgentAdapter[]);
+  /** 密钥存储；默认 Windows 用 DPAPI，其他平台不支持 */
+  secretStore?: SecretStore;
+  /** 会话空闲多久后关闭 Agent 进程，默认 30 分钟 */
+  idleTimeoutMs?: number;
+  /** ACP 各阶段超时（测试里改小） */
+  agentTimeouts?: Partial<AcpTimeouts>;
   log?: (msg: string) => void;
 }
 
@@ -52,7 +91,11 @@ export interface Gateway {
   port: number;
   url: string;
   services: Services;
-  close(): Promise<void>;
+  /**
+   * 关闭。deadlineMs：给“正常收尾”（停止回合、关闭会话）的时间上限，到点后先同步结束所有 Agent 进程树，
+   * 再写库收尾。关闭控制台窗口（SIGHUP）时系统约 10 秒后强制结束 Node，必须先保证进程树被结束。
+   */
+  close(opts?: { deadlineMs?: number }): Promise<void>;
 }
 
 export const DEV_CODE_FILE = 'dev-pairing-code.txt';
@@ -127,15 +170,39 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
     instanceId,
   });
   const events = new EventStore(db, new EventBus());
+  const agentLog = agentLogger(dataDir, log);
+  const processes = new ProcessRegistry(db, log);
   const agents = new AgentRegistry();
-  agents.register(createFakeAdapter({ speed: opts.fakeSpeed ?? 1 }));
-  const tasks = new TaskService(db, events, agents, opts.approvalTimeoutMs !== undefined ? { approvalTimeoutMs: opts.approvalTimeoutMs } : {});
+  const real = opts.realAgents ?? process.env.AIC_NO_REAL_AGENTS !== '1';
+  const rt: AcpRuntime = { log: agentLog, tracker: processes, ...(opts.agentTimeouts ? { timeouts: opts.agentTimeouts } : {}) };
+  if (real) for (const a of createAdapters({ ...rt, fakeSpeed: opts.fakeSpeed ?? 1 })) agents.register(a);
+  else agents.register(createFakeAdapter({ speed: opts.fakeSpeed ?? 1 }));
+  for (const a of typeof opts.adapters === 'function' ? opts.adapters(rt) : opts.adapters ?? []) agents.register(a);
+  const audit = (deviceId: string | null, action: string, detail: string) => {
+    try { db.run('INSERT INTO audit_log (device_id, action, detail, ts) VALUES (?, ?, ?, ?)', deviceId, action, detail, Date.now()); } catch { /* 忽略 */ }
+  };
+  const secrets = new SecretService(db, opts.secretStore ?? defaultSecretStore(db));
+  const agentSvc = new AgentService(db, events, agents, { dataDir, log, audit });
+  const profiles = new ProfileService(db, secrets, {
+    dataDir, audit,
+    adapter: (k) => agents.get(k),
+    loggedIn: (id) => agentSvc.profileLoggedIn(id),
+  });
+  agentSvc.attach(profiles);
+  const tasks = new TaskService(db, events, agents, {
+    ...(opts.approvalTimeoutMs !== undefined ? { approvalTimeoutMs: opts.approvalTimeoutMs } : {}),
+    ...(opts.idleTimeoutMs !== undefined ? { idleTimeoutMs: opts.idleTimeoutMs } : {}),
+    log,
+  });
+  tasks.agentSvc = agentSvc;
   tasks.recoverOnStartup();
+  // 上次遗留的 Agent 进程（核对启动时间后结束进程树）；不在启动时预先拉起 Agent
+  void processes.cleanupOrphans().catch((e) => log(`清理遗留的 Agent 进程失败：${String(e)}`));
   const projects = new ProjectService(db);
   const groups = new GroupService(db, tasks);
 
   const services: Services = {
-    db, auth, events, agents, projects, groups, tasks,
+    db, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks,
     port: () => port,
     machine: { id: machineId, name: hostname(), os: process.platform === 'win32' ? 'windows' : process.platform },
     version: VERSION,
@@ -156,6 +223,8 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   }
   auth.setPort(port);
   lock.setPort(port);
+  // 检测全部 Agent（后台进行；GET /agents 会等它完成）
+  void agentSvc.startup().catch((e) => log(`检测 Agent 失败：${String(e)}`));
   const url = `http://${HOST}:${port}/`;
 
   const shouldOpen = opts.openBrowser ?? process.env.AIC_NO_BROWSER !== '1';
@@ -171,11 +240,22 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   let closed = false;
   return {
     port, url, services,
-    async close() {
+    async close(opts: { deadlineMs?: number } = {}) {
       if (closed) return;
       closed = true;
       ws.close();
-      await tasks.shutdown();
+      agentSvc.shutdown();
+      const graceful = tasks.shutdown();
+      if (opts.deadlineMs !== undefined) {
+        // 两段式：正常收尾最多等 deadlineMs，到点就先同步结束所有 Agent 进程树，再给写库收尾一点时间
+        const timedOut = await Promise.race([graceful.then(() => false), delay(opts.deadlineMs).then(() => true)]);
+        processes.killAllSync();
+        if (timedOut) await Promise.race([graceful, delay(2000)]);
+      } else {
+        await graceful;
+      }
+      // 兜底：还活着的 Agent 进程一律结束进程树
+      processes.killAllSync();
       await new Promise<void>((r) => { server.close(() => r()); server.closeAllConnections?.(); });
       db.close();
       if (dev) rmSync(devCodeFile, { force: true });
@@ -225,17 +305,19 @@ async function main() {
   console.log(`AI Console 已启动：${gw.url}`);
   console.log('浏览器没有自动打开的话，请手动打开上面的地址。关闭这个窗口即可退出。');
   let stopping = false;
-  const stop = async () => {
+  const stop = async (deadlineMs: number) => {
     if (stopping) return;
     stopping = true;
     console.log('正在退出……');
-    await gw.close();
+    await gw.close({ deadlineMs });
     process.exit(0);
   };
-  process.on('SIGINT', stop);
-  process.on('SIGTERM', stop);
-  // Windows 上关闭控制台窗口时 Node 收到的是 SIGHUP，几秒后进程会被强制结束：同样要正常收尾
-  process.on('SIGHUP', stop);
+  // 都设上限：Agent 卡在启动或取消无响应时，先结束进程树，不至于等很久
+  process.on('SIGINT', () => void stop(8000));
+  process.on('SIGTERM', () => void stop(5000));
+  // Windows 上关闭控制台窗口时 Node 收到的是 SIGHUP，约 10 秒后进程会被强制结束：
+  // 先在 3 秒内结束所有 Agent 进程树（否则孙进程 claude.exe / codex app-server 会留下来），再写库收尾
+  process.on('SIGHUP', () => void stop(3000));
 }
 
 const isEntry = (() => {

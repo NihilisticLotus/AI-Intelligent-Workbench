@@ -10,5 +10,10 @@
     "test": "npm test --workspaces --if-present",
     "typecheck": "npm run typecheck --workspaces --if-present"
   },
-  "engines": { "node": ">=24" }
+  "engines": { "node": ">=24" },
+  "overrides": {
+    "@anthropic-ai/claude-agent-sdk": "0.3.316",
+    "@anthropic-ai/claude-agent-sdk-win32-x64": "0.3.316",
+    "@openai/codex": "0.165.0"
+  }
 }

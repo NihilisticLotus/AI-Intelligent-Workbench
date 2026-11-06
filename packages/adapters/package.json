@@ -1,0 +1,23 @@
+{
+  "name": "@aic/adapters",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts" },
+  "scripts": {
+    "test": "vitest run",
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@agentclientprotocol/claude-agent-acp": "0.100.0",
+    "@agentclientprotocol/codex-acp": "2.5.0",
+    "@agentclientprotocol/sdk": "2.4.0",
+    "@aic/protocol": "0.1.0",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "typescript": "5.9.3",
+    "vitest": "5.1.0"
+  }
+}

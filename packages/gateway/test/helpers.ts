@@ -56,7 +56,8 @@ export async function startGw(extra: Partial<GatewayOptions> = {}, dataDir?: str
   const dir = dataDir ?? mkdtempSync(path.join(tmpdir(), 'aic-test-'));
   let last = '';
   const gw = await createGateway({
-    dataDir: dir, port: 0, openBrowser: false, fakeSpeed: 0, log: () => {},
+    // 默认测试不注册真实 Agent，不启动任何真实 Agent 进程（phase-1.md 6.8）
+    dataDir: dir, port: 0, openBrowser: false, fakeSpeed: 0, log: () => {}, realAgents: false,
     webDist: path.join(dir, 'no-web'),
     ...extra,
     pairing: {

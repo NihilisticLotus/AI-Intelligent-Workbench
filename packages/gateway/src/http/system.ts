@@ -17,7 +17,8 @@ export function systemRoutes(s: Services) {
       protocol: PROTOCOL_VERSION,
       features: {
         [FeatureKey.FakeAgent]: true,
-        [FeatureKey.RealAgents]: false,
+        [FeatureKey.RealAgents]: true,
+        [FeatureKey.Profiles]: true,
         [FeatureKey.Approvals]: true,
         [FeatureKey.Groups]: true,
         [FeatureKey.FsBrowse]: true,

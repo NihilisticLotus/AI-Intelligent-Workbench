@@ -45,6 +45,51 @@ export const ErrorCode = {
   RateLimited: 'request.rate_limited',
   PayloadTooLarge: 'request.too_large',
   InvalidState: 'task.invalid_state',         // 任务当前状态不允许该操作（如正在执行时再次发送）
+  // 1.2 新增（phase-1.md 6.6.3）
+  AgentAuthRequired: 'agent.auth_required',   // 登录失效：任务暂停，按钮“去登录”
+  AgentQuotaExceeded: 'agent.quota_exceeded', // 额度或限流：任务暂停，按钮“换模型”“换账号”
+  AgentCrashed: 'agent.crashed',              // Agent 进程意外退出：按钮“继续”
+  AgentStartTimeout: 'agent.start_timeout',   // 启动或握手超时：按钮“再试一次”“测试连接”
+  AgentProtocolError: 'agent.protocol_error',
+  AgentFailed: 'agent.failed',                // 1.1 已在用，这里补上常量
+  PermissionLevelUnavailable: 'permission.level_unavailable', // 真实 Agent 本步只开放“只读”“需审批”
+  ProfileInUse: 'profile.in_use',
+  SecretUnavailable: 'secret.unavailable',
+  SessionNotRecoverable: 'session.not_recoverable',
+} as const;
+
+/**
+ * 1.2 新增：ApiError.actions[].action 的已知取值，界面据此渲染成可以直接点的按钮。
+ * 命名沿用 1.1 已经在用的 'agents.login'、'task.cancel'、'pairing.start'。
+ * args 里常见的键：kind（AgentKind）、profileId、taskId。客户端遇到不认识的 action 提示刷新界面。
+ */
+export const ErrorActionKey = {
+  Retry: 'retry',
+  Reload: 'reload',
+  OpenAgents: 'open_agents',
+  OpenSettings: 'open_settings',
+  PairingStart: 'pairing.start',
+  /** 去登录 / 重新登录：打开 Agent 页对应的 Agent（args.kind）和账号（args.profileId） */
+  Login: 'agents.login',
+  /** 测试连接（args.kind） */
+  TestAgent: 'agents.test',
+  /**
+   * 确认后强制登录（CodeBuddy 已登录时换账号会同时退出 WorkBuddy 里的账号）。
+   * args：kind、methodId、profileId（可选）。客户端先二次确认，再带 force: true 调 POST /agents/:kind/login
+   */
+  LoginForce: 'agents.login_force',
+  /** 停止（args.taskId） */
+  Cancel: 'task.cancel',
+  /** 继续：发一条“继续”，Gateway 收到消息时自动恢复会话（args.taskId） */
+  Continue: 'task.continue',
+  /** 恢复会话：同 Continue，文案不同 */
+  Resume: 'task.resume',
+  /** 再试一次：把最后一条消息重新发一遍（启动超时等，args.taskId） */
+  RetryTask: 'task.retry',
+  /** 换模型：打开输入框的切换器（args.taskId） */
+  SwitchModel: 'task.switch_model',
+  /** 换账号：打开切换器的账号一栏；没有别的账号时去 Agent 页添加（args.taskId） */
+  SwitchProfile: 'task.switch_profile',
 } as const;
 
 // ---------- 握手 ----------
@@ -78,16 +123,75 @@ export const Task = z.object({
   agent: AgentKind, model: z.string().nullable(), effort: z.string().nullable(),
   autoAllowLowRisk: z.boolean(), autoMergeOnPass: z.boolean(),
   lastActivityAt: Ts, createdAt: Ts, updatedAt: Ts,
+  /** 1.2 新增：任务使用的账号；空 = 该 Agent 的默认账号 */
+  profileId: Id.nullable().optional(),
 });
 export type Task = z.infer<typeof Task>;
 
 export const ModelInfo = z.object({ id: z.string(), name: z.string(), contextWindow: z.number().int().nullable() });
+export type ModelInfo = z.infer<typeof ModelInfo>;
+
+// ---------- 1.2 新增：Agent 的登录方式、能力、账号概要（phase-1.md 6.6.1） ----------
+/** 归一化后的登录方式：browser 在浏览器里授权；apiKey 用账号配置里的密钥；external_app 去别的应用里登录（WorkBuddy） */
+export const AuthMethod = z.object({
+  id: z.string(), name: z.string(), description: z.string().nullable(),
+  flow: z.enum(['browser', 'apiKey', 'external_app']),
+});
+export type AuthMethod = z.infer<typeof AuthMethod>;
+/** 换模型的方式：configOption / unstableSetModel 为会话内切换（H0）；none 要结束进程再恢复会话（H1） */
+export const ModelSwitch = z.enum(['configOption', 'unstableSetModel', 'none']);
+export type ModelSwitch = z.infer<typeof ModelSwitch>;
+export const AgentCaps = z.object({
+  loadSession: z.boolean(), resume: z.boolean(), close: z.boolean(),
+  modelSwitch: ModelSwitch, thoughts: z.boolean(),
+  modes: z.array(z.object({ id: z.string(), name: z.string() })),
+  prompt: z.object({ image: z.boolean(), audio: z.boolean(), embeddedContext: z.boolean() }),
+});
+export type AgentCaps = z.infer<typeof AgentCaps>;
+export const ProfileKind = z.enum(['subscription', 'apiKey', 'customEndpoint']);
+export type ProfileKind = z.infer<typeof ProfileKind>;
+/** AgentInfo 里的账号概要（卡片上显示用；完整信息走 /profiles） */
+export const ProfileSummary = z.object({
+  id: Id, name: z.string(), kind: ProfileKind, isDefault: z.boolean(),
+  loggedIn: z.boolean().nullable(),
+  /**
+   * 1.2 审查后新增：会话存在哪（不透明的键，客户端只比较是否相等）。
+   * 和任务当前账号的值相同 → 换账号后能恢复原来的会话；不同 → 需要交接（第 1.4 步），Gateway 会拒绝
+   */
+  sessionStore: z.string().optional(),
+});
+export type ProfileSummary = z.infer<typeof ProfileSummary>;
+
 export const AgentInfo = z.object({
   kind: AgentKind, displayName: z.string(),
   status: z.enum(['ready', 'needs_login', 'not_installed', 'error', 'disabled']),
   version: z.string().nullable(), verified: z.boolean(),
   models: z.array(ModelInfo), efforts: z.array(z.string()).nullable(),
   message: z.string().nullable(),
+  // 1.2 新增（全部可选，老客户端可以忽略）
+  adapterVersion: z.string().nullable().optional(),
+  engineVersion: z.string().nullable().optional(),
+  engineSource: z.enum(['bundled', 'local', 'app']).optional(),
+  /** 只用于展示的文本，客户端不解析、不拼接 */
+  engineLocation: z.string().nullable().optional(),
+  authMethods: z.array(AuthMethod).optional(),
+  caps: AgentCaps.optional(),
+  /** 模型列表从哪来：session 当前会话、cache 能力缓存、manual 手填、none 还没有（首次使用后显示） */
+  modelsSource: z.enum(['session', 'cache', 'manual', 'none']).optional(),
+  runningSessions: z.number().int().nonnegative().optional(),
+  concurrencyLimit: z.number().int().positive().optional(),
+  checkedAt: Ts.optional(),
+  profiles: z.array(ProfileSummary).optional(),
+  /** 1.2 审查后新增：这个 Agent 现在能选的权限级别（Gateway 按它校验）；没有这个字段时客户端退回自己的默认规则 */
+  permissionLevels: z.array(PermissionLevel).optional(),
+  /** 新任务默认用的模型、思考强度（Agent 设置）；null 表示用 Agent 自己的默认值 */
+  defaultModel: z.string().nullable().optional(),
+  defaultEffort: z.string().nullable().optional(),
+  /**
+   * 工作区里的 Agent 设置文件（hooks、自动允许规则，例如 .claude/settings.json）是否生效：
+   * ignored 不加载；trusted_only 只在用户在 Agent 里信任过的项目加载；loaded 会加载
+   */
+  workspaceConfig: z.enum(['ignored', 'trusted_only', 'loaded']).optional(),
 });
 export type AgentInfo = z.infer<typeof AgentInfo>;
 
@@ -113,7 +217,11 @@ export const ToolKind = z.enum(['read', 'search', 'edit', 'create', 'delete', 'e
 export const EventEnvelope = z.discriminatedUnion('type', [
   ev('task.created', z.object({ task: Task })),
   ev('task.updated', z.object({ task: Task })),
-  ev('session.started', z.object({ agent: AgentKind, model: z.string().nullable() })),
+  ev('session.started', z.object({
+    agent: AgentKind, model: z.string().nullable(),
+    /** 1.2 新增：会话使用的账号；resumed 表示这次是恢复原来的会话（H1） */
+    profileId: Id.nullable().optional(), resumed: z.boolean().optional(),
+  })),
   ev('session.ended', z.object({ reason: z.string() })),
   ev('message.user', z.object({ messageId: Id, text: z.string() })),
   ev('message.delta', z.object({ messageId: Id, text: z.string() })),
@@ -130,9 +238,28 @@ export const EventEnvelope = z.discriminatedUnion('type', [
     /** 1.1 新增：处理设备的名称 */
     decidedByName: z.string().nullable().optional(),
   })),
-  ev('session.config', z.object({ model: z.string().nullable(), effort: z.string().nullable(), permission: PermissionLevel.optional() })),
+  ev('session.config', z.object({
+    model: z.string().nullable(), effort: z.string().nullable(), permission: PermissionLevel.optional(),
+    /** 1.2 新增：Agent 自己的模式 id；当前会话可选的模型和思考强度（efforts 为 null 表示不能调节） */
+    agentMode: z.string().nullable().optional(),
+    models: z.array(ModelInfo).optional(),
+    efforts: z.array(z.string()).nullable().optional(),
+  })),
   ev('agent.status', z.object({ agent: AgentInfo })),
   ev('error', z.object({ error: ApiError })),
+  // 1.2 新增
+  /** 登录进度（全局事件，taskId 为空）。authUrl 只放过了白名单的授权链接 */
+  ev('agent.login', z.object({
+    loginId: Id, kind: AgentKind, profileId: Id.nullable().optional(),
+    state: z.enum(['started', 'waiting_browser', 'need_code', 'succeeded', 'failed', 'cancelled']),
+    authUrl: z.string().optional(), message: z.string().optional(),
+  })),
+  ev('session.usage', z.object({
+    used: z.number().nonnegative(), size: z.number().nonnegative(),
+    cost: z.object({ amount: z.number(), currency: z.string() }).optional(),
+  })),
+  /** 降级、恢复失败、强度被重置等需要告诉用户的情况：对话里的灰色提示行 */
+  ev('session.notice', z.object({ level: z.enum(['info', 'warn']), text: z.string() })),
 ]);
 export type EventEnvelope = z.infer<typeof EventEnvelope>;
 export type EventType = EventEnvelope['type'];
@@ -153,7 +280,11 @@ export const ClientOp = z.discriminatedUnion('op', [
   op('prompt', z.object({ taskId: Id, text: z.string().min(1).max(100_000) })),
   op('cancel', z.object({ taskId: Id })),
   op('approve', z.object({ approvalId: Id, optionId: z.string(), note: z.string().max(2000).optional() })),
-  op('switch', z.object({ taskId: Id, agent: AgentKind.optional(), model: z.string().optional(), effort: z.string().optional() })),
+  op('switch', z.object({
+    taskId: Id, agent: AgentKind.optional(), model: z.string().optional(), effort: z.string().optional(),
+    /** 1.2 新增：同一 Agent 换账号 */
+    profileId: Id.optional(),
+  })),
   op('ping', z.object({})),
 ]);
 export type ClientOp = z.infer<typeof ClientOp>;
@@ -179,10 +310,14 @@ export const CreateTaskBody = z.object({
   projectId: Id, groupId: Id.nullable().optional(), prompt: z.string().min(1).max(100_000),
   title: z.string().max(200).optional(), agent: AgentKind, model: z.string().nullable().optional(),
   effort: z.string().nullable().optional(), permission: PermissionLevel.default('ask'),
+  /** 1.2 新增 */
+  profileId: Id.nullable().optional(),
 });
 export const PatchTaskBody = z.object({
   title: z.string().max(200).optional(), groupId: Id.nullable().optional(), permission: PermissionLevel.optional(),
   autoAllowLowRisk: z.boolean().optional(), autoMergeOnPass: z.boolean().optional(),
+  /** 1.2 新增 */
+  profileId: Id.nullable().optional(),
 });
 export const CreateGroupBody = z.object({ name: z.string().min(1).max(100) });
 export const PatchGroupBody = z.object({ name: z.string().min(1).max(100).optional(), ord: z.number().int().optional() });
@@ -228,6 +363,8 @@ export const FeatureKey = {
   PageAutomations: 'pages.automations',
   PageMonitor: 'pages.monitor',
   PageCapabilities: 'pages.capabilities',
+  // 1.2 新增
+  Profiles: 'agents.profiles',       // 账号配置（订阅登录 / API Key / 自定义地址）
 } as const;
 
 // ---------- 设备与配对 ----------
@@ -316,3 +453,99 @@ export const PingResult = z.object({});
 
 /** WebSocket 关闭码：4401 令牌失效或设备被吊销（客户端应回到配对页，不要重连） */
 export const WS_CLOSE_UNAUTHORIZED = 4401;
+
+// ======================================================================
+// 1.2 新增（接入真实 Agent，phase-1.md 6.6）。只加不改，保持向后兼容。
+// ======================================================================
+
+// ---------- 账号（不含密钥明文） ----------
+export const AuthHeader = z.enum(['x-api-key', 'bearer']);
+export const AgentProfile = z.object({
+  id: Id, agent: AgentKind, name: z.string(), kind: ProfileKind,
+  /** shared：用 Agent 默认的配置目录（本机已有的登录）；isolated：AI Console 单独的目录 */
+  configDir: z.enum(['shared', 'isolated']),
+  baseUrl: z.string().nullable(), authHeader: AuthHeader.nullable(),
+  models: z.array(ModelInfo),
+  /** 接口永远不返回密钥明文：只有是否已保存和末 4 位 */
+  hasSecret: z.boolean(), secretHint: z.string().nullable(),
+  isDefault: z.boolean(), loggedIn: z.boolean().nullable(),
+  /** 只有源码依据、没有实测的组合（CodeBuddy 的 API Key 和自定义地址），界面标“实验” */
+  experimental: z.boolean(),
+  lastTestAt: Ts.nullable(), lastTestOk: z.boolean().nullable(),
+  createdAt: Ts, updatedAt: Ts,
+});
+export type AgentProfile = z.infer<typeof AgentProfile>;
+
+/** baseUrl：https://，或者 http:// 加 127.0.0.1 / localhost */
+export const isAllowedBaseUrl = (s: string): boolean => {
+  try {
+    const u = new URL(s);
+    if (u.protocol === 'https:') return true;
+    return u.protocol === 'http:' && (u.hostname === '127.0.0.1' || u.hostname === 'localhost');
+  } catch { return false; }
+};
+const BaseUrl = z.string().max(500).refine(isAllowedBaseUrl, { message: '地址必须是 https://，或者 http://127.0.0.1 / http://localhost' });
+
+export const CreateProfileBody = z.object({
+  agent: AgentKind, name: z.string().trim().min(1).max(100), kind: ProfileKind,
+  configDir: z.enum(['shared', 'isolated']).optional(),
+  baseUrl: BaseUrl.optional(), authHeader: AuthHeader.optional(),
+  /** 只在请求体里出现一次，Gateway 收到后立即加密，不进日志 */
+  apiKey: z.string().min(1).max(4000).optional(),
+  models: z.array(ModelInfo).max(200).optional(),
+});
+export type CreateProfileBody = z.infer<typeof CreateProfileBody>;
+export const PatchProfileBody = z.object({
+  name: z.string().trim().min(1).max(100).optional(),
+  configDir: z.enum(['shared', 'isolated']).optional(),
+  baseUrl: BaseUrl.optional(), authHeader: AuthHeader.optional(),
+  /** 传入就整个替换 */
+  apiKey: z.string().min(1).max(4000).optional(),
+  models: z.array(ModelInfo).max(200).optional(),
+  isDefault: z.literal(true).optional(),
+});
+export type PatchProfileBody = z.infer<typeof PatchProfileBody>;
+export const ProfilesQuery = z.object({ agent: AgentKind.optional() });
+
+// ---------- 登录、测试、Agent 设置 ----------
+export const AgentLoginBody = z.object({
+  profileId: Id.optional(),
+  /** AgentInfo.authMethods 里的 id；CodeBuddy 另有 workbuddy-app（启动 WorkBuddy） */
+  methodId: z.string().min(1).max(100),
+  /** CodeBuddy 已登录时必须带上（会同时退出 WorkBuddy 里的账号） */
+  force: z.boolean().optional(),
+});
+export type AgentLoginBody = z.infer<typeof AgentLoginBody>;
+export const AgentLoginResult = z.object({ loginId: Id });
+export const AgentLoginCodeBody = z.object({ code: z.string().trim().min(1).max(2000) });
+export const WORKBUDDY_APP_METHOD = 'workbuddy-app';
+
+export const AgentTestBody = z.object({
+  profileId: Id.optional(),
+  /** 多发一条“只回复 OK”，会产生少量费用 */
+  sendMessage: z.boolean().optional(),
+});
+export const AgentTestStep = z.object({ ts: Ts, label: z.string(), ok: z.boolean(), ms: z.number().nonnegative(), detail: z.string().optional() });
+export const AgentTestResult = z.object({ ok: z.boolean(), steps: z.array(AgentTestStep) });
+export type AgentTestResult = z.infer<typeof AgentTestResult>;
+
+export const PatchAgentBody = z.object({
+  concurrencyLimit: z.number().int().min(1).max(4).optional(),
+  /** 只对 Claude 有效：bundled 适配器自带的引擎；local 本机安装的 Claude Code */
+  engine: z.enum(['bundled', 'local']).optional(),
+  /** 新任务默认用的模型、思考强度；null 恢复为 Agent 自己的默认值 */
+  defaultModel: z.string().min(1).max(200).nullable().optional(),
+  defaultEffort: z.string().min(1).max(50).nullable().optional(),
+});
+export type PatchAgentBody = z.infer<typeof PatchAgentBody>;
+export const RedetectResult = z.object({ items: z.array(AgentInfo) });
+
+/** 只表示“成功”的响应（取消登录、提交授权码等） */
+export const OkResult = z.object({ ok: z.literal(true) });
+export type OkResult = z.infer<typeof OkResult>;
+/** DELETE /profiles/:id：keptDir 为 true 表示账号专属的配置目录保留在磁盘上（没有删除） */
+export const DeleteProfileResult = z.object({ ok: z.literal(true), keptDir: z.boolean() });
+export type DeleteProfileResult = z.infer<typeof DeleteProfileResult>;
+
+/** 真实 Agent 第 1.2 步开放的权限级别（工作区内自动、全自动等 1.3 有了工作副本再开放） */
+export const REAL_AGENT_PERMISSIONS: readonly PermissionLevel[] = ['readonly', 'ask'];

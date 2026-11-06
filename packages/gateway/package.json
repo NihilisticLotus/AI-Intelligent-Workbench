@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@aic/adapters": "0.1.0",
     "@aic/protocol": "0.1.0",
     "@hono/node-server": "2.1.6",
     "hono": "4.13.16",

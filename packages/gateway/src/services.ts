@@ -1,6 +1,10 @@
 // 各服务的集合，路由和 WebSocket 共用
 import type { AuthService } from './auth';
 import type { AgentRegistry } from './agents/registry';
+import type { AgentService } from './agents/service';
+import type { ProfileService } from './profiles';
+import type { SecretService } from './secrets';
+import type { ProcessRegistry } from './processes';
 import type { Db } from './db';
 import type { EventStore } from './events';
 import type { GroupService, ProjectService } from './projects';
@@ -11,6 +15,11 @@ export interface Services {
   auth: AuthService;
   events: EventStore;
   agents: AgentRegistry;
+  /** 1.2：检测缓存、能力缓存、登录、测试连接、并发上限 */
+  agentSvc: AgentService;
+  profiles: ProfileService;
+  secrets: SecretService;
+  processes: ProcessRegistry;
   projects: ProjectService;
   groups: GroupService;
   tasks: TaskService;

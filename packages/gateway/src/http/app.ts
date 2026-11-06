@@ -11,6 +11,7 @@ import type { Services } from '../services';
 import { systemRoutes } from './system';
 import { projectRoutes } from './projects';
 import { taskRoutes } from './tasks';
+import { agentRoutes } from './agents';
 import { staticHandler } from './static';
 
 export type Env = { Bindings: HttpBindings; Variables: { device: DeviceRow; ip: string } };
@@ -88,6 +89,7 @@ export function createApp(s: Services, opts: { webDist: string }) {
   app.route(API_BASE, systemRoutes(s));
   app.route(API_BASE, projectRoutes(s));
   app.route(API_BASE, taskRoutes(s));
+  app.route(API_BASE, agentRoutes(s));
 
   // 没有匹配的 API：统一 404 ApiError；其他路径交给静态网页
   app.all(`${API_BASE}/*`, (c) => fail(c, Errors.notFound('没有这个接口')));

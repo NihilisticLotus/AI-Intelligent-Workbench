@@ -566,7 +566,8 @@ ErrorCode 增加：`agent.auth_required`、`agent.quota_exceeded`、`agent.crash
 | 窗口被遮挡时审批卡片不出现（已改，没用真实审批复测） | ISSUE-0014 |
 | Gateway 意外退出，没有留下错误信息 | ISSUE-0015 |
 | 网页里的登录流程、API Key / 自定义地址账号、未登录时发消息的错误 | ISSUE-0013、ISSUE-0007 |
-| 恢复会话后配置和上下文是否保留；拒绝审批后文件确实没写；Codex 在网页里的完整对话 | ISSUE-0012 |
+| 恢复会话后配置和上下文是否保留；拒绝审批后文件确实没写；Codex 在网页里的完整对话（2026-11-08 补验：Codex 全部通过，CodeBuddy 换模型后记得上下文；Claude 额度用完没测到） | ISSUE-0012 |
+| 额度错误提示读不通；回合长时间没有事件也没有超时（2026-11-08 补验发现） | ISSUE-0021、ISSUE-0022 |
 | Claude 工具行标题停在“Preparing file…” | ISSUE-0011 |
 | 模型能否真正调用注入的 MCP 工具 | ISSUE-0001（随 1.6 的 `aic_history` 一起验） |
 | 启动脚本在干净环境的首次运行；配对前控制台 401 | ISSUE-0004、ISSUE-0005 |
@@ -595,6 +596,8 @@ ErrorCode 增加：`agent.auth_required`、`agent.quota_exceeded`、`agent.crash
 
 ### 8.1 第 1.3 步：稳定、补验与输入框
 
+> 详细实现规格见第 9 节（2026-11-08）。下面是范围摘要。
+
 做什么：
 
 1. 稳定性：ISSUE-0014 用真实审批复测；ISSUE-0015 找到退出原因（兜底日志已加），Gateway 被结束时网页提示“工作台服务已停止”并能一键重启；ISSUE-0011 标题更新。
@@ -610,9 +613,11 @@ ErrorCode 增加：`agent.auth_required`、`agent.quota_exceeded`、`agent.crash
 完成标准：
 
 - Claude Code、Codex 各在网页里完成一次带截图的对话（Ctrl+V 粘贴），回复里能说出图片内容；选一个看不了图的模型时被拦下并能一键换成能看图的模型。
-- CodeBuddy 在网页里完成一次对话、换一次模型。
-- 7.2 里除 ISSUE-0001、ISSUE-0016 外的项都有真实验证结果（通过，或开了新问题单）。
+- CodeBuddy 在网页里完成一次对话、换一次模型（2026-11-08 补验已通过，1.3 改完输入框后再跑一次）。
+- 7.2 里除 ISSUE-0001、ISSUE-0016 外的项都有真实验证结果（通过，或开了新问题单）。Codex 的恢复会话、拒绝审批、网页对话已在 2026-11-08 补验通过；Claude 因账号额度用完没测到，留在本步。
 - 窗口被遮挡 10 分钟后，新的审批卡片仍会出现；Gateway 被结束后网页 3 秒内给出提示。
+- 回合 60 秒没有任何事件时界面有提示，10 分钟自动停止（ISSUE-0022）；额度错误的提示读得通（ISSUE-0021）。
+- 自动测试、类型检查、构建全部通过；第 9.12 节列出的新测试都在。
 
 ### 8.2 第 1.4 步：界面改版与用量
 
@@ -641,3 +646,244 @@ ErrorCode 增加：`agent.auth_required`、`agent.quota_exceeded`、`agent.crash
 ### 8.3 第 1.5～1.7 步
 
 范围同第 1 节，开工前各自写实现规格。1.6 额外包含原型里“换 Agent 发送时才交接、可撤销”的交互（ui 6.5），以及恢复 1.2 遗留的“换账号需要交接”。
+
+## 9. 1.3 实现规格
+
+> 2026-11-08 · 依据：本文 8.1；ui-design.md 6.5、6.16；design.md 15.2、17；问题单 ISSUE-0004、0005、0007、0011～0015、0021、0022；`docs/acceptance/step-1.2.md`“补验（2026-11-08）”一节；原型 `docs/prototype/assets/interact.js`（`aicAgentPicker`）、`attach.js`。
+> 代码现状核对到 2026-11-08 的 main（提交 7eb16a6 之后）。下文的 `文件:行号` 是当天的位置，改动后以函数名为准。
+
+### 9.1 总体与约束
+
+- 第 2 节接口规则全部适用。协议只增不改：新字段一律可选，新事件和错误码只追加；老客户端忽略不认识的字段和事件。
+- 本步不碰工作副本、交接、局域网。换 Agent 仍不可用（1.6），选择器里照旧说明原因，但说法改成不写步号（9.10）。
+- 新增依赖前先确认仍在维护，锁精确版本。本步预计不需要新的运行时依赖：上传用 Hono 自带的 `c.req.parseBody()` / `arrayBuffer()`；图片尺寸和类型靠文件头魔数判断，不引入图片库。
+- 凭据边界不变：不读取、不复制任何 Agent 自己的凭据文件；附件文件不进日志，日志里只写文件名、大小、类型。
+- 默认 `npm test` 不启动真实 Agent、不联网、不花钱。真实验证写在 9.11，单独执行。
+
+### 9.2 工作分解
+
+| # | 工作 | 主要文件 | 问题单 |
+|---|---|---|---|
+| A | 实时事件在窗口被遮挡时不停（复测与补测试） | `apps/web/src/state/app.ts` | ISSUE-0014 |
+| B | Gateway 退出：找原因、网页提示、一键重启 | `packages/gateway/src/server.ts`、`crash-log.ts`，`apps/web/src/api/ws.ts`，启动脚本 | ISSUE-0015 |
+| C | 回合长时间没有事件：提醒与自动取消 | `packages/gateway/src/tasks.ts`（`runTurn`） | ISSUE-0022 |
+| D | 额度错误提示、不支持的模型 | `packages/adapters/src/acp/errors.ts`，`codex/index.ts` | ISSUE-0021，补验发现 |
+| E | 工具行标题更新 | `packages/adapters/src/acp/updates.ts`，协议 | ISSUE-0011 |
+| F | 统一的 Agent · 模型 · 思考强度选择器 | `apps/web/src/components/Composer.tsx`、`NewTaskDialog.tsx`，新组件 | — |
+| G | 附件与图片 | 协议、Gateway 新路由、`acp/session.ts`、网页新组件 | — |
+| H | 旧步号文字、配对前 401、启动脚本首次运行 | 见 9.10 | ISSUE-0004、0005 |
+| I | 真实补验：登录、API Key、Claude、遮挡 10 分钟 | 验收记录 | ISSUE-0007、0012、0013、0014 |
+
+建议顺序：E、D、C（适配器和 Gateway 的小改，先把错误和卡住的问题修好）→ A、B → G 的协议和 Gateway → G 的适配器 → F → G 的网页 → H → I。F 和 G 的网页部分都改输入框，同一个人做，避免冲突。
+
+### 9.3 A：实时事件在窗口被遮挡时不停（ISSUE-0014）
+
+现状：`apps/web/src/state/app.ts:56-69` 的 `enqueueEvent` 已改为 rAF 和 `setTimeout` 谁先到谁执行（可见时 100ms，不可见时 16ms），`done` 防止重复执行。2026-11-08 补验在“页面可见、没有焦点、面板在后台”时审批卡片正常出现。
+
+要做：
+
+1. 把调度逻辑拆成可测试的纯函数，例如 `apps/web/src/state/flush.ts` 导出 `createFlusher({ raf, setTimeout, visibility, flush })`，`app.ts` 里只组装。不改行为。
+2. 单元测试（node 环境，注入假的 raf / setTimeout）：raf 永远不调用时 100ms 内 flush；raf 先到时只 flush 一次；不可见时 16ms 内 flush；连续入队 1000 条只 flush 一次。
+3. 审批到来时除了渲染卡片，再调用 `Platform.notify`（已有接口）发系统通知，标题“有审批等你处理”，正文是审批标题；页面有焦点时不发。用户拒绝过通知权限时静默。
+4. 真实复测见 9.11 第 4 项。
+
+### 9.4 B：Gateway 退出（ISSUE-0015）
+
+现状：`crash-log.ts` 已记录 `unhandledRejection`（ERROR，继续运行）和 `uncaughtException`（FATAL，退出），写 `<数据目录>/logs/gateway.log`；`server.ts:302/319/327` 记录启动、已启动、正常退出。网页只有“正在重新连接…”，不知道 Gateway 已经不在了。
+
+要做：
+
+1. 补齐退出记录：`process.on('exit', code)` 记录退出码；关掉控制台窗口的 `SIGHUP` 已经处理（`server.ts:334-336`，3 秒内停止），在它和 SIGINT、SIGTERM 里各记一条 INFO 写明原因（“控制台窗口被关闭”“按了 Ctrl+C”“收到结束信号”）；`SIGBREAK`（Ctrl+Break）按 SIGINT 处理。每条带 pid 和已运行时长。
+2. 启动时检查上一次的结尾：读 `gateway.log` 最后一条，如果是“启动”或“已启动”而没有对应的“退出”，记一条 WARN“上次运行没有正常退出（pid N，最后记录在 …）”。这条信息也放进 `GET /hello` 的可选字段 `lastExit: { clean: boolean, at: number, reason: string | null } | null`，网页设置页“关于”里显示。
+3. 网页判断“服务已停止”：`ws.ts` 连续重连失败超过 3 次（约 3 秒）后，用 `fetch(baseUrl + '/api/v1/hello')` 探测；连不上（网络错误，不是 401）时 `ConnState` 新增 `'down'`（只增），界面：
+   - 输入框上方的提示改为“工作台服务已停止，对话不会丢。双击桌面上的“启动 AI Console”可以重新打开；打开后这里会自动恢复。”；
+   - 侧栏状态点变红，文字“服务已停止”；
+   - 之后每 5 秒探测一次，恢复后自动重连并补齐事件（沿用 `resyncAfterReconnect`）。
+   - “一键重启”：浏览器页面没法拉起本机进程（接口规则 7：不绕过接口），所以本步只做提示和自动恢复；真正的一键重启放在桌面软件（Tauri 托盘）里，`Platform` 增加可选方法 `restartGateway?(): Promise<boolean>`，浏览器版不提供，界面有这个方法时才显示 [重新启动] 按钮。
+4. 测试：Gateway 测试里起一个 Gateway、停掉，检查 `gateway.log` 有退出记录；再起一个，`/hello` 的 `lastExit.clean` 为 true。人为写入一条没有退出记录的日志后启动，`clean` 为 false。网页：`ws.ts` 的状态机测试（已有 `api/ws.test.ts`），连续失败 + 探测失败进入 `down`，探测成功回到 `connecting`。
+5. 真实复测：开发预览里停止 Gateway，网页 3 秒内显示“工作台服务已停止”；重新启动后自动恢复，对话完整。
+
+### 9.5 C：回合长时间没有事件（ISSUE-0022）
+
+现状：`tasks.ts` 的 `runTurn`（约 :561）等 `rt.conn.prompt()` 返回，期间不看有没有事件。补验时 Claude 额度用完，3 分 25 秒才报 429；恢复会话后第二次 2 分钟以上没有任何事件。
+
+要做：
+
+1. 每个回合记录最后一次收到 Agent 事件的时间（任何 `session/update`、权限请求都算；我们自己发的 `task.updated` 不算）。等待审批期间不计时。
+2. 60 秒没有事件：发 `session.notice`（level `warn`）：“Agent 已经 1 分钟没有回应，可能在重试或网络不稳定。可以继续等，也可以停止这一轮。”。之后每 2 分钟更新一次同一条提示（用固定的 notice id 替换，不堆叠，见 ISSUE-0018 的做法），写明已等待多久。
+3. 10 分钟没有事件：自动 `session/cancel`，任务暂停，发 `error`，错误码新增 `agent.no_response`（`ErrorCode.AgentNoResponse`，HTTP 504），message“Agent 10 分钟没有回应，这一轮已停止”，hint“可以重新发送，或换个模型 / 账号”，actions `[重试] [换模型]`。
+4. 两个时间做成 `TaskServiceOptions` 的可选项（默认 60 秒、10 分钟），测试里改小。
+5. 网页：“正在处理 · N 秒”在收到这条 notice 后变成琥珀色，旁边一个 [停止] 按钮（已有停止功能，放到这里方便点）。
+6. 查 claude-agent-acp 0.100.0 和自带 claude.exe 2.1.316 有没有缩短上游重试的设置（环境变量或 `_meta.claudeCode.options`），有就设成最多重试 2 次；结论写进 ISSUE-0022。只看源码和文档，不读凭据。
+7. 测试：假 ACP Agent 的剧本加 `sleep` 步（已有）模拟长时间不发事件，用假时钟验证 notice、替换、自动取消、错误码；等待审批时不触发。
+
+### 9.6 D：额度提示与不支持的模型（ISSUE-0021，补验发现）
+
+1. `packages/adapters/src/acp/errors.ts` 的 `quotaHint()`：只在捕获的内容像时间时才用。认可的格式：ISO 时间、`HH:MM`（可带时区）、`in N (seconds|minutes|hours|days)`、`N (s|m|h)`、`after <星期几或日期>`。其余一律用固定 hint“额度或调用频率达到上限，可以稍后再试，或换个模型 / 账号”。单元测试用补验时的原文：
+   `API Error: Request rejected (429) · upstream account quota usage limit has been reached; wait for quota to reset or use an account with available quota`，期望得到固定 hint。另加 3 条能解析出时间的正例。
+2. 上游拒绝模型：Codex 选 gpt-5.5 时，回复正文是上游 400 原文（“The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account”），任务进入“待验收”。处理：
+   - 适配器在回合结束时，如果这一轮只有一段消息、没有工具调用，并且文本匹配已知的上游错误模式（`model is not supported`、`upstream_status: HTTP 4\d\d`、`API Error: Request rejected`），把它当成错误：发 `error`（`agent.failed`，或额度类的 `agent.quota_exceeded`），任务暂停而不是“待验收”；原文保留在消息里。
+   - 这个“文本里的错误”规则放在一个表里（`errors.ts` 的 `TEXT_ERROR_PATTERNS`），每条都有测试，避免误判正常回复：只在整段回复以这些前缀开头、长度小于 600 字时才判定。
+   - 模型列表：不做按账号过滤（ACP 拿不到账号能用哪些模型）。选了一次失败的模型后，在这个账号下记住“上次失败：不支持”，切换器里这个模型后面标灰字“上次失败”，鼠标悬停显示原因。存在 `agent_caps.catalog_json` 旁边的新列不划算，用新表 `model_failures(agent, profile_id, model, reason, at)`（和 9.9.2 的 `attachments` 表放在同一个迁移 v5 里，只追加）。
+
+### 9.7 E：工具行标题更新（ISSUE-0011）
+
+现状：`updates.ts:151-164` 处理 `tool_call_update`，第一次见到的 id 才发 `tool_start`；之后只改 `title` 的更新被丢弃（:160 的注释），Claude 的工具行停在“Preparing file…”。
+
+要做：
+
+1. 协议新增事件 `tool.update`：`{ toolId, title?: string, target?: string | null, kind?: ToolKind }`（只增；字段都可选，只带变化的部分）。
+2. 适配器：已见过的 id 收到带 `title`（或 `locations`、`kind`）的更新且和上次不同时，发 `tool_update`；内容和状态照旧走 `tool.output` / `tool.end`。
+3. Gateway 照常写库、推送。网页 `state/core.ts` 处理 `tool.update`：更新时间线里对应的工具行；老事件流里没有它也不影响。
+4. 测试：适配器契约测试（剧本里先 `tool_call` 标题“Preparing file…”再 `tool_call_update` 改标题）；网页 core 测试；协议正反例。
+
+### 9.8 F：统一的 Agent · 模型 · 思考强度选择器（ui-design 6.5）
+
+参照原型 `docs/prototype/assets/interact.js` 的 `aicAgentPicker`（和 `new-task.js` 里的调用）。现状：`Composer.tsx:165-335` 的 `Switcher` 是一块弹出层（Agent 列表、账号、模型、思考强度分段放在一起），`NewTaskDialog.tsx` 里是三个 `<select>`。
+
+新组件 `apps/web/src/components/AgentPicker.tsx`：
+
+- 触发按钮：`徽标 Agent名 模型名 · 思考 X ▾`。思考强度为 null（Agent 不支持）时不显示“· 思考 X”。`title` 显示当前账号。
+- 第一级菜单（`role="menu"`）：只列已启用的 Agent（`isEnabled`），外加当前任务的 Agent（即使后来被关掉）。每行：徽标、名称，右侧是
+  - 当前 Agent：`模型 · 思考 X ✓`；
+  - 状态不是就绪：状态文字（“需要登录”“登录已过期”“未连接”），琥珀色；
+  - 其他：`N 个模型`。
+  - 末尾一行提示：“换模型、账号、思考强度都保留完整上下文。换 Agent 需要交接，现在还不能直接换。”（1.6 做完交接后改为“发送时才交接”）。
+- 鼠标移到某个 Agent（或按 →）在旁边展开二级菜单，内容自上而下：
+  1. 模型（`menuitemradio`），当前打勾。模型的数据用 `pickModels(info, session)`（已有）。
+  2. 思考强度：`pickEfforts(info, session)` 不为 null 时用分段按钮（`role="radiogroup"`）；为 null 时写“由模型自己决定，这里不能调”。CodeBuddy 的列表末尾有 `enabled`（补验看到：`minimal, low, medium, high, xhigh, max, enabled`，当前值是 `enabled`），显示为“自动”，放在最前面。
+  3. 账号：只在“当前 Agent 且有多个账号”时出现，沿用 `profileSwitchKind` 的规则（存放位置不同的账号置灰，说明原因）。
+  4. 看不了图的模型后面标“不能看图”（9.9 的 `vision === false`），上次失败的模型标“上次失败”（9.6）。
+- 打开时自动展开当前 Agent 的二级菜单，焦点在当前 Agent 那一行。
+- 行为：
+  - 当前 Agent 的思考强度：点了立即生效（发 `switch`），菜单不关；
+  - 当前 Agent 的模型：发 `switch`，菜单关闭；
+  - 其他 Agent：在对话里选择时显示一个说明对话框“换 Agent 需要交接，会在之后的版本提供；现在可以用这个 Agent 新建任务”，带 [用它新建任务]（预填当前任务的描述）和 [取消]；在新建任务里选择则直接生效（新任务还没有会话）。
+  - 正在执行时换模型：沿用现有的 `switchNeedsTurnEnd` + `choiceDialog`（等这一步结束 / 立即中断）。
+  - 失败时恢复原值，显示 error 的 message（沿用现有 `ErrorNotice`）。
+- 收起：再点一次按钮、Esc（二级菜单里先回到一级，再按一次关闭）、点外面。
+- 键盘：一级 ↑↓ 移动、→ / Enter 进二级；二级 ↑↓、← 返回、Enter 选择、Space 选思考强度。全部有 `aria-expanded`、`aria-haspopup`。
+- 放置：按钮在屏幕下半部分时向上开，否则向下；二级菜单放在一级右边，放不下就放左边，且不超出屏幕。
+- 输入框里的旧 `Switcher` 换成它；账号按钮不再单独显示。`NewTaskDialog` 的三个 `<select>` 换成它（`POST /tasks` 已支持 `model`、`effort`、`profileId`，不需要改接口）。
+- 测试（web 是 node 环境，没有 DOM）：把“第一级每行显示什么、二级有哪些项、点了发什么”写成纯函数 `lib/picker.ts`，覆盖：当前 Agent 显示、状态文字、`enabled` 显示为“自动”、思考强度为 null、多账号、不能看图标注、上次失败标注、其他 Agent 在对话里和在新建任务里的不同行为。
+
+### 9.9 G：附件与图片（ui-design 6.16、design 15.2）
+
+参照原型 `docs/prototype/assets/attach.js`。
+
+#### 9.9.1 协议（全部只增）
+
+```ts
+// 附件：先上传，再在消息里按 id 引用
+export const AttachmentInfo = z.object({
+  id: Id,                       // 'att_' 开头的不透明 id
+  name: z.string().max(255),    // 显示用的文件名（服务端清洗过）
+  mime: z.string(),             // 服务端按文件头判断的类型，不信客户端给的
+  size: z.number().int(),
+  kind: z.enum(['image', 'file']),
+  width: z.number().int().nullable(),   // 图片才有
+  height: z.number().int().nullable(),
+  createdAt: z.number().int(),
+});
+// prompt 指令：增加可选 attachments（id 列表，最多 10 个）
+op('prompt', z.object({ taskId: Id, text: z.string().max(100_000), attachments: z.array(Id).max(10).optional() }))
+// text 由 min(1) 改为：text 和 attachments 至少有一个（用 superRefine，老客户端只发 text 不受影响）
+// CreateTaskBody：增加可选 attachments（同上）
+// message.user 事件：增加可选 attachments: AttachmentInfo[]
+// 模型能不能看图：ModelInfo 增加可选 vision: boolean | null
+```
+
+- 能不能看图的判断顺序：`ModelInfo.vision`（Agent 报告了模型级信息时）→ `AgentInfo.caps.prompt.image`（ACP initialize 的 `promptCapabilities.image`）→ null（未知）。工具函数 `visionOf(info, modelId): true | false | null` 写在 `packages/protocol`，两边共用。
+  - 现在三家都只有 Agent 级的 `promptCapabilities.image`（补验：Codex、CodeBuddy 都是 true）。模型级信息拿不到，所以 `ModelInfo.vision` 先一律不填；CodeBuddy 的模型里有明显的纯文本模型（例如 deepseek 系列），能否从 CodeBuddy 的私有扩展拿到模型能力，在实现时查 `_codebuddy.ai/*` 并写进验收记录，拿不到就保持 null。
+- 新增错误码：`attachment.unsupported`（415，Agent 不能看图）、`attachment.too_large`（413）、`attachment.too_many`（400）、`attachment.not_found`（404）、`attachment.bad_type`（415）。
+
+#### 9.9.2 Gateway
+
+- 新路由 `POST /tasks/:id/attachments`：请求体是文件本身（`Content-Type` 为文件类型，`X-AIC-Filename` 头带 URL 编码的文件名），不用 multipart，便于流式写盘和统一限制。
+  - 这个路由单独设 body 上限 20 MB（`app.ts:87` 的全局 1 MB 限制对它放开，其他路由不变）。
+  - 文件类型按文件头判断：PNG、JPEG、GIF、WebP 判为图片，并读出宽高；其他按文本 / 二进制判为 file。拒绝可执行文件头（MZ、ELF）。SVG 当作 file，不当图片（避免脚本）。
+  - 每个任务最多 50 个附件、总计 200 MB，超出返回 `attachment.too_many`。
+  - 存放：`<数据目录>/attachments/<taskId>/<attId>`，文件名只用 id，原文件名存在库里。新表 `attachments(id, task_id, name, mime, size, kind, width, height, sha256, created_at, used_at)`（迁移 v5，和 9.6 的 `model_failures` 同一个迁移）。
+  - 返回 `AttachmentInfo`。
+- `GET /tasks/:id/attachments/:attId`：返回文件内容（`Content-Type` 用库里的 mime，图片之外一律 `Content-Disposition: attachment`，加 `X-Content-Type-Options: nosniff`），给网页显示缩略图和大图用。鉴权同其他接口。
+- 发送：`prompt` 和 `POST /tasks` 带 `attachments` 时，Gateway 校验每个 id 都属于这个任务、文件存在；有图片且 `visionOf` 为 false 时返回 `attachment.unsupported`（message “X · 模型 看不了图片”，actions `[换模型]`）。为 null 时照常发送（网页那边已经问过用户）。
+- 清理：任务删除时删掉整个目录；上传后 24 小时没有被任何消息引用的附件删除（启动时和每小时检查一次）。
+- `message.user` 事件里带 `attachments`（只有元数据，不带内容）。
+- 日志：只写 id、大小、类型，不写文件名之外的内容；文件名经过脱敏函数。
+
+#### 9.9.3 适配器
+
+- `AgentAdapter` 的 `prompt(text, signal)` 改为 `prompt(input: { text: string; attachments?: PromptAttachment[] }, signal)`，`PromptAttachment = { kind, mime, name, path, uri }`；旧签名的调用点一并改（fake 适配器、测试）。
+- ACP（`acp/session.ts:270`）：`prompt` 数组依次放：
+  - 文本块 `{ type: 'text', text }`（文本为空时省略）；
+  - 每张图片一个 `{ type: 'image', mimeType, data: <base64> }`（ACP 规范的 ImageContent；单张 base64 前不超过 5 MB，更大的先在 Gateway 拒绝或缩小，本步先拒绝并提示“图片太大，最大 5 MB”）；
+  - 每个文件一个 `{ type: 'resource_link', uri: 'file:///…', name, mimeType }`（Agent 在本机，可以直接读路径）。Agent 声明 `embeddedContext` 且是小文本文件（< 256 KB）时，改用 `{ type: 'resource', resource: { uri, text, mimeType } }`。
+- Agent 没声明 `promptCapabilities.image` 却收到图片：适配器再检查一次，抛 `AgentError('attachment.unsupported')`，不发出去。
+- 假 ACP Agent：`session/prompt` 处理（fixture :168）已经记录参数，契约测试核对 content 数组的形状和 base64 长度。
+- 演示 Agent（fake）：收到图片时回复“收到 N 张图片：文件名、宽 × 高”，方便在不花钱的情况下演示。
+
+#### 9.9.4 网页
+
+新组件 `apps/web/src/components/Attachments.tsx`，`Composer` 和 `NewTaskDialog` 共用：
+
+- 三种加法：输入框上 `paste`（剪贴板里有文件时加为附件；同时有文字时文字照常粘贴）、拖入（拖入时输入框高亮）、[附件] 按钮（`<input type="file" multiple>`，不再置灰）。
+- 选中后立即上传（`POST /tasks/:id/attachments`）；新建任务时还没有任务 id，先暂存在内存里，任务建好后再上传并随第一条消息发送（`POST /tasks` 带 `attachments` 需要任务 id，所以新建任务的流程是：建任务（不带附件、`prompt` 先不发）→ 上传 → 发 `prompt`）。为此 `CreateTaskBody` 增加可选 `deferPrompt: boolean`，为 true 时只建任务不启动回合。
+- 输入框里显示附件：图片缩略图（`GET` 回来的地址）、文件名、大小，上传中显示进度，失败显示原因和 [重试]；点缩略图看大图；× 删除（只从这条消息里去掉，服务端的文件按 24 小时规则清理）。
+- 粘贴的截图没有文件名时，用“截图-时分秒.png”。
+- 能不能看图：用 `visionOf(info, model)`：
+  - false：输入框上方琥珀提示“X · 模型 看不了图片，这 N 张图片发过去它收不到”，缩略图描琥珀边；按钮 [换成 Y]（同 Agent 能看图的模型优先；没有时不推荐别的 Agent，因为换 Agent 要交接）和 [去掉图片]；点发送被拦下，提示条晃一下（减少动态效果时改为描边）。
+  - null：提示“没有报告能不能看图片，可能收不到”，多一个 [仍然发送]。
+  - 换模型后提示随之更新。
+- 对话里你的消息显示附件：图片缩略图（最多 120 × 90，点开看大图），文件显示为一行带图标的文件名；图片地址同样走 `GET` 接口。
+- 每个任务的输入框附件和草稿一起保存？不保存：附件已经上传在服务端，草稿只多存一个附件 id 列表（`TaskDraft` 增加可选 `attachments: Id[]`），刷新后恢复缩略图；24 小时清理规则对草稿里的附件也适用，过期的从草稿里去掉并提示。
+- 纯函数测试（`lib/attachments.ts`）：粘贴事件的文件筛选、截图命名、超限判断、`visionOf` 的提示文案和推荐模型。
+
+### 9.10 H：零碎修复
+
+1. 旧步号文字（ISSUE-0004 之外的 20 处，2026-11-08 盘点）：
+   - 第 1.3 步（工作副本）：`Composer.tsx:113`（附件按钮，本步本来就要改掉）、`dialogs.tsx:59`、`NewTaskDialog.tsx:188`、`SidePanel.tsx:88`、`:93`、`TaskView.tsx:57`、`lib/agents.ts:57`（`PERM_LOCKED_REASON`）、`:66`（`DIRECT_EDIT_WARNING`）、`packages/gateway/src/tasks.ts:250`。
+   - 第 1.4 步（交接）：`Composer.tsx:284`、`:285`、`:299`、`:328`、`lib/agents.ts:107`、`:117`、`packages/adapters/src/types.ts:296`、`packages/gateway/src/tasks.ts:496`、`:646`、`:673`、`:674`、`:721`、`packages/protocol/src/index.ts:159`。
+   - 第 1.5 步（局域网）：`SettingsPage.tsx:59`。
+   - 改法：界面和错误提示不写步号，说做完什么之后开放，例如“有了独立工作副本后开放”“换 Agent 需要交接，之后的版本提供”“局域网访问之后的版本提供”。代码注释可以写新步号（1.5 / 1.6 / 1.7）。改完 `grep -rn "第 1\.[3-5] 步" apps packages` 应该只剩注释。
+2. 配对前控制台 401（ISSUE-0005）：网页启动时先调 `GET /hello`（不需要令牌，已有），本地没有凭据时直接显示配对页，不再发需要令牌的请求。测试：`api/credentials.test.ts` 或新建的启动流程纯函数测试，覆盖“没有凭据时不发需要令牌的请求”。
+3. 启动脚本首次运行（ISSUE-0004）：在 Windows 沙盒（如果用户电脑开着这个功能）或一个新建的空用户目录里实测两条路径：删掉 `node_modules` 后双击（应自动 `npm ci` 并打开浏览器）；PATH 里没有 Node 时双击（应弹出中文提示并打开下载页）。不能在本机删 Node；做不了沙盒就把这一项留在问题单里，验收记录写“未验证”。
+
+### 9.11 I：真实补验（需要用户配合）
+
+先在验收记录里写明预计的消息条数和费用，用户同意后再跑。每个 Agent 最多 5 条极短的消息，都在空的临时目录里。
+
+| # | 项 | 怎么做 | 需要用户 | 问题单 |
+|---|---|---|---|---|
+| 1 | Claude 网页对话、恢复、拒绝审批 | 照 2026-11-08 对 Codex 的做法（暗号 → 拒绝新建文件 → 会话内换模型问暗号 → 重启 Gateway 后问暗号） | Claude 账号额度恢复 | ISSUE-0012 |
+| 2 | 网页登录流程 | 三家各在“未登录”状态下点 [登录]，记录是否需要任何终端输入、要多久、取消是否有效。未登录状态由用户准备：建议用 Agent 管理里“添加账号 → 订阅登录”新建一个账号（工作台给它单独的配置目录，见 6.4.2），这样不影响用户现在的登录 | 用户在浏览器里完成授权 | ISSUE-0013、ISSUE-0007 |
+| 3 | API Key / 自定义地址账号 | 用户提供一个测试用的、额度很小的 API Key；在 Agent 管理里添加，发一条“只回复 OK”，确认用的是这个 Key（Claude `auth status` 显示 API 计费；Codex 的 `env_key` 方案生效）；然后删除账号，确认 DPAPI 密钥和账号目录都被清掉 | API Key | ISSUE-0013 |
+| 4 | 窗口被遮挡 10 分钟后审批卡片出现 | 浏览器打开任务，把窗口最小化或被别的窗口完全挡住 10 分钟，期间由另一个任务（或接口）触发一次真实审批；恢复窗口时卡片已经在，系统通知也出现过 | 用户的电脑不进入睡眠 | ISSUE-0014 |
+| 5 | Gateway 被结束后的提示 | 关掉 Gateway 的控制台窗口，网页 3 秒内显示“工作台服务已停止”；重新双击启动后自动恢复 | — | ISSUE-0015 |
+| 6 | 回合没有回应的提示 | 用假 ACP Agent 演示即可（真实 Agent 很难稳定复现）；如果 Claude 额度又用完，顺便看真实表现 | — | ISSUE-0022 |
+| 7 | 带截图的对话 | Claude、Codex、CodeBuddy 各 Ctrl+V 一张截图，问“图里写了什么”；再选一个 `vision === false` 的模型（如果有）看是否被拦下 | — | — |
+| 8 | 统一选择器 | 三家各换一次模型和思考强度（CodeBuddy 的“自动”）、Claude 换一次账号（需要第二个账号时和第 3 项一起做） | — | — |
+
+做完：通过的关单（时间线写验收记录的位置和提交哈希）；不通过的修，修不了的开新问题单。
+
+### 9.12 测试清单（默认 `npm test` 里）
+
+| 包 | 新增 |
+|---|---|
+| protocol | `prompt` 只有附件、只有文字、两者都没有（应失败）；`AttachmentInfo`、`tool.update`、`ModelInfo.vision` 正反例；`visionOf` 的三种来源；老事件（没有新字段）仍然通过 |
+| adapters | `quotaHint` 补验原文与 3 条正例；`TEXT_ERROR_PATTERNS` 的命中与不误判；`tool_update`（标题变化）；`session/prompt` 的 content 数组（文字 + 图片 base64 + resource_link + 小文本 resource）；没声明图片能力时拒绝；fake 适配器回复图片信息 |
+| gateway | 上传：类型按文件头判断、SVG 当文件、可执行文件拒绝、20 MB 上限、每任务 50 个上限、文件名清洗、`GET` 的响应头；发送：附件不属于这个任务、图片发给不能看图的 Agent、`deferPrompt`；清理：24 小时未引用删除、删任务删目录；无回应：60 秒提示、提示替换不堆叠、10 分钟自动取消、等待审批不计时；退出记录与 `lastExit`；迁移 v5 |
+| web | `flush.ts` 调度；`ws.ts` 的 `down` 状态；`picker.ts` 的显示和行为；`attachments.ts` 的筛选、命名、提示；`core.ts` 处理 `tool.update` 和带附件的 `message.user`；没有凭据时不发需要令牌的请求 |
+
+### 9.13 验收记录
+
+写 `docs/acceptance/step-1.3.md`（模板 `.agent/templates/acceptance.md`），包括：8.1 完成标准逐条打勾；9.11 每一项的真实结果（含消息条数和费用）；自动测试、类型检查、构建的结果；浏览器里的操作步骤和截图（截图放 `docs/acceptance/assets/`）；没通过、没验证的项和问题单。
+
+### 9.14 开发顺序
+
+1. 协议（9.6 的错误码、9.7 的 `tool.update`、9.9.1 全部）和测试。
+2. 适配器：E、D、9.9.3；契约测试。
+3. Gateway：C、B、9.9.2、迁移 v5；集成测试。
+4. 网页：A、B 的界面、F、9.9.4、H 的 1 和 2。
+5. `npm run typecheck`、`npm test`、`npm run build` 全部通过后，开发预览里用演示 Agent 把界面走一遍（截图）。
+6. 9.11 真实补验（和用户约好时间），9.10 第 3 项，写验收记录，关单或开新单。
+7. 按 `.agent/commit-convention.md` 分支提交，用户确认后快进合并到 main 并推送。建议按上面的 1～4 分成几个提交，每个提交都能通过测试。

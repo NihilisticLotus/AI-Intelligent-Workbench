@@ -179,3 +179,27 @@ CodeBuddy 和 WorkBuddy 拆分后（ISSUE-0016），CodeBuddy 改用官方独立
 自动测试：Gateway 新增 `agent-toggle-draft.test.ts` 3 项（默认开关、关闭后拒绝建任务和测试连接、草稿读写和校验）；网页新增注释定位 1 项。
 
 未验证：换一台设备打开时草稿是否出现（接口相同，只在本机浏览器验证）；CodeBuddy、WorkBuddy 打开后的检测在本次只跑了单元测试。
+
+## 补验（2026-11-08，为第 1.3 步做准备）
+
+环境：开发预览（`.claude/launch.json` 的 `app`，Gateway 代码与 2026-11-07 提交 440cfe5 相同），临时空目录 `%LOCALAPPDATA%\Temp\aic-verify-1108` 建为项目“1.2 补验（临时空目录）”。操作经网页自己的接口（同一设备密钥的 REST 和 WebSocket）发出，最后在网页里打开任务核对显示。真实消息：Codex 7 条、CodeBuddy 2 条、Claude 2 条（都因额度用完没有回复）。
+
+| 项 | 结果 |
+|---|---|
+| Codex 在网页里的完整对话（ISSUE-0012） | 通过。gpt-5.6-luna / low：回复“OK”，9 秒 |
+| 拒绝审批后文件确实没写（ISSUE-0012） | 通过。让 Codex 新建 reject.txt，弹出“Edit files”（允许执行 / 不执行，我来告诉它怎么做），选拒绝后 `tool.end rejected`，任务暂停，目录里没有 reject.txt |
+| 会话内换模型后记得上下文 | 通过。换到 gpt-6-luna / low 后问“第一条消息里的暗号”，回复“蓝鲸42” |
+| Gateway 重启后恢复会话，配置和上下文保留（ISSUE-0012） | 通过。停止并重新启动 Gateway 后发消息：`session.started resumed=true`，`session.config` 为 gpt-6-luna / low（切换过的配置保留），回复“蓝鲸42”；网页里显示“已恢复原来的会话，Agent 记得之前的对话” |
+| 允许审批后文件确实写入 | 通过。网页里点 [允许执行]（Run command，PowerShell Set-Content），allow.txt 内容为 yes |
+| 审批卡片实时出现（ISSUE-0014，部分） | 通过（页面可见、没有焦点、开发预览面板在后台时）：发消息后审批卡片出现在页面上，按钮“允许执行 Enter / 不执行，我来告诉它怎么做… Esc”。窗口被遮挡 10 分钟的场景没有测，留给 1.3 |
+| CodeBuddy 网页对话与换模型（ISSUE-0010 已关闭，这里复核） | 通过。打开开关后检测为就绪，28 个模型，声明能看图片；glm-5.3-flash 回复“OK”（15 秒，有思考内容）；会话内换到 kimi-k3 后回复“蓝鲸42” |
+| Claude 网页对话 | 未通过：账号额度用完。第一条消息 3 分 25 秒后才收到上游 429，任务暂停，错误码 `agent.quota_exceeded`，带 [换模型] [换账号]；hint 文字读不通（ISSUE-0021）。重启后恢复会话再发一条，2 分钟以上没有任何事件，手动停止（ISSUE-0022）。额度恢复后在 1.3 补测 |
+| 换到账号不支持的模型 | 发现：Codex 选 gpt-5.5 时，回复正文是上游的 400 原文（“The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account”），任务进入“待验收”而不是报错。Codex 的模型列表里有当前账号用不了的模型，列入 1.3 的规格（模型列表按账号过滤或标注、上游错误识别） |
+| 登录流程、API Key / 自定义地址账号（ISSUE-0013、ISSUE-0007） | 未做：需要未登录环境和测试用 API Key，按 1.3 的计划在用户配合下做 |
+| 模型能否调用注入的 MCP 工具（ISSUE-0001） | 未做：按计划在 1.6 随 `aic_history` 验证 |
+
+其他观察：
+
+- Codex 每轮开始都有一个“Compact conversation”工具行（Codex 自己压缩上下文），对话里显示为一行工具，不影响结果。
+- CodeBuddy 的 `session.config` 里思考强度是 `enabled`（不是档位），切换器需要按“开 / 关”显示，列入 1.3 的统一选择器。
+- 临时项目和任务只在 `.aic-data/`，不提交；临时目录验收后可删。

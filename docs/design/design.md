@@ -1,6 +1,7 @@
 # AI Console 设计文档
 
-> 版本 0.4.1 · 2026-11-08 · 状态：设计中
+> 版本 0.4.2 · 2026-11-08 · 状态：设计中
+> v0.4.2 用户澄清：第三方 Agent 沿用自身设置、API、认证和模型；AI Console 的独立 Agent 单独管理自定义 API 与模型。修正第 1、2、6.4、6.6 节。独立执行器尚未实现，技术选型待核实；此前以各家账号替换 API 的实现不作为目标方案（ISSUE-0029）。
 > v0.4.1 补充（2026-11-08 重新规划）：第一阶段步骤改为 1.1～1.7，里程碑和步骤的对应关系见第 19 节；附件与图片（15.2）、Agent · 模型 · 思考强度统一选择器（ui 6.5）、右侧“详细”（15.1）、对话导航条、新建任务起始页已写入设计。
 > v0.4.1 补充（2026-11-07 轻量化）：参照 OpenBitFun 精简界面；上下文用量与 token 统计的数据来源和规则（15.5）。
 > v0.4.1 补充（2026-11-07 用户试用）：Agent 启用开关，默认只开 Claude Code、Codex（6.7）；对话注释按任务保存（15.2）；侧聊连续换模型只留一行提示。
@@ -23,10 +24,11 @@
 - 并行工作：多个任务同时跑，互不干扰，完成后再合并。
 - 多端访问：桌面软件 + 浏览器（本机、局域网），以后扩展外网和手机。
 - 全程图形化：安装、登录、配置、排错都通过界面完成，用户不需要使用命令行。
+- 独立使用自定义模型：AI Console 提供独立 Agent，使用工作台自己的 API 服务与模型配置；第三方 Agent 的设置、登录和模型继续由各软件管理。添加自定义模型是增加可选项，保留已有服务和模型。
 
 非目标（本版不做）：
 
-- 不自研 Agent 和模型调用，只做编排和界面。
+- 不训练基础模型。独立 Agent 的执行器可以复用经核实的独立引擎，或实现工作台自己的执行逻辑；选型另行说明，不能借用、更换第三方软件的认证来冒充独立 Agent。
 - 不直接控制各家的图形界面（CodeBuddy 编辑器、Claude 桌面版等），只调用它们的命令行引擎。
 - 不做外网访问、手机应用、多机管理（预留扩展点）。
 
@@ -46,7 +48,7 @@
 │ AgentRegistry   AssetService     PluginHost                   │
 │ EventStore/EventBus   Notifier   AuthService                  │
 │ ─────────────────────────────────────────────────────────── │
-│ ACP Client（统一，@agentclientprotocol/sdk）                   │
+│ ACP Client（第三方 Agent）  独立 Agent Runtime → 自定义模型 API │
 └──┬──────────┬──────────────┬─────────────────┬────────────────┘
    │ACP       │ACP           │ACP              │ZCode Protocol→ACP 桥
  claude      codex     codebuddy / workbuddy  zcode 引擎
@@ -57,9 +59,9 @@
 
 1. Gateway 是唯一核心，不带界面，所有状态都在它这里。界面关掉，任务照样跑。
 2. 客户端是"瘦"的，只负责显示和发指令；任何客户端断开重连，都能从 Gateway 恢复完整状态。
-3. Agent 统一走 ACP（Agent Client Protocol）。不支持 ACP 的，写桥接层转成 ACP，上层不感知差异。
+3. 第三方 Agent 通过 ACP（Agent Client Protocol）接入；不支持 ACP 的写桥接层。AI Console 独立 Agent 使用工作台自己的模型连接与执行器，通过统一适配器接口报告事件、工具和审批，上层任务界面共用。
 4. 上下文由工作台持有（事件记录 + 工作区 + 任务文档 + 结构化记忆），不解析各家私有的会话文件；能用 Agent 原生恢复时优先用原生恢复。
-5. 能力以 ACP 握手结果为准，不在代码里写死。同一操作按能力分级降级，界面如实显示走的是哪一级。
+5. 第三方能力以 ACP 握手结果为准；独立 Agent 的能力由其执行器及所选接口的已核实能力报告，未知保持未知。同一操作按能力分级降级，界面如实显示走的是哪一级。
 
 ## 3. 部署形态
 
@@ -187,10 +189,8 @@ interface AgentAdapter {
   install?(progress: ProgressFn): Promise<void>;   // 仅 npm 类 Agent 支持一键安装
   update?(progress: ProgressFn): Promise<void>;
 
-  // 账号
-  authMethods: AuthMethod[];          // 'oauth' | 'apiKey' | 'customEndpoint'
-  login(profile: AccountProfile): Promise<void>;   // oauth：打开浏览器授权
-  buildEnv(profile: AccountProfile): Record<string, string>;  // 启动时注入的环境变量
+  // 配置：第三方沿用自身设置；独立 Agent 的服务配置由工作台管理
+  // 旧 login / buildEnv 的账号替换设计不再作为第三方接入要求，正式契约见 phase-1 9.15
 
   // 模型
   listModels(profile: AccountProfile): Promise<ModelInfo[]>;
@@ -232,13 +232,24 @@ interface AgentCaps {
 
 ### 6.4 账号配置与环境隔离
 
-- 每个 Agent 可以有多个账号配置：订阅登录、官方 API Key、自定义地址（兼容第三方中转）。
-- 启动 Agent 进程时，通过环境变量和独立配置目录注入本次使用的账号，不修改用户的全局配置。用户在别处使用 `claude-api`、`codex-api` 等切换工具不受影响。
-- 自定义地址配置需要填写：显示名称、Base URL、API Key、模型列表（可从接口拉取或手动填写）。
-- 登录在哪里完成，按 Agent 分开：
-  - Claude Code、Codex：在工作台里用浏览器授权，或填 API Key。
-  - CodeBuddy：在工作台里用浏览器登录（微信 / Google·GitHub / iOA），登录信息由引擎自己保存在 `~/.codebuddy`。
-  - WorkBuddy：在 WorkBuddy 软件里登录，工作台沿用它的登录状态，不提供登录按钮。
+2026-11-08 用户决定：第三方 Agent 接入与工作台自定义模型配置分别管理。此前“给 Claude / Codex / CodeBuddy 添加 API 账号，再注入该 Agent 认证”的设计作废；旧实现及测试记录保留用于追溯，整改见 ISSUE-0029。
+
+#### 6.4.1 第三方 Agent 的自身配置
+
+- Claude Code、Codex、CodeBuddy、WorkBuddy、ZCode 使用各自已经配置的 API、登录和模型，包括用户在该软件内添加的自定义模型。
+- AI Console 不替它们切换 API 服务、不注入工作台的 API Key、不代为登录或登出，也不改写或复制它们的设置与凭据文件。需要配置或登录时，引导用户到对应软件完成，再回工作台重新检测。
+- 模型和思考强度通过 Agent 声明的会话能力选择，只作用于工作台当前会话；不能改写该软件的全局默认设置。Agent 未暴露的自定义模型如实显示为不可用，不猜模型名或借用其他账号目录。
+- 工作台任务权限与审批仍按统一规则执行；若引擎无法在保留自身设置的同时遵守任务审批约束，应报告不兼容，不能静默修改用户设置或放行。
+
+#### 6.4.2 AI Console 独立 Agent 与自定义模型
+
+- 独立 Agent 在选择器中是单独的执行者，拥有自己的会话、工具执行和审批。现有“演示 Agent”不能视为该功能已实现。
+- API 服务配置属于工作台：显示名称、接口协议、Base URL、API Key；模型条目归属该服务，可从接口获取或手填。一个服务可有多个模型，新增条目不替换已有模型、服务或默认值。
+- 任务显式选择服务和模型后，由独立执行器调用该接口。该 Key 只发送到所选服务，不注入 Claude、Codex、CodeBuddy、WorkBuddy、ZCode 的进程，不以各家订阅登录作为前置条件。连接失败只报错，不自动回退到第三方登录或其他服务计费。
+- 密钥使用工作台的 Windows DPAPI 存储；配置、缓存与独立执行器状态存放在工作台数据目录。不读取、不复制第三方 Agent 的凭据；日志、事件、导出内容不含 Key 或附件正文。
+- 网页统一经 `/api/v1` 管理服务、模型与任务；凭据由 Gateway 使用，浏览器不直连模型服务。协议类型只在 packages/protocol 定义，并按只增不改规则演进。
+- 删除工作台服务只影响本服务与自有凭据。有关联任务时明确提示影响，不删除第三方设置或历史。已有错误归属到第三方名下的测试配置先标明来源并停止使用，待迁移与清理方案落实后处理，不自动转换成第三方账号。
+- 独立执行器、首批接口协议、工具集、持久化与迁移的具体实现规格仍需补齐；本节是用户确认的产品边界，不表示代码已经完成。
 
 ### 6.5 ZCode 桥接
 
@@ -249,14 +260,14 @@ interface AgentCaps {
 
 ### 6.6 Agent 或模型更新后怎么同步
 
-原则：工作台不内置任何模型清单，模型列表一律从 Agent 那里实时取。所以绝大多数情况下会自动同步，不需要你操作。
+原则：第三方 Agent 的模型从它自身实时获取；AI Console 独立 Agent 的模型从工作台所选 API 服务获取或手填。两者分别维护，不串用模型目录或认证。
 
 模型列表从哪来：
 
 | 账号类型 | 来源 | 何时刷新 |
 |---|---|---|
-| 订阅登录 / 官方 API Key | Agent 在 ACP `session/new` 返回的 `configOptions`（model 类别），以及适配器的 `listModels` | 每次新建会话时；每天后台探测一次；检测到 Agent 版本变化时立即探测 |
-| 自定义地址（第三方中转） | 该地址的 `/models` 接口；接口不提供时用你手填的列表 | 同上；账号卡片上有 [刷新模型列表] |
+| 第三方 Agent 自身配置 | Agent 在 ACP `session/new` 返回的 `configOptions`（model 类别），以及适配器的 `listModels`；包含其自身已配置且暴露的自定义模型 | 每次新建会话时；每天后台探测一次；检测到 Agent 版本变化时立即探测 |
+| AI Console 独立 Agent 的 API 服务 | 按所选协议查询服务的模型接口；不提供时用手填列表，不覆盖其他服务的模型 | 添加或手动刷新服务时；是否后台刷新按后续实现规格确定 |
 
 三种更新情况：
 
@@ -361,9 +372,10 @@ switch(task, target):              // target = {agentId, profileId, modelId}
       else: 走交接（第 3 种情况）
 
   elif target.agentId == cur.agentId:
-      // 2. 同 Agent 换账号
-      结束进程 → 用新账号环境变量重启 → session/resume(或 load)(agent_session_id)
-      若会话不存在（会话存储随账号隔离）：走交接，并提示用户原因
+      // 2. 独立 Agent 换工作台 API 服务；第三方不在工作台换认证
+      若是第三方 Agent：提示在该软件中管理配置，结束本次账号切换
+      若是独立 Agent：保留工作台会话历史，使用显式选择的服务和模型继续
+      新接口不能表达原历史时按交接规则处理；不把密钥放进历史或交接包
 
   else:
       // 3. 跨 Agent
@@ -912,7 +924,7 @@ interface AssetMeta {
 ### 12.3 接入方式
 
 - 新增 Agent：
-  - 原生支持 ACP 的 Agent（OpenCode、Gemini CLI、Letta Code 等），只写清单就能接入，由 `generic-acp` 适配器负责启动、探测能力、注入账号。
+  - 原生支持 ACP 的 Agent（OpenCode、Gemini CLI、Letta Code 等），由 `generic-acp` 适配器按清单启动并探测能力，沿用该软件自身配置，不注入工作台 API 认证。
   - 不支持 ACP 的 Agent，由插件自带桥接程序，对上说 ACP（同 ZCode 的做法）。
   - Zed 使用的 ACP Registry 以后可以作为"从目录添加 Agent"的数据源，它的格式和许可待验证。
 - 新增预览器：
@@ -1246,7 +1258,7 @@ audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, action TEXT, de
 | 阶段 | 内容 | 验收标准 |
 |---|---|---|
 | M1 骨架 | monorepo、Gateway、界面框架、假 Agent、事件存储与 WebSocket | 用假 Agent 完成一次对话；刷新页面后对话完整恢复 |
-| M2 接入 | Claude Code、Codex、CodeBuddy 适配器；Agent 管理页；账号配置 | 三个 Agent 都能在界面里登录、选模型、完成对话 |
+| M2 接入 | 第三方适配器与管理页；工作台独立 Agent 及自有 API 服务 / 模型（2026-11-08 更正） | 第三方沿用自身配置完成对话；独立 Agent 使用自有 API 对话与审批，新增模型保留原配置；具体规格见 phase-1 9.15 |
 | M3 任务 | 任务派发、worktree、diff、合并/丢弃、影子快照、审批规则 | 在 git 项目和非 git 项目各完成一个改代码任务并合并/回滚 |
 | M4 切换与记忆 | 会话内换模型、换账号、L1 任务账本、自动交接 H2–H4、覆盖校验与探针问答、aic_history 工具、L2 项目记忆（FTS5） | 同一任务从 Claude Code 交接到 Codex 全程不弹窗，交接后能继续完成且不重复已完成的改动；覆盖校验对 git diff 中的文件和失败命令 100% 覆盖；探针问答平均通过率 ≥ 85%；token 估算误差在 ±20% 以内 |
 | M5 桌面与局域网 | Tauri 安装包、托盘、自启、自动更新、局域网配对 | 在另一台电脑或手机浏览器上配对后完成一次审批 |
@@ -1283,10 +1295,10 @@ audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, action TEXT, de
 
 需要实测或验证：
 
-1. 各 Agent 在订阅登录时，会话记录是否随账号隔离（影响 7.4 "换账号"能否无损）。M2 阶段实测。
-2. 已解决：CodeBuddy 与 WorkBuddy 拆成两个 Agent，CodeBuddy 在工作台里单独登录（2026-11-07）。仍待确认：CodeBuddy `--acp` 的 resume、set_config_option 支持情况；WorkBuddy 精简引擎能否经 ACP 驱动（ISSUE-0016）。
+1. AI Console 独立 Agent 的执行器选型、首批接口协议、工具集与旧工作台测试配置迁移。尚未实现，不沿用第三方认证替换路线（2026-11-08 用户澄清，ISSUE-0029）。
+2. 已解决：CodeBuddy 与 WorkBuddy 拆成两个 Agent（2026-11-07）；登录各由自身管理（2026-11-08 更正）。仍待确认：CodeBuddy `--acp` 的 resume、set_config_option 支持情况；WorkBuddy 精简引擎能否经 ACP 驱动（ISSUE-0016）。
 3. ZCode app-server 的消息格式。M6 前抓包确认。
-4. claude-agent-acp、codex-acp 能否在不重启进程的情况下切换账号（目前按"必须重启"设计）。
+4. 第三方适配器在沿用自身设置时，能否完整报告自定义模型，并保证任务会话切换不改写软件全局默认。工作台不研究替换第三方登录作为解决方案。
 5. token 估算方法和各模型窗口大小的数据来源。M4 校准。
 6. 文件监听库、图片库在 Node SEA 打包下能否加载原生模块。M7 前验证。
 6a. Windows 唤醒计时器在常见笔记本电源设置下是否可靠；各 Agent 是否通过 ACP 报告订阅额度。M8 前验证。

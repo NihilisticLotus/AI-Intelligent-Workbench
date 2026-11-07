@@ -1,5 +1,5 @@
 // 工具持久意图与状态转换。恢复仅标记中断，不执行、补做或重试工具。
-import { IndependentCommandOutcome, IndependentToolIntent, IndependentToolRecord, type IndependentToolState } from '@aic/protocol';
+import { IndependentCommandOutcome, IndependentToolIntent, IndependentToolRecord, IndependentFileWriteOutcome, type IndependentToolState } from '@aic/protocol';
 import type { Db, Row } from '../db';
 import { Errors, newId, now } from '../util';
 
@@ -11,7 +11,8 @@ export class IndependentToolJournal {
       turnId: row.turn_id, callId: row.call_id, toolName: row.tool_name, inputHash: row.input_hash,
       state: row.state, createdAt: row.created_at, updatedAt: row.updated_at,
       pid: row.pid, processStartedAt: row.process_started_at,
-      outcome: row.outcome_json === null ? null : JSON.parse(String(row.outcome_json)) });
+      outcome: row.outcome_json === null ? null : JSON.parse(String(row.outcome_json)),
+      ...(row.file_outcome_json == null ? {} : { fileOutcome: JSON.parse(String(row.file_outcome_json)) }) });
   }
 
   get(id: string): IndependentToolRecord {
@@ -82,6 +83,16 @@ export class IndependentToolJournal {
       const record = this.get(id);
       if (record.state !== 'running') throw Errors.invalidState('工具已结束或尚未执行，不能覆写结果');
       this.db.run('UPDATE independent_tool_calls SET state = ?, outcome_json = ?, updated_at = ? WHERE id = ? AND state = ?', state, JSON.stringify(outcome), now(), id, 'running');
+      return this.get(id);
+    });
+  }
+  finishFile(id: string, input: IndependentFileWriteOutcome): IndependentToolRecord {
+    const outcome = IndependentFileWriteOutcome.parse(input);
+    return this.db.tx(() => {
+      const record = this.get(id);
+      if (record.state !== 'running') throw Errors.invalidState('工具已结束或尚未执行，不能覆写文件结果');
+      const state = outcome.status === 'written' ? 'succeeded' : outcome.status === 'cancelled' ? 'cancelled' : outcome.status === 'interrupted' ? 'interrupted' : 'failed';
+      this.db.run('UPDATE independent_tool_calls SET state=?,file_outcome_json=?,updated_at=? WHERE id=? AND state=?', state, JSON.stringify(outcome), now(), id, 'running');
       return this.get(id);
     });
   }

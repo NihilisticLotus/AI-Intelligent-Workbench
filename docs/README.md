@@ -6,7 +6,7 @@
 
 | 文档 | 说明 |
 |---|---|
-| [design/design.md](design/design.md) | 架构设计 v0.4.9：独立模型发现、内部工具循环与完整会话、预算 / 压缩来源 / 恢复及执行器底线 |
+| [design/design.md](design/design.md) | 架构设计 v0.4.10：多服务模型、内部循环与会话、项目文本工具 / 规则 / 审批备份及执行器底线 |
 | [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.5：多服务模型、发现预览与来源核对、批量导入、人工修订及冲突处理 |
 | [prototype/index.html](prototype/index.html) | 可点击原型（双击打开）：工作台、看板、Agent、资产、生成、自动化、监控、能力 |
 

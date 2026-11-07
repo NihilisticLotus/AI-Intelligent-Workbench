@@ -72,6 +72,7 @@ export class IndependentTurnEngine {
           }
           if (isStopped()) return finish(stopped());
           this.store.tool(id, owner, result);
+          if (result.outcome === 'interrupted') return finish('tool_error');
         }
         continue;
       }

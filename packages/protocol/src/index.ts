@@ -667,6 +667,7 @@ export const IndependentToolRecord = IndependentToolIntent.extend({
   id: Id, state: IndependentToolState, createdAt: Ts, updatedAt: Ts,
   pid: z.number().int().positive().nullable(), processStartedAt: Ts.nullable(),
   outcome: IndependentCommandOutcome.nullable(),
+  fileOutcome: z.lazy(() => IndependentFileWriteOutcome).optional(),
 });
 export type IndependentToolRecord = z.infer<typeof IndependentToolRecord>;
 
@@ -872,3 +873,93 @@ export interface IndependentToolDriver {
   /** 收到取消后实际关闭工具资源再 settle；循环等待该 promise，不将信号当作收尾。 */
   execute(call: IndependentToolCall, identity: { taskId: string; sessionId: string; turnId: string }, signal: AbortSignal): Promise<IndependentToolMessage>;
 }
+
+// ---------- 独立 Agent：项目文本工具与修改凭据 ----------
+export const IndependentRelativePath = z.string().min(1).max(1000).refine((s) => {
+  if (s.startsWith('/') || /[\\:\x00-\x1f\x7f]/.test(s)) return false;
+  return s.split('/').every((part) => part.length > 0 && part !== '.' && part !== '..' && part.length <= 200
+    && !/[. ]$/.test(part) && !/[<>"|?*]/.test(part)
+    && !/^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(part));
+}, '需要工作区内使用正斜杠的相对路径');
+export type IndependentRelativePath = z.infer<typeof IndependentRelativePath>;
+export const IndependentFileWriteSpec = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('create'), path: IndependentRelativePath, content: z.string().max(512 * 1024), createParents: z.boolean() }).strict(),
+  z.object({ kind: z.literal('replace'), path: IndependentRelativePath, expectedHash: z.string().regex(/^[a-f0-9]{64}$/),
+    oldText: z.string().min(1).max(512 * 1024), newText: z.string().max(512 * 1024) }).strict(),
+]);
+export type IndependentFileWriteSpec = z.infer<typeof IndependentFileWriteSpec>;
+export const IndependentFileWriteOutcome = z.object({
+  status: z.enum(['written', 'conflict', 'cancelled', 'interrupted', 'failed']), path: IndependentRelativePath,
+  beforeHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(), afterHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+  receiptId: Id.nullable(), durationMs: z.number().nonnegative(), message: z.string().max(300),
+}).strict();
+export type IndependentFileWriteOutcome = z.infer<typeof IndependentFileWriteOutcome>;
+export const IndependentFileReceipt = z.object({
+  id: Id, toolId: Id, taskId: Id, sessionId: Id, path: IndependentRelativePath,
+  workspaceHash: z.string().regex(/^[a-f0-9]{64}$/), beforeHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),
+  afterHash: z.string().regex(/^[a-f0-9]{64}$/), state: z.enum(['prepared', 'written', 'unknown']),
+  createdAt: Ts, updatedAt: Ts,
+}).strict();
+export type IndependentFileReceipt = z.infer<typeof IndependentFileReceipt>;
+/** 审批核对的私有正文，只通过受鉴权的按需读取交给界面，不进入事件或日志。 */
+export const IndependentFileProposal = z.object({
+  record: IndependentToolRecord, kind: z.enum(['create', 'replace']), path: IndependentRelativePath,
+  beforeText: z.string().max(512 * 1024).nullable(), afterText: z.string().max(512 * 1024),
+  beforeHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(), afterHash: z.string().regex(/^[a-f0-9]{64}$/),
+  workspaceHash: z.string().regex(/^[a-f0-9]{64}$/), rulesFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+export type IndependentFileProposal = z.infer<typeof IndependentFileProposal>;
+export const IndependentFileReadSpec = z.object({ path: IndependentRelativePath,
+  startLine: z.number().int().min(1).max(1_000_000), maxLines: z.number().int().min(1).max(1000),
+}).strict();
+export type IndependentFileReadSpec = z.infer<typeof IndependentFileReadSpec>;
+export const IndependentFileReadResult = z.object({ path: IndependentRelativePath,
+  sha256: z.string().regex(/^[a-f0-9]{64}$/), fileId: z.string().min(1).max(100), size: z.number().int().nonnegative(),
+  text: z.string().max(64 * 1024), startLine: z.number().int().positive(), endLine: z.number().int().nonnegative(),
+  totalLines: z.number().int().nonnegative(), truncated: z.boolean(), bom: z.boolean(),
+  lineEnding: z.enum(['lf', 'crlf', 'cr', 'mixed', 'none']),
+}).strict();
+export type IndependentFileReadResult = z.infer<typeof IndependentFileReadResult>;
+export const IndependentFileListSpec = z.object({ directory: IndependentRelativePath.nullable(), query: z.string().max(200),
+  maxEntries: z.number().int().min(1).max(2000),
+}).strict();
+export type IndependentFileListSpec = z.infer<typeof IndependentFileListSpec>;
+export const IndependentFileListResult = z.object({ paths: z.array(IndependentRelativePath).max(2000),
+  skipped: z.number().int().nonnegative(), truncated: z.boolean(),
+}).strict();
+export type IndependentFileListResult = z.infer<typeof IndependentFileListResult>;
+export const IndependentFileSearchSpec = z.object({ directory: IndependentRelativePath.nullable(), query: z.string().min(1).max(2000),
+  caseSensitive: z.boolean(), maxMatches: z.number().int().min(1).max(200),
+}).strict();
+export type IndependentFileSearchSpec = z.infer<typeof IndependentFileSearchSpec>;
+export const IndependentFileSearchResult = z.object({ matches: z.array(z.object({ path: IndependentRelativePath,
+  line: z.number().int().positive(), text: z.string().max(1000), textTruncated: z.boolean(),
+}).strict()).max(200), scannedFiles: z.number().int().nonnegative(), scannedBytes: z.number().int().nonnegative(),
+  skipped: z.number().int().nonnegative(), truncated: z.boolean(),
+}).strict();
+export type IndependentFileSearchResult = z.infer<typeof IndependentFileSearchResult>;
+export const IndependentProjectRules = z.object({ files: z.array(z.object({ path: IndependentRelativePath, sha256: z.string().regex(/^[a-f0-9]{64}$/),
+  text: z.string().max(256 * 1024),
+}).strict()).max(33), fingerprint: z.string().regex(/^[a-f0-9]{64}$/), complete: z.boolean(), notices: z.array(z.string().max(300)).max(33),
+}).strict();
+export type IndependentProjectRules = z.infer<typeof IndependentProjectRules>;
+export const IndependentProjectRulesSpec = z.object({ target: IndependentRelativePath.nullable() }).strict();
+export const IndependentFileApprovalDecision = z.object({ approved: z.boolean(), reason: z.string().max(2000) }).strict();
+export type IndependentFileApprovalDecision = z.infer<typeof IndependentFileApprovalDecision>;
+/** 固定宿主 IPC，不进入公开事件；base64 只为可靠传输，不代表加密。 */
+export const IndependentFileFailureReason = z.enum(['forbidden', 'not_found', 'busy', 'conflict', 'too_large', 'binary', 'io_error', 'cancelled', 'interrupted']);
+export type IndependentFileFailureReason = z.infer<typeof IndependentFileFailureReason>;
+const FileHostFailure = z.object({ ok: z.literal(false), reason: IndependentFileFailureReason }).strict();
+export const IndependentFileHostReadReply = z.union([FileHostFailure, z.object({ ok: z.literal(true),
+  data: z.string().max(1024 * 1024).regex(/^[A-Za-z0-9+/]*={0,2}$/), hash: z.string().regex(/^[a-f0-9]{64}$/), fileId: z.string().regex(/^[a-f0-9]{8}-[a-f0-9]{16}$/),
+}).strict()]);
+export const IndependentFileHostWriteReply = z.union([FileHostFailure, z.object({ ok: z.literal(true), hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict()]);
+export const IndependentFileHostSearchReply = z.union([FileHostFailure, z.object({ ok: z.literal(true), found: z.object({
+  Matches: z.array(z.object({ Path: IndependentRelativePath, TextBase64: z.string().max(8000), Line: z.number().int().positive(), TextTruncated: z.boolean() }).strict()).max(200),
+  ScannedFiles: z.number().int().nonnegative().max(2000), ScannedBytes: z.number().int().nonnegative().max(16 * 1024 * 1024), Skipped: z.number().int().nonnegative(), Truncated: z.boolean(),
+}).strict() }).strict()]);
+export const IndependentFileHostRulesReply = z.union([FileHostFailure, z.object({ ok: z.literal(true), items: z.array(z.union([
+  FileHostFailure.extend({ path: IndependentRelativePath }),
+  z.object({ path: IndependentRelativePath, ok: z.literal(true), data: z.string().max(512 * 1024).regex(/^[A-Za-z0-9+/]*={0,2}$/),
+    hash: z.string().regex(/^[a-f0-9]{64}$/), fileId: z.string().regex(/^[a-f0-9]{8}-[a-f0-9]{16}$/) }).strict(),
+])).max(33) }).strict()]);

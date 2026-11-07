@@ -20,14 +20,14 @@ async function upload(token: string, taskId: string, b: Buffer, name = '../截�
 }
 describe('附件接口和迁移 v5', () => {
   it('迁移只追加，并能重新打开已有数据库', async () => {
-    const { s,task } = await setup(); expect(SCHEMA_VERSION).toBe(9); expect(s.db.get<{user_version:number}>('PRAGMA user_version')?.user_version).toBe(SCHEMA_VERSION);
+    const { s,task } = await setup(); expect(SCHEMA_VERSION).toBe(10); expect(s.db.get<{user_version:number}>('PRAGMA user_version')?.user_version).toBe(SCHEMA_VERSION);
     expect(s.db.all('PRAGMA table_info(attachments)').length).toBe(11);
     const file=path.join(t!.dataDir,'migration.db');const db = openDb(file);
     const oldTask=s.db.get<Record<string,SqlValue>>('SELECT * FROM tasks WHERE id = ?',task.id)!;
     db.run(`INSERT INTO tasks (${Object.keys(oldTask).join(',')}) VALUES (${Object.keys(oldTask).map(()=>'?').join(',')})`,...Object.values(oldTask));
     db.run('INSERT INTO task_drafts (task_id,text,annotations_json,updated_at) VALUES (?,?,?,?)',task.id,'历史草稿','[]',1);db.close();
     // 构造与已发布 v4 一致的表形状，再执行真实升级，验证历史草稿保留。
-    const v4=new DatabaseSync(file);v4.exec('DROP TABLE independent_checkpoints; DROP TABLE independent_messages; DROP TABLE independent_turns; DROP TABLE independent_discoveries; DROP TABLE independent_task_models; DROP TABLE independent_models; DROP TABLE independent_services; DROP TABLE independent_tool_calls; DROP TABLE attachments; DROP TABLE model_failures; ALTER TABLE task_drafts DROP COLUMN attachments_json; PRAGMA user_version=4;');v4.close();
+    const v4=new DatabaseSync(file);v4.exec('DROP TABLE independent_file_receipts; DROP TABLE independent_checkpoints; DROP TABLE independent_messages; DROP TABLE independent_turns; DROP TABLE independent_discoveries; DROP TABLE independent_task_models; DROP TABLE independent_models; DROP TABLE independent_services; DROP TABLE independent_tool_calls; DROP TABLE attachments; DROP TABLE model_failures; ALTER TABLE task_drafts DROP COLUMN attachments_json; PRAGMA user_version=4;');v4.close();
     const db2 = openDb(file); expect(db2.all('SELECT * FROM model_failures')).toEqual([]);expect(db2.all('PRAGMA table_info(task_drafts)').some((c)=>c.name==='attachments_json')).toBe(true);expect(db2.get('SELECT text,attachments_json FROM task_drafts WHERE task_id = ?',task.id)).toEqual({text:'历史草稿',attachments_json:null}); db2.close();
   });
   it('上传按头判断、清洗名字；下载带鉴权和安全响应头', async () => {

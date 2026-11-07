@@ -56,6 +56,12 @@ describe('完整独立会话与循环', () => {
     expect((await engine.run(create().id)).status).toBe('completed');
     expect(store.entries('session')[2]!.message).toMatchObject({ outcome: 'rejected', text: '用户拒绝修改' });
   });
+  it('工具明确返回中断结果时停止续传，不能让模型自动再次请求未定操作', async () => {
+    const { engine, model, create, store } = setup([toolReply, finalReply], async (input) => ({ role: 'tool', callId: input.id, name: input.name, text: '副作用未知，需要人工核对', outcome: 'interrupted' }));
+    const turn = create(); expect(await engine.run(turn.id)).toMatchObject({ stop: 'tool_error', status: 'failed' });
+    expect(model.complete).toHaveBeenCalledTimes(1); expect(store.pending(turn.id)).toEqual([]);
+    expect(store.entries('session')[2]!.message).toMatchObject({ outcome: 'interrupted' });
+  });
   it('工具严格校验拿到数字原值，失败不会将其转换后执行或自动重试', async () => {
     let effects = 0;
     const { engine, store, create, tools } = setup([{ ...toolReply, toolCalls: [{ ...call, arguments: { program: 123, args: [], timeoutMs: 1000, maxOutputBytes: 4096 } }] }], async (input) => {
@@ -264,11 +270,11 @@ describe('原始记录、压缩和跨进程恢复', () => {
     expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(2 * 1024 * 1024); expect(result.text).toContain('截断');
     store.finish(turn.id, owner, 'interrupted'); expect(store.pending(turn.id)).toEqual([]);
   });
-  it('v8 升 v9 保留旧草稿、会话与发现表，重开不重复迁移', () => {
+  it('v8 升至当前版本保留旧草稿、会话与发现表，重开不重复迁移', () => {
     const file = path.join(temporary(), 'migration.db'); const current = openDb(file); seed(current);
     current.run("INSERT INTO task_drafts(task_id,text,annotations_json,updated_at) VALUES ('task','原草稿','[]',1)"); current.close();
-    const old = new DatabaseSync(file); old.exec('DROP TABLE independent_checkpoints; DROP TABLE independent_messages; DROP TABLE independent_turns; PRAGMA user_version=8;'); old.close();
-    for (let i = 0; i < 2; i++) { const db = openDb(file); expect(db.get('PRAGMA user_version')).toEqual({ user_version: 9 });
+    const old = new DatabaseSync(file); old.exec('DROP TABLE independent_file_receipts; ALTER TABLE independent_tool_calls DROP COLUMN file_outcome_json; DROP TABLE independent_checkpoints; DROP TABLE independent_messages; DROP TABLE independent_turns; PRAGMA user_version=8;'); old.close();
+    for (let i = 0; i < 2; i++) { const db = openDb(file); expect(db.get('PRAGMA user_version')).toEqual({ user_version: 10 });
       expect(db.get('SELECT text FROM task_drafts')).toEqual({ text: '原草稿' }); expect(db.all('SELECT * FROM independent_discoveries')).toEqual([]);
       expect(db.get('SELECT id FROM sessions')).toEqual({ id: 'session' });
       expect(new IndependentConversationStore(db).entries('session')).toEqual([]); db.close(); }

@@ -187,6 +187,19 @@ const MIGRATIONS: string[] = [
     UNIQUE(session_id,through_seq)
   );
   `,
+  // v10：文件修改原文备份与无正文结果；原文只在专用私有表，不进入工具意图或事件。
+  `
+  ALTER TABLE independent_tool_calls ADD COLUMN file_outcome_json TEXT;
+  CREATE TABLE independent_file_receipts (
+    id TEXT PRIMARY KEY, tool_id TEXT NOT NULL UNIQUE REFERENCES independent_tool_calls(id) ON DELETE CASCADE,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    path TEXT NOT NULL, workspace_hash TEXT NOT NULL, before_hash TEXT, after_hash TEXT NOT NULL,
+    original BLOB, state TEXT NOT NULL CHECK(state IN ('prepared','written','unknown')),
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+    CHECK(original IS NULL OR length(original)<=524288)
+  );
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

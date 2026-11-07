@@ -56,6 +56,12 @@ export const ErrorCode = {
   ProfileInUse: 'profile.in_use',
   SecretUnavailable: 'secret.unavailable',
   SessionNotRecoverable: 'session.not_recoverable',
+  AgentNoResponse: 'agent.no_response',
+  AttachmentUnsupported: 'attachment.unsupported',
+  AttachmentTooLarge: 'attachment.too_large',
+  AttachmentTooMany: 'attachment.too_many',
+  AttachmentNotFound: 'attachment.not_found',
+  AttachmentBadType: 'attachment.bad_type',
 } as const;
 
 /**
@@ -104,6 +110,7 @@ export const Hello = z.object({
   lastSeq: z.number().int().nonnegative(),
   /** 1.1 新增：每次 Gateway 启动都会变的标识；客户端据此判断服务是否重启过 */
   bootId: z.string().optional(),
+  lastExit: z.object({ clean: z.boolean(), at: Ts, reason: z.string().nullable() }).nullable().optional(),
 });
 export type Hello = z.infer<typeof Hello>;
 
@@ -128,7 +135,7 @@ export const Task = z.object({
 });
 export type Task = z.infer<typeof Task>;
 
-export const ModelInfo = z.object({ id: z.string(), name: z.string(), contextWindow: z.number().int().nullable() });
+export const ModelInfo = z.object({ id: z.string(), name: z.string(), contextWindow: z.number().int().nullable(), vision: z.boolean().nullable().optional() });
 export type ModelInfo = z.infer<typeof ModelInfo>;
 
 // ---------- 1.2 新增：Agent 的登录方式、能力、账号概要（phase-1.md 6.6.1） ----------
@@ -199,8 +206,23 @@ export const AgentInfo = z.object({
   enabled: z.boolean().optional(),
   /** 2026-11-07 新增：装了但这个版本还不能在工作台里用（WorkBuddy 精简引擎、ZCode 等桥接）；status 仍为 error，message 写明原因 */
   unsupported: z.boolean().optional(),
+  modelFailures: z.array(z.object({ profileId: Id.nullable(), model: z.string(), reason: z.string(), at: Ts })).optional(),
 });
 export type AgentInfo = z.infer<typeof AgentInfo>;
+
+/** 模型报告优先，其次使用 Agent 报告；没有报告就保持未知。 */
+export function visionOf(info: Pick<AgentInfo, 'models' | 'caps'> | undefined, modelId: string | null): boolean | null {
+  return info?.models.find((m) => m.id === modelId)?.vision ?? info?.caps?.prompt.image ?? null;
+}
+
+export const AttachmentInfo = z.object({
+  id: Id, name: z.string().max(255), mime: z.string(), size: z.number().int().nonnegative(),
+  kind: z.enum(['image', 'file']), width: z.number().int().positive().nullable(), height: z.number().int().positive().nullable(), createdAt: Ts,
+});
+export type AttachmentInfo = z.infer<typeof AttachmentInfo>;
+/** 仅服务端和适配器之间传递，路径不返回客户端。 */
+export type PromptAttachment = Pick<AttachmentInfo, 'kind' | 'mime' | 'name' | 'width' | 'height'> & { path: string; uri: string };
+export type PromptInput = { text: string; attachments?: PromptAttachment[] };
 
 export const Approval = z.object({
   id: Id, taskId: Id, sessionId: Id,
@@ -230,11 +252,12 @@ export const EventEnvelope = z.discriminatedUnion('type', [
     profileId: Id.nullable().optional(), resumed: z.boolean().optional(),
   })),
   ev('session.ended', z.object({ reason: z.string() })),
-  ev('message.user', z.object({ messageId: Id, text: z.string() })),
+  ev('message.user', z.object({ messageId: Id, text: z.string(), attachments: z.array(AttachmentInfo).max(10).optional() })),
   ev('message.delta', z.object({ messageId: Id, text: z.string() })),
   ev('message.done', z.object({ messageId: Id })),
   ev('thought.delta', z.object({ messageId: Id, text: z.string() })),
   ev('tool.start', z.object({ toolId: Id, kind: ToolKind, title: z.string(), target: z.string().nullable() })),
+  ev('tool.update', z.object({ toolId: Id, title: z.string().optional(), target: z.string().nullable().optional(), kind: ToolKind.optional() })),
   ev('tool.output', z.object({ toolId: Id, text: z.string() })),
   /** rejected（1.1 新增）：用户在审批里拒绝，工具没有执行；界面按“未执行”显示，不当成故障 */
   ev('tool.end', z.object({ toolId: Id, ok: z.boolean(), summary: z.string().nullable(), rejected: z.boolean().optional() })),
@@ -266,7 +289,7 @@ export const EventEnvelope = z.discriminatedUnion('type', [
     cost: z.object({ amount: z.number(), currency: z.string() }).optional(),
   })),
   /** 降级、恢复失败、强度被重置等需要告诉用户的情况：对话里的灰色提示行 */
-  ev('session.notice', z.object({ level: z.enum(['info', 'warn']), text: z.string() })),
+  ev('session.notice', z.object({ level: z.enum(['info', 'warn']), text: z.string(), id: Id.optional() })),
 ]);
 export type EventEnvelope = z.infer<typeof EventEnvelope>;
 export type EventType = EventEnvelope['type'];
@@ -284,7 +307,8 @@ export const ClientOp = z.discriminatedUnion('op', [
    * 每条连接只有一个订阅，重复 subscribe 以最后一次为准。
    */
   op('subscribe', z.object({ lastSeq: z.number().int().nonnegative(), taskIds: z.array(Id).optional() })),
-  op('prompt', z.object({ taskId: Id, text: z.string().min(1).max(100_000) })),
+  op('prompt', z.object({ taskId: Id, text: z.string().max(100_000), attachments: z.array(Id).max(10).optional() })
+    .refine((v) => !!v.text.trim() || !!v.attachments?.length, '文字和附件至少提供一个')),
   op('cancel', z.object({ taskId: Id })),
   op('approve', z.object({ approvalId: Id, optionId: z.string(), note: z.string().max(2000).optional() })),
   op('switch', z.object({
@@ -314,12 +338,14 @@ export type ServerFrame = z.infer<typeof ServerFrame>;
 // ---------- REST 请求体 ----------
 export const CreateProjectBody = z.object({ name: z.string().min(1).max(200), path: z.string().min(1).max(1000) });
 export const CreateTaskBody = z.object({
-  projectId: Id, groupId: Id.nullable().optional(), prompt: z.string().min(1).max(100_000),
+  projectId: Id, groupId: Id.nullable().optional(), prompt: z.string().max(100_000),
   title: z.string().max(200).optional(), agent: AgentKind, model: z.string().nullable().optional(),
   effort: z.string().nullable().optional(), permission: PermissionLevel.default('ask'),
   /** 1.2 新增 */
   profileId: Id.nullable().optional(),
-});
+  attachments: z.array(Id).max(10).optional(),
+  deferPrompt: z.boolean().optional(),
+}).refine((v) => !!v.prompt.trim() || !!v.attachments?.length || v.deferPrompt === true, '文字和附件至少提供一个');
 export const PatchTaskBody = z.object({
   title: z.string().max(200).optional(), groupId: Id.nullable().optional(), permission: PermissionLevel.optional(),
   autoAllowLowRisk: z.boolean().optional(), autoMergeOnPass: z.boolean().optional(),
@@ -566,6 +592,7 @@ export type DraftAnnotation = z.infer<typeof DraftAnnotation>;
 export const TaskDraft = z.object({
   text: z.string().max(100_000),
   annotations: z.array(DraftAnnotation).max(50),
+  attachments: z.array(Id).max(10).optional(),
   updatedAt: Ts.nullable(),
 });
 export type TaskDraft = z.infer<typeof TaskDraft>;

@@ -739,7 +739,7 @@ export const CreateIndependentModelBody = z.object({ remoteModelId: z.string().m
 export type CreateIndependentModelBody = z.infer<typeof CreateIndependentModelBody>;
 export const PatchIndependentModelBody = z.object({ expectedRevision: Revision, name: IndependentName.optional(), enabled: z.boolean().optional() }).strict();
 export type PatchIndependentModelBody = z.infer<typeof PatchIndependentModelBody>;
-export const PatchIndependentOverridesBody = z.object({ expectedRevision: Revision, values: IndependentCapabilityPatch }).strict();
+export const PatchIndependentOverridesBody = z.object({ expectedRevision: Revision, expectedConfigRevision: Revision.optional(), values: IndependentCapabilityPatch }).strict();
 export type PatchIndependentOverridesBody = z.infer<typeof PatchIndependentOverridesBody>;
 export const IndependentModel = z.object({
   id: Id, serviceId: Id, remoteModelId: z.string(), name: z.string(), enabled: z.boolean(), revision: Revision,

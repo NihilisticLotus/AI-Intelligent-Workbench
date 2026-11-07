@@ -8,6 +8,11 @@ import {
   type AgentKind, type AgentLoginBody, type CreateProfileBody, type DeviceKind, type PatchAgentBody, type PatchProfileBody, type PutTaskDraftBody,
 } from '@aic/protocol';
 import { z } from 'zod';
+import {
+  IndependentService, IndependentModel, IndependentDefault,
+  type CreateIndependentServiceBody, type PatchIndependentServiceBody, type CreateIndependentModelBody,
+  type PatchIndependentModelBody, type PatchIndependentOverridesBody,
+} from '@aic/protocol';
 
 /** 客户端自己产生的错误码（网络断开、超时等），不在服务端协议里 */
 export const ClientErrorCode = {
@@ -165,6 +170,19 @@ export class HttpClient {
   }
 
   // ---------- 具体接口 ----------
+  independentServices() { return this.request('GET', '/independent/services', { parse: listOf(IndependentService) }).then((r) => r.items); }
+  independentService(id: string) { return this.request('GET', `/independent/services/${encodeURIComponent(id)}`, { parse: IndependentService }); }
+  createIndependentService(body: CreateIndependentServiceBody) { return this.request('POST', '/independent/services', { body, parse: IndependentService }); }
+  patchIndependentService(id: string, body: PatchIndependentServiceBody) { return this.request('PATCH', `/independent/services/${encodeURIComponent(id)}`, { body, parse: IndependentService }); }
+  deleteIndependentService(id: string) { return this.request('DELETE', `/independent/services/${encodeURIComponent(id)}`, { parse: OkResult }); }
+  independentModels(id: string) { return this.request('GET', `/independent/services/${encodeURIComponent(id)}/models`, { parse: listOf(IndependentModel) }).then((r) => r.items); }
+  independentModel(sid: string, mid: string) { return this.request('GET', `/independent/services/${encodeURIComponent(sid)}/models/${encodeURIComponent(mid)}`, { parse: IndependentModel }); }
+  createIndependentModel(id: string, body: CreateIndependentModelBody) { return this.request('POST', `/independent/services/${encodeURIComponent(id)}/models`, { body, parse: IndependentModel }); }
+  patchIndependentModel(sid: string, mid: string, body: PatchIndependentModelBody) { return this.request('PATCH', `/independent/services/${encodeURIComponent(sid)}/models/${encodeURIComponent(mid)}`, { body, parse: IndependentModel }); }
+  deleteIndependentModel(sid: string, mid: string) { return this.request('DELETE', `/independent/services/${encodeURIComponent(sid)}/models/${encodeURIComponent(mid)}`, { parse: OkResult }); }
+  patchIndependentOverrides(sid: string, mid: string, body: PatchIndependentOverridesBody) { return this.request('PATCH', `/independent/services/${encodeURIComponent(sid)}/models/${encodeURIComponent(mid)}/overrides`, { body, parse: IndependentModel }); }
+  independentDefault() { return this.request('GET', '/independent/default', { parse: IndependentDefault }); }
+  putIndependentDefault(body: IndependentDefault) { return this.request('PUT', '/independent/default', { body, parse: IndependentDefault }); }
   hello() { return this.request('GET', '/hello', { parse: Hello }); }
   pairingStart() { return this.request('POST', '/pairing/start', { body: {}, parse: PairingStartResult }); }
   /** kind / tokenDelivery 由 Platform 决定：浏览器要 Cookie + 设备密钥，桌面和手机要 Bearer 令牌 */

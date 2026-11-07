@@ -6,8 +6,8 @@
 
 | 文档 | 说明 |
 |---|---|
-| [design/design.md](design/design.md) | 架构设计 v0.4.6：第三方原生配置、独立目录后端与能力证据、命令 / 恢复基础及执行器底线、Gateway、上下文、权限及扩展 |
-| [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.3：第三方原生配置、独立服务与多模型、能力来源 / 未知 / 冲突、动态推理选项、布局和组件规格 |
+| [design/design.md](design/design.md) | 架构设计 v0.4.7：第三方原生配置、独立目录与配置网页、能力证据、命令 / 恢复基础及执行器底线、Gateway、上下文、权限及扩展 |
+| [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.4：独立服务 / 模型配置、人工能力与来源、冲突保留草稿、在线识别及动态推理的后续规格 |
 | [prototype/index.html](prototype/index.html) | 可点击原型（双击打开）：工作台、看板、Agent、资产、生成、自动化、监控、能力 |
 
 ## 调研
@@ -33,6 +33,6 @@
 | 目录 | 说明 |
 |---|---|
 | [acceptance/](acceptance/) | 每一步的验收记录 |
-| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 稳定、补验与输入框：部分通过；第三方边界已整改，独立命令 / 恢复与目录后端已实现，正式网页、在线发现与运行时待整合（ISSUE-0029、0030） |
+| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 稳定、补验与输入框：部分通过；第三方边界已整改，独立命令 / 恢复、目录后端与配置网页已实现，在线发现与运行时待整合（ISSUE-0029、0030） |
 | [devlog/](devlog/) | 开发笔记，每月一个文件，只追加 |
 | [issues/](issues/README.md) | 问题收纳：总表 + 每个问题一个文件 |

@@ -32,6 +32,17 @@ afterEach(async () => {
 });
 
 describe('独立服务与模型目录', () => {
+  it('能力表单打开后服务路由变化，旧配置修订不能把人工值写入新范围', async () => {
+    const { catalog, db } = setup(); const s = await catalog.createService(config()); const m = catalog.createModel(s.id, { remoteModelId: 'm', name: '模型' });
+    await catalog.patchService(s.id, { expectedRevision: s.revision, baseUrl: 'https://other.example.com/v1' });
+    const eventCount = db.get<{ n: number }>('SELECT COUNT(*) AS n FROM events')!.n;
+    expect(() => catalog.overrides(s.id, m.id, { expectedRevision: m.revision, expectedConfigRevision: s.configRevision, values: { imageInput: true } })).toThrow('配置已在其他操作中改变');
+    expect(catalog.getModel(s.id, m.id).evidence).toEqual([]);
+    expect(db.get<{ n: number }>('SELECT COUNT(*) AS n FROM events')!.n).toBe(eventCount);
+    const fresh = catalog.getService(s.id);
+    const saved = catalog.overrides(s.id, m.id, { expectedRevision: m.revision, expectedConfigRevision: fresh.configRevision, values: { imageInput: false } });
+    expect(value(saved, 'imageInput').value).toBe(false); expect(saved.evidence[0]?.scope.configRevision).toBe(fresh.configRevision);
+  });
   it('两服务各两个模型，同名模型隔离，追加不替换或自动设默认', async () => {
     const { catalog } = setup(); const a = await catalog.createService(config()); const b = await catalog.createService(config({ name: '服务二', protocol: 'responses' }));
     const m = catalog.createModel(a.id, { remoteModelId: 'shared', name: '原模型' });

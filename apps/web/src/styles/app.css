@@ -1,5 +1,37 @@
 /* 正式工程新增的样式：原型里没有、但 1.1 需要的部分（演示 Agent、提示条、文件夹浏览、配对页、设置页等） */
 
+/* 独立服务与模型：沿用原型令牌，窄屏按钮换行、长 ID 不撑开页面。 */
+.independent-panel { margin: 20px 0 28px; padding: 20px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-2); }
+.independent-panel h2, .independent-panel h3 { margin: 0 0 8px; }
+.independent-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.independent-heading > div { min-width: 0; overflow-wrap: anywhere; }
+.independent-heading p { margin: 0; color: var(--fg-2); }
+.independent-panel .muted, .independent-panel > p, .independent-evidence { line-height: 1.7; }
+.independent-actions { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.independent-panel .btn, .independent-capability-body .btn { min-height: 40px; }
+.independent-service { margin-top: 16px; border: 1px solid var(--line); border-radius: var(--r-card); }
+.independent-service > summary, .independent-capability > summary { cursor: pointer; padding: 14px; overflow-wrap: anywhere; }
+.independent-service > summary span, .independent-capability > summary span { margin-left: 12px; color: var(--fg-2); font-size: var(--fs-13); }
+.independent-service-body, .independent-capability-body { padding: 0 16px 16px; }
+.independent-url { overflow-wrap: anywhere; white-space: normal; }
+.independent-model { margin-top: 16px; padding: 16px; background: var(--bg-1); border-radius: var(--r-card); }
+.independent-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 16px 0; }
+.independent-summary dt { color: var(--fg-3); font-size: var(--fs-12); }
+.independent-summary dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+.independent-fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
+.independent-fieldset > details { margin: 16px 0; }
+.independent-fieldset summary { cursor: pointer; }
+.independent-check { display: flex; gap: 10px; align-items: center; min-height: 44px; }
+.independent-capability { border-bottom: 1px solid var(--line); }
+.independent-capability-body { padding-top: 8px; }
+.independent-evidence { padding-left: 20px; font-size: var(--fs-12); color: var(--fg-2); overflow-wrap: anywhere; }
+.independent-evidence p { margin: 4px 0; }
+@media (max-width: 600px) {
+  .independent-panel { padding: 12px; }
+  .independent-service > summary span, .independent-capability > summary span { display: block; margin: 8px 0 0 16px; }
+  .independent-panel .btn, .independent-capability-body .btn { min-height: 44px; }
+}
+
 .ag.fake { background: var(--ag-fake); }
 #root { height: 100%; }
 

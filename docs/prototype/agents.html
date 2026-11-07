@@ -63,6 +63,14 @@
       <div class="page">
         <p class="page-lead">上次检测：今天 13:58。第三方 Agent 沿用软件自身的 API、登录与模型设置。只有打开的 Agent 会检测、出现在新建任务和切换器里。</p>
         <h2 class="sec-h">已启用 <span class="muted" id="on-count"></span></h2>
+        <section id="independent-preview" style="margin:20px 0;padding:20px;background:var(--bg-2);border-radius:var(--r-card)" aria-label="工作台独立 Agent">
+          <h2>工作台独立 Agent</h2>
+          <p>自己的 API 服务与模型目录。正式版已支持保存多服务、多模型、能力人工修订与默认值；在线识别和任务执行尚未接入。</p>
+          <p class="muted">下面仅演示界面，不保存密钥、不联网。刷新页面后恢复示例。</p>
+          <button class="btn primary" data-independent-add data-wired>添加 API 服务</button>
+          <p data-independent-default>默认模型：尚未设置</p>
+          <div data-independent-list></div>
+        </section>
         <div class="cards">
           <article class="agent-card" tabindex="0" aria-current="true" data-agent="claude">
             <span class="top"><span class="ag claude lg">C</span><span><span class="name">Claude Code</span><br><span class="src">npm 全局安装</span></span><span style="margin-left:auto" class="status ok"><span class="dot"></span>就绪</span></span>
@@ -126,7 +134,7 @@
             <h3>软件自身配置</h3>
             <p>API、登录和模型由软件自己管理，工作台沿用这些设置。完成配置后，回到这里重新检测。</p>
             <p>模型来自软件报告的会话能力，包含其提供的自定义模型。工作台换模型只作用于任务会话。</p>
-            <p class="muted">旧工作台测试配置已停止使用，清理功能尚未开放。AI Console 自有 API 服务归独立 Agent，功能仍待实现。</p>
+            <p class="muted">旧工作台测试配置已停止使用，清理功能尚未开放。AI Console 自有 API 服务在上方独立管理，任务执行尚未实现。</p>
           </div>
           <div>
             <h3>工作台任务默认值</h3>
@@ -149,5 +157,6 @@
 <script src="assets/attach.js"></script>
 <script src="assets/interact.js"></script>
 <script src="assets/new-task.js"></script>
+<script src="assets/independent-catalog.js"></script>
 </body>
 </html>

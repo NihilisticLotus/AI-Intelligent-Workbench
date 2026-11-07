@@ -134,7 +134,9 @@ export class IndependentCatalog {
     return this.change({ scope: 'model', action: 'updated', serviceId, modelId: id }, () => {
       const model = this.getModel(serviceId, id); this.expectRevision(model.revision, body.expectedRevision);
       const fields = Object.keys(body.values); const kept = model.evidence.filter((e) => e.kind !== 'manual' || !fields.includes(e.field));
-      const scope = capabilityScope(this.getService(serviceId), model.remoteModelId);
+      const service = this.getService(serviceId);
+      if (body.expectedConfigRevision !== undefined) this.expectRevision(service.configRevision, body.expectedConfigRevision);
+      const scope = capabilityScope(service, model.remoteModelId);
       for (const [field, value] of Object.entries(body.values)) if (value !== null && value !== undefined) kept.push(IndependentCapabilityEvidence.parse({ id: newId('ice'), field, value, kind: 'manual', scope, sourceUrl: null, sourceVersion: 'manual-v1', fieldPath: field, observedAt: now(), expiresAt: null }));
       return this.saveEvidence(serviceId, id, kept);
     }, deviceId);

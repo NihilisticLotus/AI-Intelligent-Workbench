@@ -35,11 +35,13 @@ export interface AppState extends CoreState {
   devices: Device[] | null;
   /** 1.2：各 Agent 的账号列表（按需从 /profiles 拉取，没拉过时没有这个键） */
   profiles: Partial<Record<AgentKind, AgentProfile[]>>;
+  /** 目录事件只令快照失效，不覆盖正在编辑的表单。 */
+  independentCatalogVersion: number;
 }
 
 export const appStore = createStore<AppState>({
   ...emptyCore(), boot: 'loading', bootError: null, pairRequested: false, hello: null, conn: 'idle',
-  projects: [], groups: [], history: {}, devices: null, profiles: {},
+  projects: [], groups: [], history: {}, devices: null, profiles: {}, independentCatalogVersion: 0,
 });
 export const useApp = <S>(sel: (s: AppState) => S) => useStore(appStore, sel);
 const set = (fn: (s: AppState) => AppState) => appStore.set(fn);
@@ -73,6 +75,7 @@ function flushEvents() {
 
 /** 事件带来的界面副作用：播报、系统通知 */
 function sideEffects(before: AppState, batch: EventEnvelope[]) {
+  if (batch.some((ev) => ev.type === 'independent.catalog_changed')) set((s) => ({ ...s, independentCatalogVersion: s.independentCatalogVersion + 1 }));
   for (const ev of batch) {
     if (ev.type === 'approval.requested' && !before.approvals[ev.data.approval.id] && ev.data.approval.status === 'pending') {
       const a = ev.data.approval;

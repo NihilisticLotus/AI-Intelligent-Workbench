@@ -26,6 +26,7 @@ import { AgentBadge, ErrorNotice, StatusMark, asApiError, confirmDialog, openDia
 import { Icon } from '../components/Icon';
 import { agentTestRequestStore } from '../components/focus';
 import { ProfileDialog } from './ProfileDialog';
+import { IndependentAgentPanel } from './independent-agent-panel';
 
 /** 这个页面里发起的登录：每个 Agent 记住最近一次的 loginId */
 type MyLogins = Partial<Record<AgentKind, { loginId: string; methodId: string; profileId: string | null }>>;
@@ -147,6 +148,7 @@ export function AgentsPage() {
             {lastChecked ? `上次检测：${clock(lastChecked)}。` : ''}
             第三方 Agent 沿用软件自身的 API、登录与模型设置。{toggleOn ? '只有打开的 Agent 会检测、出现在新建任务和切换器里。' : ''}
           </p>
+          <IndependentAgentPanel />
           {toggleOn ? <h2 className="sec-h">已启用 <span className="muted">{agents.length} 个</span></h2> : null}
           {!allAgents.length ? <div className="empty"><h3>还没有检测到 Agent</h3><p>点右上角的“重新检测”。</p></div>
             : !agents.length ? <div className="cards-empty">还没有启用任何 Agent。在下面打开一个就能开始用。</div> : null}
@@ -324,7 +326,7 @@ function NativeConfigSection({ a, onRedetect, redetecting }: { a: AgentInfo; onR
         <Icon name="key" /><div className="info"><b>{p.name}<span className="tag attn">已停用</span></b><span>{profileKindText[p.kind]} · {p.hasSecret ? '加密密钥已保留，不再使用' : '历史配置已保留'}</span></div>
       </div>)}
     </> : null}
-    <p className="muted-note">AI Console 自有 API 服务将由独立 Agent 使用，该功能尚未开放。</p>
+    <p className="muted-note">AI Console 自有 API 服务归本页上方的独立 Agent 管理，独立任务执行尚未开放。</p>
   </>;
 }
 

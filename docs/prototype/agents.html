@@ -71,13 +71,27 @@
             <div class="acts"><button class="btn sm attn">重新登录</button><button class="btn sm">更新到 0.63.2</button></div>
           </article>
 
-          <article class="agent-card" tabindex="0">
-            <span class="top"><span class="ag codebuddy lg">B</span><span><span class="name">CodeBuddy</span><br><span class="src">WorkBuddy 内置引擎</span></span><span style="margin-left:auto" class="status ok"><span class="dot"></span>就绪</span></span>
+          <article class="agent-card" tabindex="0" data-agent="codebuddy">
+            <span class="top"><span class="ag codebuddy lg">B</span><span><span class="name">CodeBuddy</span><br><span class="src">工作台自带的官方独立版引擎</span></span><span style="margin-left:auto" class="status wait"><span class="dot"></span>需要登录</span></span>
             <dl>
-              <dt>版本</dt><dd style="color:var(--attn)"><svg class="i" aria-hidden="true" style="width:13px;height:13px;vertical-align:-2px"><use href="#i-warn"/></svg> 4.2.0，未验证版本</dd>
-              <dt>账号</dt><dd>沿用 WorkBuddy 登录</dd>
+              <dt>版本</dt><dd>2.181.0（已验证）</dd>
+              <dt>账号</dt><dd>还没登录。在浏览器里完成，登录信息由 CodeBuddy 自己保存</dd>
               <dt>模型</dt><dd>glm-5.1、kimi-k2.5、minimax-m2.7、deepseek-v3-2</dd>
             </dl>
+            <div class="acts"><button class="btn sm attn" data-cb-login="微信">微信登录</button><button class="btn sm" data-cb-login="Google / GitHub">Google / GitHub 登录</button><button class="btn sm" data-cb-login="iOA">iOA 登录</button></div>
+          </article>
+
+          <article class="agent-card" tabindex="0" data-agent="workbuddy">
+            <span class="top"><span class="ag workbuddy lg">W</span><span><span class="name">WorkBuddy</span><br><span class="src">WorkBuddy 内置引擎</span></span><span style="margin-left:auto" class="status err"><span class="dot"></span>暂不支持</span></span>
+            <div class="alert err" style="padding:8px 10px">
+              <svg class="i" aria-hidden="true"><use href="#i-warn"/></svg>
+              <div class="body"><strong>这个版本的 WorkBuddy 只带精简引擎</strong><p>2.165.0 起，WorkBuddy 只打包给它自己用的精简引擎，工作台暂时无法通过 ACP 驱动。CodeBuddy 不受影响，可以改用 CodeBuddy。</p></div>
+            </div>
+            <dl>
+              <dt>版本</dt><dd>2.165.0</dd>
+              <dt>账号</dt><dd>在 WorkBuddy 里登录，工作台沿用</dd>
+            </dl>
+            <div class="acts"><button class="btn sm" data-wb-recheck>重新检测</button></div>
           </article>
 
           <article class="agent-card" tabindex="0">

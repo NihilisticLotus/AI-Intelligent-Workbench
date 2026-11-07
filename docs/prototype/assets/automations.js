@@ -82,7 +82,7 @@
     { id: 'a2', name: '每周一生成上周更新日志', proj: P1, enabled: true,
       prompt: '读取上周合并到 main 的提交和已完成的任务，按“新功能 / 修复 / 美术资源 / 本地化”分类，写一份玩家能看懂的更新日志，存到 Docs/Changelog/{日期}.md。',
       trigger: { type: 'repeat', freq: 'weekly', days: [1], time: '10:00' },
-      agent: 'codebuddy', account: '沿用 WorkBuddy 登录', model: 'glm-5.1', effort: null, perm: '工作区内自动',
+      agent: 'codebuddy', account: 'CodeBuddy 账号', model: 'glm-5.1', effort: null, perm: '工作区内自动',
       rules: { overlap: 'queue', missed: 'skip', max: '30 分钟', budget: '5%' }, notify: 'always', automerge: false,
       runs: [
         { at: dayAt(lastMonday(), '10:00'), st: 'ok', dur: '6 分钟', sum: '生成 v0.9.3 更新日志，共 14 条，已放进待验收' },
@@ -92,7 +92,7 @@
     { id: 'a3', name: '新 FBX 自动转 glb 并检查面数和命名', proj: P1, enabled: true,
       prompt: '把{变化的文件}转成 glb（+Y 朝上，单位米），检查三角面不超过 2,000、文件名符合 SM_ / SK_ 前缀规则。不合格的列出原因，不要改原始 FBX。',
       trigger: { type: 'file', folder: 'Assets/Art', exts: ['.fbx'], settle: '30 秒' },
-      agent: 'codebuddy', account: '沿用 WorkBuddy 登录', model: 'glm-5.1', effort: null, perm: '工作区内自动',
+      agent: 'codebuddy', account: 'CodeBuddy 账号', model: 'glm-5.1', effort: null, perm: '工作区内自动',
       rules: { overlap: 'skip', missed: 'catchup', max: '15 分钟', budget: '2%' }, notify: 'fail', automerge: false,
       runs: [
         { at: minsAgo(18), st: 'ok', dur: '2 分钟', sum: 'SM_Chest_v2.fbx → SM_Chest_v2.glb，412 个三角面，命名正确' },

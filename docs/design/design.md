@@ -1,6 +1,7 @@
 # AI Console 设计文档
 
-> 版本 0.4 · 2026-11-06 · 状态：设计中
+> 版本 0.4.1 · 2026-11-07 · 状态：设计中
+> v0.4.1 变更：CodeBuddy 与 WorkBuddy 拆成两个独立的 Agent，CodeBuddy 改用工作台自带的官方独立版引擎（第 6 节、25.1）；对话按“轮”显示、Markdown 渲染、连续切换只留一行提示、选中文字的小菜单（15.2）；Gateway 兜底日志 `logs/gateway.log`（第 17 节）。依据 ISSUE-0015～0018。
 > v0.4 新增：第 22 节自动化（定时与事件触发）、第 23 节监控与告警、第 24 节快速判断层、第 25 节能力中心（统一管理 MCP 和 Skill）、第 26 节侧边聊天、第 27 节媒体生成预留；任务分组与最近活动排序（第 13 节）。
 > 本版范围：本机 + 局域网直连。外网远程（VPS 中转）和手机应用放在后期，只在第 18 节保留扩展点。
 > v0.3 变更：
@@ -45,8 +46,8 @@
 │ ACP Client（统一，@agentclientprotocol/sdk）                   │
 └──┬──────────┬──────────────┬─────────────────┬────────────────┘
    │ACP       │ACP           │ACP              │ZCode Protocol→ACP 桥
- claude      codex     codebuddy 引擎        zcode 引擎
- (适配器)    (适配器)  (WorkBuddy 内置,--acp) (ZCode 内置,app-server)
+ claude      codex     codebuddy / workbuddy  zcode 引擎
+ (适配器)    (适配器)  (各自的引擎,--acp)     (ZCode 内置,app-server)
 ```
 
 设计原则：
@@ -151,10 +152,11 @@ AI_Console/
 |---|---|---|---|
 | Claude Code | npm 全局 `claude` | ACP：`@agentclientprotocol/claude-agent-acp` | 支持订阅登录与 API Key；`@zed-industries/claude-code-acp` 已废弃 |
 | Codex | npm 全局 `codex` | ACP：`@agentclientprotocol/codex-acp`；备选 `codex app-server` | 支持 ChatGPT 登录与 API Key；适配器自带 codex，需用 `CODEX_PATH` 指向本机版本，保证登录状态和版本一致 |
-| CodeBuddy / WorkBuddy | `%LOCALAPPDATA%\Programs\WorkBuddy\resources\app.asar.unpacked\cli\dist\codebuddy.js` | 原生 `--acp`（stdio） | 一个引擎覆盖两款软件；模型含 glm-5.1、kimi-k2.5、minimax-m2.7、deepseek-v3-2 等 |
+| CodeBuddy | 工作台自带的官方独立版 `@tencent-ai/codebuddy-code`（packages/adapters 的依赖，锁定 2.181.0） | 原生 `--acp`（stdio） | 2026-11-07 起改用独立版（ISSUE-0016）；账号属于 codebuddy.ai，在工作台里用浏览器登录；模型含 glm-5.1、kimi-k2.5、minimax-m2.7、deepseek-v3-2 等 |
+| WorkBuddy | `%LOCALAPPDATA%\Programs\WorkBuddy\resources\app.asar.unpacked\cli\…`（WorkBuddy 内置引擎） | 原生 `--acp`（stdio），仅完整引擎 | 账号属于 workbuddy.cn，在 WorkBuddy 里登录；2.165.0 起只带精简引擎 `codebuddy-lite-wb.mjs`，ACP 模式下没有响应，检测为“暂不支持”（ISSUE-0016） |
 | ZCode | `%LOCALAPPDATA%\Programs\ZCode\resources\glm\zcode.cjs`（v0.17.1） | `zcode app-server`（自有 ZCode Protocol） | 需写桥接层；备选 `-p --json` 单次模式 |
 
-CodeBuddy 编辑器本体是 VS Code 改版，没有可调用的 Agent 命令行，所以统一用 WorkBuddy 内置的 CodeBuddy 引擎。CodeBuddy 的 `--acp` 有官方文档（https://www.codebuddy.ai/docs/cli/acp ），提到 loadSession 和 `_codebuddy.ai/*` 私有扩展；其余能力 M2 实测。
+CodeBuddy 编辑器本体是 VS Code 改版，没有可调用的 Agent 命令行。原来借用 WorkBuddy 内置的引擎，但 WorkBuddy 自动更新会替换它（2.165.0 起变成精简版），而且两者本来就是两套账号。2026-11-07 按用户决定拆成两个独立的 Agent：CodeBuddy 用工作台自带的官方独立版引擎，不再依赖 WorkBuddy 的安装目录和更新；WorkBuddy 只在带完整引擎时可用，精简引擎能否经 ACP 驱动待研究。CodeBuddy 的 `--acp` 有官方文档（https://www.codebuddy.ai/docs/cli/acp ），提到 loadSession 和 `_codebuddy.ai/*` 私有扩展；其余能力 M2 实测。
 
 已确认的适配器能力（2026-11-05，读源码确认，来源见 `docs/research/context.md` 第 4 节）：
 
@@ -174,7 +176,7 @@ ACP 协议本身（v1.15.1，2026-11-02）：
 
 ```ts
 interface AgentAdapter {
-  id: string;                         // 'claude' | 'codex' | 'codebuddy' | 'zcode'
+  id: string;                         // 'claude' | 'codex' | 'codebuddy' | 'workbuddy' | 'zcode'
   displayName: string;
 
   // 环境
@@ -220,14 +222,20 @@ interface AgentCaps {
 ### 6.3 引擎定位
 
 - npm 类 Agent：从 PATH 和 `%APPDATA%\npm` 查找。
+- 工作台自带的引擎（CodeBuddy 独立版）：从 Gateway 自己的 `node_modules` 加载，版本随工作台锁定、跟着工作台发版升级，不受本机其他软件更新影响。
 - 应用内置引擎（WorkBuddy、ZCode）：按已知路径查找，找不到时扫描 `%LOCALAPPDATA%\Programs` 下同名目录。应用升级后路径变化时，界面提示"引擎位置变化，正在重新定位"，仍找不到就让用户点选安装目录。
 - 每次启动 Agent 前校验版本。版本不在已测试范围内时，照常运行，但在 Agent 卡片上标黄提示"未验证版本"。
+- 引擎找得到但已知不能用时（例如 WorkBuddy 只带精简引擎），检测结果为“暂不支持”并写明原因，不启动引擎。
 
 ### 6.4 账号配置与环境隔离
 
 - 每个 Agent 可以有多个账号配置：订阅登录、官方 API Key、自定义地址（兼容第三方中转）。
 - 启动 Agent 进程时，通过环境变量和独立配置目录注入本次使用的账号，不修改用户的全局配置。用户在别处使用 `claude-api`、`codex-api` 等切换工具不受影响。
 - 自定义地址配置需要填写：显示名称、Base URL、API Key、模型列表（可从接口拉取或手动填写）。
+- 登录在哪里完成，按 Agent 分开：
+  - Claude Code、Codex：在工作台里用浏览器授权，或填 API Key。
+  - CodeBuddy：在工作台里用浏览器登录（微信 / Google·GitHub / iOA），登录信息由引擎自己保存在 `~/.codebuddy`。
+  - WorkBuddy：在 WorkBuddy 软件里登录，工作台沿用它的登录状态，不提供登录按钮。
 
 ### 6.5 ZCode 桥接
 
@@ -1101,9 +1109,15 @@ audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, action TEXT, de
 
 ### 15.2 对话流渲染
 
-- 助手消息：Markdown 渲染，代码块带复制按钮。
+- 按“轮”显示（参照 Codex，2026-11-07）：一轮回复是两条用户消息之间 Agent 的全部输出，头像和名称只出现一次。
+  - 过程收进一个可折叠的“用时 N 秒 >”：思考、中途说明、工具调用、审批都在里面。进行中显示“正在处理 · N 秒”并展开；有待处理的审批时强制展开；结束后自动收起；用户手动开合后以用户为准。
+  - 连续的网页搜索合成一组“已搜索网页 N 次 >”，展开后列出每次搜索的内容。
+  - 最终回答：最后一段、并且之后没有工具调用的输出，显示在过程下面。
+  - 计划更新放到这一轮后面，不打断这一轮。
+- 助手消息：Markdown 渲染（标题、粗体、列表、表格、代码块），代码块带复制按钮。链接只显示文字，点击后经 `Platform.openExternal` 在系统浏览器里打开；不渲染原始 HTML。思考内容同样按 Markdown 渲染。
+- 选中对话里的文字后弹出小菜单：[添加到对话] 把选中内容作为“> 引用”插入输入框末尾；[在侧边聊天中提问] 随侧边聊天（第 26 节）上线，由功能开关 `chat.side` 控制，现在关闭、不显示。
 - 思考过程：来自 `thought.delta` 事件，实时显示，结束后折叠成"思考了 N 秒"。事件照常入库，可回放；交接包不包含思考内容。显示方式（默认折叠 / 默认展开 / 不显示）在设置里选。
-- 切换器：每个任务的输入框都有，可切换 Agent、账号、模型、思考强度。思考强度通过 `session/set_config_option` 下发，从下一条消息生效。
+- 切换器：每个任务的输入框都有，可切换 Agent、账号、模型、思考强度。思考强度通过 `session/set_config_option` 下发，从下一条消息生效。连续切换模型或思考强度、中间没有新消息时，对话里只保留一行提示，显示最终结果（ISSUE-0018）。
 - 工具调用：折叠卡片，标题显示动作（"修改 src/login.ts"、"执行 npm test"），展开看详情；命令输出最多显示 200 行，可展开全部。
 - 文件修改：内联 diff，点击跳到右侧面板。
 - 审批：醒目卡片，按钮 [允许] [总是允许] [拒绝]，可附拒绝理由让 Agent 换个做法。
@@ -1183,6 +1197,7 @@ audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, action TEXT, de
 - 空闲回收：会话 15 分钟无活动时释放进程（先发 `session/close`），下次发消息时自动恢复。能力里没有 resume 和 loadSession 的 Agent 不回收。
 - 防休眠：有任务运行时阻止系统睡眠（可关闭）。已睡眠或关机时任务会中断，开机后提示恢复。
 - 卡死检测：Agent 超过 10 分钟没有任何输出时，在任务上提示"可能卡住"，提供 [继续等待] [中断]。
+- 兜底日志（ISSUE-0015）：Gateway 的启动、已启动、正常退出、启动失败都写进 `logs/gateway.log`，事后能判断进程是怎么结束的。未捕获的异常写完整堆栈（脱敏）后收尾退出，终端给出日志位置；未处理的 Promise 拒绝只记录并提示，服务继续运行。
 - 诊断页：显示 Gateway、各 Agent 进程、数据库、端口状态；[导出诊断包] 打包最近日志和配置（自动去除密钥）。
 - 错误提示：统一成"发生了什么 + 怎么处理 + 按钮"，例如"Codex 登录已过期 → [重新登录]"。
 
@@ -1213,7 +1228,7 @@ audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, action TEXT, de
 
 | 风险 | 影响 | 应对 |
 |---|---|---|
-| 内置引擎（WorkBuddy、ZCode）随应用升级改变路径或参数 | 该 Agent 不可用 | 动态定位 + 版本校验 + 契约测试；界面提示而不是崩溃 |
+| 内置引擎（WorkBuddy、ZCode）随应用升级改变路径或参数 | 该 Agent 不可用（已发生：WorkBuddy 2.165.0 换成精简引擎，ISSUE-0016） | 动态定位 + 版本校验 + 契约测试；界面提示“暂不支持”和原因而不是崩溃；有官方独立版的改用独立版（CodeBuddy） |
 | ZCode Protocol 未公开、可能变化 | 桥接失效 | 降级到 `-p --json` 单次模式 |
 | 各 Agent 的 ACP 支持程度不同（如会话内换模型） | 部分切换变成"恢复会话"或"交接" | 启动时探测能力，按 7.4 分级降级，界面如实提示 |
 | ACP 的 unstable 方法（fork、setSessionModel）变化，适配器包频繁发版 | 功能失效 | 只把 unstable 方法当可选优化；锁定 SDK 和适配器版本，升级前跑契约测试 |
@@ -1238,7 +1253,7 @@ audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, action TEXT, de
 需要实测或验证：
 
 1. 各 Agent 在订阅登录时，会话记录是否随账号隔离（影响 7.4 "换账号"能否无损）。M2 阶段实测。
-2. WorkBuddy 内置的 CodeBuddy 引擎是否沿用 WorkBuddy 的登录状态，还是需要单独登录；以及 CodeBuddy `--acp` 的 resume、set_config_option 支持情况。M2 阶段实测。
+2. 已解决：CodeBuddy 与 WorkBuddy 拆成两个 Agent，CodeBuddy 在工作台里单独登录（2026-11-07）。仍待确认：CodeBuddy `--acp` 的 resume、set_config_option 支持情况；WorkBuddy 精简引擎能否经 ACP 驱动（ISSUE-0016）。
 3. ZCode app-server 的消息格式。M6 前抓包确认。
 4. claude-agent-acp、codex-acp 能否在不重启进程的情况下切换账号（目前按"必须重启"设计）。
 5. token 估算方法和各模型窗口大小的数据来源。M4 校准。
@@ -1451,7 +1466,7 @@ interface JudgeEngine {           // 第 12 节插件的一种
 |---|---|---|---|---|
 | Claude Code | `~/.claude.json`（`mcpServers`） | blender、houdini、bilibili、renderdoc | `~/.claude/skills`（不存在）；另有插件市场 `~/.claude/plugins` | 0（不含插件） |
 | Codex | `~/.codex/config.toml`（`[mcp_servers.*]`） | houdini、node_repl、video-analyzer、bilibili、renderdoc、blender、qml_preview | `~/.codex/skills` | 12 |
-| CodeBuddy | `~/.codebuddy/mcp.json` | zai-mcp-server、web-search-prime、web-reader、zread、video-analyzer、bilibili | `~/.codebuddy/skills` | 9 |
+| CodeBuddy（独立版） | `~/.codebuddy/mcp.json` | zai-mcp-server、web-search-prime、web-reader、zread、video-analyzer、bilibili | `~/.codebuddy/skills` | 9 |
 | WorkBuddy | `~/.workbuddy/.mcp.json` | connector-proxy（连接器代理） | `~/.workbuddy/skills` | 0 |
 | ZCode | `~/.zcode/cli/config.json`（`mcp`） | blender、fxhoudini、houdini、video-analyzer、bilibili | `~/.zcode/skills` | 10 |
 | 跨厂商公共目录 | — | — | `~/.agents/skills` | 9 |

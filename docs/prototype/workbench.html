@@ -40,17 +40,45 @@
               </div>
             </article>
 
-            <article class="msg">
+            <article class="msg turn" aria-label="CodeBuddy 的回复">
               <div class="who"><span class="ag codebuddy" title="CodeBuddy">B</span></div>
               <div>
                 <div class="head"><b>CodeBuddy</b><span>glm-5.1</span><span>14:03</span></div>
-                <div class="text"><p>日志里 <code>SaveManager.Save</code> 和 Steam 云同步的上传几乎同时发生，上传读到的是写了一半的文件。问题出在 <code>File.WriteAllText</code> 直接覆盖原文件。</p></div>
+                <details class="process">
+                  <summary aria-label="用时 1 分 12 秒，点击查看过程"><span class="pl">用时 1 分 12 秒</span><svg class="i" aria-hidden="true"><use href="#i-right"/></svg></summary>
+                  <div class="process-body">
+                    <details class="thought"><summary><svg class="i" aria-hidden="true"><use href="#i-bulb"/></svg><span class="tl">思考了 6 秒</span><svg class="i" aria-hidden="true"><use href="#i-right"/></svg></summary><div class="thought-body">日志里两条时间戳只差 40 毫秒：<strong>Save 开始写入</strong>，云同步开始上传。先查清楚 Steam 云同步什么时候读文件，再看 <code>WriteAllText</code> 是不是先截断。</div></details>
+                    <div class="text step-text"><p>先查一下 Steam 云同步的上传时机，以及 .NET 覆盖写文件的行为。</p></div>
+                    <div class="tools-group">
+                      <details class="tool search-group">
+                        <summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><svg class="i" aria-hidden="true"><use href="#i-search"/></svg><span class="verb">已搜索网页</span><span class="end">3 次</span></summary>
+                        <ul class="search-list">
+                          <li><svg class="i" aria-hidden="true"><use href="#i-search"/></svg>Steam Cloud upload timing on exit Steam Deck</li>
+                          <li><svg class="i" aria-hidden="true"><use href="#i-search"/></svg>File.WriteAllText truncate before write partial file</li>
+                          <li><svg class="i" aria-hidden="true"><use href="#i-search"/></svg>File.Replace atomic Proton Wine support</li>
+                        </ul>
+                      </details>
+                    </div>
+                    <div class="text step-text"><p>云同步在进程退出后立刻上传，<code>WriteAllText</code> 会先把文件截成 0 字节。再看项目里哪些地方直接覆盖写。</p></div>
+                    <div class="tools-group">
+                      <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">搜索</span><span class="target">"WriteAllText" 于 Assets/Scripts</span><span class="end">4 处匹配</span></summary></details>
+                      <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">读取</span><span class="target">Assets/Scripts/Save/SaveManager.cs</span><span class="end">186 行</span></summary></details>
+                    </div>
+                  </div>
+                </details>
+                <div class="text answer md">
+                  <h3>原因</h3>
+                  <p><code>SaveManager.Save</code> 和 Steam 云同步的上传几乎同时发生，上传读到的是<strong>写了一半的文件</strong>。问题出在 <code>File.WriteAllText</code> 直接覆盖原文件：它先截断，再写入。</p>
+                  <h3>建议的修法</h3>
+                  <ul>
+                    <li><strong>写入</strong>：先写临时文件并落盘，再用 <code>File.Replace</code> 原子替换，顺带留一份 <code>.bak</code>。</li>
+                    <li><strong>读取</strong>：主存档解析失败时回退到 <code>.bak</code>。</li>
+                    <li>存档格式不变，老存档照常能读。</li>
+                  </ul>
+                  <p>参考：<a href="https://learn.microsoft.com/dotnet/api/system.io.file.replace" title="https://learn.microsoft.com/dotnet/api/system.io.file.replace">File.Replace 文档</a>、<a href="https://partner.steamgames.com/doc/features/cloud" title="https://partner.steamgames.com/doc/features/cloud">Steam 云存储说明</a>。</p>
+                </div>
               </div>
             </article>
-            <div class="tools-group">
-              <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">搜索</span><span class="target">"WriteAllText" 于 Assets/Scripts</span><span class="end">4 处匹配</span></summary></details>
-              <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">读取</span><span class="target">Assets/Scripts/Save/SaveManager.cs</span><span class="end">186 行</span></summary></details>
-            </div>
 
             <div class="handoff" role="group" aria-label="交接">
               <details>
@@ -63,67 +91,66 @@
               </details>
             </div>
 
-            <article class="msg">
+            <article class="msg turn" id="turn-cur" aria-label="Claude Code 的回复">
               <div class="who"><span class="ag claude" title="Claude Code">C</span></div>
               <div>
                 <div class="head"><b>Claude Code</b><span>Opus 5.5</span><span>14:07</span></div>
-                <div class="text"><p>按交接内容继续。写入改成“临时文件 → 落盘 → 原子替换”，读取时主存档解析失败就回退到 <code>.bak</code>。存档内容和格式不变。</p></div>
-              </div>
-            </article>
-            <div class="tools-group">
-              <details class="tool" open>
-                <summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">修改</span><span class="target">Assets/Scripts/Save/SaveManager.cs</span><span class="end"><span class="stat-add">+22</span><span class="stat-del">−4</span></span></summary>
-                <div class="detail">
-                  <div class="diff" style="margin:0" aria-label="SaveManager.cs 内联改动">
-                    <div class="ln d"><span>44</span><span></span><span>−</span><span>        File.WriteAllText(SavePath, json);</span></div>
-                    <div class="ln a"><span></span><span>45</span><span>+</span><span>        var tmpPath = SavePath + ".tmp";</span></div>
-                    <div class="ln a"><span></span><span>47</span><span>+</span><span>        WriteAndFlush(tmpPath, Encoding.UTF8.GetBytes(json));</span></div>
-                    <div class="ln a"><span></span><span>48</span><span>+</span><span>        ReplaceAtomically(tmpPath, SavePath);</span></div>
+                <details class="process" open data-pending="1">
+                  <summary aria-label="正在处理，有 1 项审批等你处理"><span class="pl thinking">正在处理 · 4 分 6 秒</span><svg class="i" aria-hidden="true"><use href="#i-right"/></svg></summary>
+                  <div class="process-body">
+                    <details class="thought"><summary><svg class="i" aria-hidden="true"><use href="#i-bulb"/></svg><span class="tl">思考了 9 秒</span><svg class="i" aria-hidden="true"><use href="#i-right"/></svg></summary><div class="thought-body">交接包里的约束是<strong>不改存档格式</strong>。Windows 上原子替换用 <code>File.Replace</code> 最稳，还会顺带留 .bak；Steam Deck 跑的是 Proton，Wine 也支持这个调用。</div></details>
+                    <div class="text step-text"><p>按交接内容继续。写入改成“临时文件 → 落盘 → 原子替换”，读取时主存档解析失败就回退到 <code>.bak</code>。存档内容和格式不变。</p></div>
+                <div class="tools-group">
+                  <details class="tool" open>
+                    <summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">修改</span><span class="target">Assets/Scripts/Save/SaveManager.cs</span><span class="end"><span class="stat-add">+22</span><span class="stat-del">−4</span></span></summary>
+                    <div class="detail">
+                      <div class="diff" style="margin:0" aria-label="SaveManager.cs 内联改动">
+                        <div class="ln d"><span>44</span><span></span><span>−</span><span>        File.WriteAllText(SavePath, json);</span></div>
+                        <div class="ln a"><span></span><span>45</span><span>+</span><span>        var tmpPath = SavePath + ".tmp";</span></div>
+                        <div class="ln a"><span></span><span>47</span><span>+</span><span>        WriteAndFlush(tmpPath, Encoding.UTF8.GetBytes(json));</span></div>
+                        <div class="ln a"><span></span><span>48</span><span>+</span><span>        ReplaceAtomically(tmpPath, SavePath);</span></div>
+                      </div>
+                      <div class="foot">已折叠 18 行<span class="grow"></span><button class="btn sm ghost" data-action="side" data-tab="t-diff">在改动面板中查看</button></div>
+                    </div>
+                  </details>
+                  <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">新建</span><span class="target">Assets/Tests/EditMode/SaveManagerTests.cs</span><span class="end"><span class="stat-add">+46</span></span></summary></details>
+                  <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">修改</span><span class="target">Assets/Scripts/Platform/SteamCloudSync.cs</span><span class="end"><span class="stat-add">+3</span><span class="stat-del">−2</span></span></summary></details>
+                  <details class="tool failed">
+                    <summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">执行失败</span><span class="target">dotnet build FogHarbor.sln</span><span class="end">退出码 1</span></summary>
+                    <div class="detail">
+    <pre>Assets/Scripts/Save/SaveManager.cs(61,17): error CS0103: The name 'Encoding' does not exist in the current context
+    构建失败。1 个错误，0 个警告。</pre>
+                      <div class="foot">显示最后 2 行，共 48 行<span class="grow"></span><button class="btn sm ghost"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg>复制输出</button></div>
+                    </div>
+                  </details>
+                  <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">修改</span><span class="target">SaveManager.cs：补上 using System.Text</span><span class="end"><span class="stat-add">+1</span></span></summary></details>
+                  <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">执行</span><span class="target">dotnet build FogHarbor.sln</span><span class="end"><span class="status ok"><span class="dot"></span>成功</span>8.9 秒</span></summary></details>
+                </div>
+                    <details class="thought"><summary><svg class="i" aria-hidden="true"><use href="#i-bulb"/></svg><span class="tl">思考了 4 秒</span><svg class="i" aria-hidden="true"><use href="#i-right"/></svg></summary><div class="thought-body">编译通过不代表逻辑对。最关键的两条：<strong>老格式能读</strong>，<strong>写到一半中断时能回退</strong>。EditMode 测试能覆盖，但要调用 Unity.exe，这一步需要审批。</div></details>
+                    <div class="text step-text"><p>编译通过。接下来用 Unity 命令行跑存档相关的 EditMode 测试，确认老存档能读、写入中断时能回退到 .bak。</p></div>
+                <section class="approval" id="approval" aria-labelledby="ap-title" tabindex="-1">
+                  <div class="ah"><svg class="i" aria-hidden="true"><use href="#i-shield"/></svg><span id="ap-title">Claude Code 请求执行命令</span><span class="meta">已等待 3 分钟，27 分钟后自动暂停</span></div>
+                  <p class="why">运行存档系统的 EditMode 测试，大约 1 分钟，会在工作副本里生成测试报告。</p>
+    <pre class="mono">"C:\Program Files\Unity\Hub\Editor\6000.0.32f1\Editor\Unity.exe" -batchmode -projectPath . -runTests -testPlatform EditMode -testFilter SaveManagerTests -testResults Temp\save-tests.xml</pre>
+                  <dl class="facts">
+                    <dt>运行位置</dt><dd class="mono" style="font-size:12px">%LOCALAPPDATA%\AI_Console\worktrees\FogHarbor\t8f2</dd>
+                    <dt>为什么要审批</dt><dd>当前权限级别为“需审批”：执行命令都要确认</dd>
+                  </dl>
+                  <div class="acts">
+                    <button class="btn attn">允许 <kbd>Enter</kbd></button>
+                    <button class="btn" title="将生成项目规则：允许以 Unity.exe -runTests 开头的命令">总是允许此类命令</button>
+                    <span class="grow"></span>
+                    <button class="btn danger" onclick="document.getElementById('rr').hidden=false;document.getElementById('rr-input').focus()">拒绝… <kbd>Esc</kbd></button>
                   </div>
-                  <div class="foot">已折叠 18 行<span class="grow"></span><button class="btn sm ghost" data-action="side" data-tab="t-diff">在改动面板中查看</button></div>
-                </div>
-              </details>
-              <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">新建</span><span class="target">Assets/Tests/EditMode/SaveManagerTests.cs</span><span class="end"><span class="stat-add">+46</span></span></summary></details>
-              <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">修改</span><span class="target">Assets/Scripts/Platform/SteamCloudSync.cs</span><span class="end"><span class="stat-add">+3</span><span class="stat-del">−2</span></span></summary></details>
-              <details class="tool failed">
-                <summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">执行失败</span><span class="target">dotnet build FogHarbor.sln</span><span class="end">退出码 1</span></summary>
-                <div class="detail">
-<pre>Assets/Scripts/Save/SaveManager.cs(61,17): error CS0103: The name 'Encoding' does not exist in the current context
-构建失败。1 个错误，0 个警告。</pre>
-                  <div class="foot">显示最后 2 行，共 48 行<span class="grow"></span><button class="btn sm ghost"><svg class="i" aria-hidden="true"><use href="#i-copy"/></svg>复制输出</button></div>
-                </div>
-              </details>
-              <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">修改</span><span class="target">SaveManager.cs：补上 using System.Text</span><span class="end"><span class="stat-add">+1</span></span></summary></details>
-              <details class="tool"><summary><svg class="i chev" aria-hidden="true"><use href="#i-right"/></svg><span class="verb">执行</span><span class="target">dotnet build FogHarbor.sln</span><span class="end"><span class="status ok"><span class="dot"></span>成功</span>8.9 秒</span></summary></details>
-            </div>
-
-            <article class="msg">
-              <div class="who"><span class="ag claude" title="Claude Code">C</span></div>
-              <div>
-                <div class="head"><b>Claude Code</b><span>Opus 5.5</span><span>14:11</span></div>
-                <div class="text"><p>编译通过。接下来用 Unity 命令行跑存档相关的 EditMode 测试，确认老存档能读、写入中断时能回退到 .bak。</p></div>
+                  <div class="reject-reason" id="rr" hidden>
+                    <label for="rr-input" class="sr-only">拒绝理由</label>
+                    <input class="input" id="rr-input" placeholder="告诉 Agent 为什么拒绝、应该怎么做（可选），例如：先只跑 LoadLegacy 用例">
+                  </div>
+                </section>
+                  </div>
+                </details>
               </div>
             </article>
-
-            <section class="approval" id="approval" aria-labelledby="ap-title" tabindex="-1">
-              <div class="ah"><svg class="i" aria-hidden="true"><use href="#i-shield"/></svg><span id="ap-title">Claude Code 请求执行命令</span><span class="meta">已等待 3 分钟，27 分钟后自动暂停</span></div>
-              <p class="why">运行存档系统的 EditMode 测试，大约 1 分钟，会在工作副本里生成测试报告。</p>
-<pre class="mono">"C:\Program Files\Unity\Hub\Editor\6000.0.32f1\Editor\Unity.exe" -batchmode -projectPath . -runTests -testPlatform EditMode -testFilter SaveManagerTests -testResults Temp\save-tests.xml</pre>
-              <dl class="facts">
-                <dt>运行位置</dt><dd class="mono" style="font-size:12px">%LOCALAPPDATA%\AI_Console\worktrees\FogHarbor\t8f2</dd>
-                <dt>为什么要审批</dt><dd>当前权限级别为“需审批”：执行命令都要确认</dd>
-              </dl>
-              <div class="acts">
-                <button class="btn attn">允许 <kbd>Enter</kbd></button>
-                <button class="btn" title="将生成项目规则：允许以 Unity.exe -runTests 开头的命令">总是允许此类命令</button>
-                <span class="grow"></span>
-                <button class="btn danger" onclick="document.getElementById('rr').hidden=false;document.getElementById('rr-input').focus()">拒绝… <kbd>Esc</kbd></button>
-              </div>
-              <div class="reject-reason" id="rr" hidden>
-                <label for="rr-input" class="sr-only">拒绝理由</label>
-                <input class="input" id="rr-input" placeholder="告诉 Agent 为什么拒绝、应该怎么做（可选），例如：先只跑 LoadLegacy 用例">
-              </div>
-            </section>
           </div>
         </div>
 

@@ -306,10 +306,40 @@
     if (document.activeElement === input) { $('.composer textarea')?.focus(); return; }
     open(selected());
   });
+  // 选中文字后的小菜单（design.md 15.2、ui-design.md 5.15）：[添加到对话] 把引用插进主输入框末尾；
+  // [在侧边聊天中提问] 正式版由功能开关 chat.side 控制，侧聊上线前不显示；原型里画出来演示
+  let selMenu = null;
+  const hideSel = () => { selMenu?.remove(); selMenu = null; };
+  const showSel = () => {
+    hideSel();
+    const s = getSelection();
+    const raw = s && !s.isCollapsed && stream.contains(s.anchorNode) && stream.contains(s.focusNode) ? s.toString().trim() : '';
+    if (!raw) return;
+    const r = s.getRangeAt(0).getBoundingClientRect();
+    document.body.insertAdjacentHTML('beforeend', `<div class="sel-menu" role="toolbar" aria-label="选中内容的操作" style="left:${r.left + r.width / 2}px;top:${r.top}px"><button type="button" data-wired="1" data-sel="add">添加到对话</button><button type="button" data-wired="1" data-sel="side" title="正式版在侧边聊天上线后才显示">在侧边聊天中提问</button></div>`);
+    selMenu = document.body.lastElementChild;
+    selMenu.addEventListener('mousedown', (e) => e.preventDefault());
+    selMenu.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-sel]'); if (!b) return;
+      if (b.dataset.sel === 'add') {
+        const ta = $('.composer textarea');
+        const quote = raw.split('\n').map((l) => '> ' + l).join('\n') + '\n\n';
+        ta.value = (ta.value && !ta.value.endsWith('\n') ? ta.value + '\n\n' : ta.value) + quote;
+        ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); ta.scrollTop = ta.scrollHeight;
+        toast('已把选中的内容作为引用加到输入框');
+      } else open(selected());
+      getSelection().removeAllRanges(); hideSel();
+    });
+  };
+  stream?.addEventListener('mouseup', () => setTimeout(showSel));
+  stream?.addEventListener('keyup', (e) => { if (e.key === 'Escape') hideSel(); else if (e.shiftKey) setTimeout(showSel); });
+  stream?.addEventListener('scroll', hideSel);
+  document.addEventListener('mousedown', (e) => { if (selMenu && !selMenu.contains(e.target)) hideSel(); });
+
   // 右键菜单；键盘用菜单键或 Shift+F10，同样会触发
   stream?.addEventListener('contextmenu', (e) => {
     const text = selected(); if (!text) return;
-    e.preventDefault();
+    e.preventDefault(); hideSel();
     let r = (e.clientX || e.clientY) ? { left: e.clientX, right: e.clientX, top: e.clientY, bottom: e.clientY } : getSelection().getRangeAt(0).getBoundingClientRect();
     // 键盘触发时选区可能已滚出视野：菜单放到对话区可见范围内
     const sr = stream.getBoundingClientRect();

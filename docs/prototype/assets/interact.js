@@ -235,9 +235,9 @@
         <label class="check-row"><input type="radio" name="jeng" value="account"> <span>已有账号或 API 的便宜模型（默认）<small>用结构化输出返回判断。不用下载，但会消耗所选账号的额度，每次判断约几百 token</small></span></label>
         <div class="form-row sub-row" id="j-acc-row"><label for="j-acc">账号与模型</label><select class="select" id="j-acc">
           <option value="claude|工作室 API Key|Haiku 5.5">Claude Code · 工作室 API Key · Haiku 5.5（便宜）</option>
-          <option value="codebuddy|沿用 WorkBuddy 登录|deepseek-v3-2">CodeBuddy · WorkBuddy 登录 · deepseek-v3-2（便宜）</option>
+          <option value="codebuddy|CodeBuddy 账号|deepseek-v3-2">CodeBuddy · CodeBuddy 账号 · deepseek-v3-2（便宜）</option>
           <option value="claude|个人订阅|Sonnet 5">Claude Code · 个人订阅 · Sonnet 5</option>
-          <option value="codebuddy|沿用 WorkBuddy 登录|glm-5.1">CodeBuddy · WorkBuddy 登录 · glm-5.1</option></select></div>
+          <option value="codebuddy|CodeBuddy 账号|glm-5.1">CodeBuddy · CodeBuddy 账号 · glm-5.1</option></select></div>
         <label class="check-row"><input type="radio" name="jeng" value="local"> <span>本机小模型<small>在这台电脑上运行，判断内容不出网。需要先下载模型文件（约 1.1 GB），运行时约占 1.2 GB 内存</small></span></label>
         <div class="form-row sub-row" id="j-local-row"><span class="lbl">模型文件</span><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><span id="j-local-st" class="status idle"><span class="dot"></span>还没下载</span><button type="button" class="btn sm" data-wired="1" id="j-dl">${ic('download')}下载模型文件</button></div></div>
         <label class="check-row"><input type="radio" name="jeng" value="jev"> <span>Jev API（TypeSafe AI）<small>专门做带概率的结构化判断，响应最快；需要 API Key</small></span></label>
@@ -425,8 +425,10 @@
   };
   window.aicApplyThoughtMode = applyThoughtMode;
   const thoughtHtml = (text, secs) => `<details class="thought"><summary>${ic('bulb')}<span class="tl">思考了 ${secs} 秒</span>${ic('right')}</summary><div class="thought-body">${text}</div></details>`;
-  const agentMsg = (key, model, html, thought, secs = 3) => `<article class="msg"><div class="who"><span class="ag ${key}" title="${agents[key][0]}">${letter[key]}</span></div><div>
-    <div class="head"><b>${agents[key][0]}</b><span>${model}${window.aicCur && window.aicCur.agent === key && window.aicCur.effort ? ' · 思考 ' + window.aicCur.effort : ''}</span><span>${hhmm()}</span></div>${thought ? thoughtHtml(thought, secs) : ''}<div class="text">${html}</div></div></article>`;
+  // 一轮回复（design.md 15.2）：过程（思考等）收进可折叠的“用时 N 秒”，最终回答显示在下面
+  const processHtml = (inner, secs) => `<details class="process"><summary><span class="pl">用时 ${secs} 秒</span>${ic('right')}</summary><div class="process-body">${inner}</div></details>`;
+  const agentMsg = (key, model, html, thought, secs = 3) => `<article class="msg turn" aria-label="${agents[key][0]} 的回复"><div class="who"><span class="ag ${key}" title="${agents[key][0]}">${letter[key]}</span></div><div>
+    <div class="head"><b>${agents[key][0]}</b><span>${model}${window.aicCur && window.aicCur.agent === key && window.aicCur.effort ? ' · 思考 ' + window.aicCur.effort : ''}</span><span>${hhmm()}</span></div>${thought ? processHtml(thoughtHtml(thought, secs), secs) : ''}<div class="text answer md">${html}</div></div></article>`;
   const userMsg = (text) => `<article class="msg user"><div class="who"><span class="me">黄</span></div><div>
     <div class="head"><b>你</b><span>今天 ${hhmm()}</span></div><div class="text"><p>${esc(text)}</p></div></div></article>`;
   const sysnote = (text, kind = '') => `<div class="sysnote" role="note" data-kind="${kind}"><span>${ic('swap')}${text}</span></div>`;
@@ -467,8 +469,14 @@
     } else el = add(agentMsg(key, model, '', thought ? ' ' : '', 0));
     if (opts.label) $('.head span', el).textContent = opts.label;
     const d = $('.thought', el), body = $('.thought-body', el), label = $('.tl', el);
+    const proc = $('.process', el), pl = proc && $('.pl', proc);
     const start = Date.now();
-    const finish = () => { $('.text', el).innerHTML = answerHtml; scrollEnd(); if (done) done(el); };
+    if (proc) { proc.open = true; pl.textContent = '正在处理'; pl.classList.add('thinking'); }
+    const finish = () => {
+      $('.text.answer', el).innerHTML = answerHtml;
+      if (proc) { pl.classList.remove('thinking'); pl.textContent = `用时 ${Math.max(1, Math.round((Date.now() - start) / 1000))} 秒`; if (!proc.dataset.user) proc.open = false; }
+      scrollEnd(); if (done) done(el);
+    };
     if (!d) { setTimeout(finish, 600); return el; }
     d.open = thoughtMode() !== 'hidden';
     label.textContent = '正在思考';
@@ -487,11 +495,23 @@
     }, 30);
     return el;
   };
+  // 回复里的链接只显示文字；正式版点击后经 Platform.openExternal 在系统浏览器里打开，原型只给出提示
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest('.md a[href^="http"]'); if (!a) return;
+    e.preventDefault();
+    toast(`正式版会在系统浏览器里打开：${esc(a.href)}`);
+  });
+  // 用户手动开合过程后，以用户为准，不再自动收起
+  document.addEventListener('click', (e) => {
+    const sm = e.target.closest('details.process > summary'); if (!sm) return;
+    if (sm.parentElement.dataset.pending) { e.preventDefault(); toast('有待处理的审批，处理完之前过程保持展开'); return; }
+    sm.parentElement.dataset.user = '1';
+  });
   Object.assign(window, { aicAdd: add, aicAgentMsg: agentMsg, aicSysnote: sysnote, aicStreamReply: streamReply });
 
   // 折叠的工具调用补上详情内容，展开后不再是空的
   $$('details.tool').forEach((d) => {
-    if ($('.detail', d)) return;
+    if ($('.detail', d) || d.classList.contains('search-group')) return;
     const verb = $('.verb', d)?.textContent || '';
     const target = $('.target', d)?.textContent || '';
     let body;
@@ -711,7 +731,7 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
   });
 
   // ---------- Agent / 账号 / 模型 / 思考强度 切换器（每个输入框都有） ----------
-  const accounts = { claude: ['个人订阅', '工作室 API Key'], codex: ['ChatGPT 账号'], codebuddy: ['沿用 WorkBuddy 登录'], zcode: ['Z.AI 账号'] };
+  const accounts = { claude: ['个人订阅', '工作室 API Key'], codex: ['ChatGPT 账号'], codebuddy: ['CodeBuddy 账号'], zcode: ['Z.AI 账号'] };
   const status = { claude: '空闲', codex: '登录已过期', codebuddy: '空闲', zcode: '未连接' };
   // 思考强度：Agent 通过 ACP 配置项提供时才可调；null 表示由模型自己决定
   const efforts = { claude: ['低', '中', '高', '最高'], codex: ['低', '中', '高'], codebuddy: null, zcode: null };
@@ -935,17 +955,26 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
   };
   const runTests = () => {
     setHead('run', '运行中');
-    const g = add(`<div class="tools-group"><details class="tool" open><summary>${window.icon('right', 'chev')}<span class="verb">执行</span><span class="target">Unity.exe -runTests -testFilter SaveManagerTests</span><span class="end thinking">运行中</span></summary>
+    const turn = $('#turn-cur'), proc = $('.process', turn), body = $('.process-body', turn);
+    $('.pl', proc).textContent = '正在处理';
+    body.insertAdjacentHTML('beforeend', `<div class="tools-group"><details class="tool" open><summary>${window.icon('right', 'chev')}<span class="verb">执行</span><span class="target">Unity.exe -runTests -testFilter SaveManagerTests</span><span class="end thinking">运行中</span></summary>
       <div class="detail"><pre>正在启动 Unity（batchmode）</pre></div></details></div>`);
+    const g = body.lastElementChild;
+    delete proc.dataset.pending;
+    $('.stream').scrollTop = $('.stream').scrollHeight;
     setTimeout(() => {
       $('.end', g).className = 'end';
       $('.end', g).innerHTML = '<span class="status ok"><span class="dot"></span>12/12 通过</span>41 秒';
       $('pre', g).textContent = 'SaveManagerTests.LoadLegacySave_v3 ✓\nSaveManagerTests.InterruptedWrite_FallsBackToBak ✓\nSaveManagerTests.RoundTrip_KeepsFormat ✓\n…共 12 项，全部通过';
-      window.aicStreamReply(window.aicCur.agent, window.aicCur.model, '12 项全部通过。重点看了两条：老格式 v3 能读，中断写入能回退。剩下的是云同步前等写入完成，改动很小。', '<p>12 项测试全部通过：老存档能读，写入中断时会回退到 .bak。剩下“云同步前等待写入完成”这一步，改完后就可以合并。</p>',
-        () => { const j = window.aicJudge({ kind: 'done', text: '完成度判断：已满足验收标准 3/3', prob: 88, why: 'SaveManagerTests 12/12 通过，覆盖了老格式读取和中断回退；存档格式没有改动' }); if (j) add(`<div class="judge-inline">${j}</div>`);
+      const pl = $('.pl', proc); pl.classList.remove('thinking'); pl.textContent = '用时 5 分 2 秒';
+      $('summary', proc).setAttribute('aria-label', '用时 5 分 2 秒，点击查看过程');
+      if (!proc.dataset.user) proc.open = false;
+      $('.process', turn).insertAdjacentHTML('afterend', '<div class="text answer md"><h3>测试结果</h3><p><strong>12 项全部通过</strong>：</p><ul><li>老格式 v3 存档能读</li><li>写入中断时会回退到 <code>.bak</code></li></ul><p>剩下“云同步前等待写入完成”这一步，改完后就可以合并。</p></div>');
+      $('.stream').scrollTop = $('.stream').scrollHeight;
+      (() => { const j = window.aicJudge({ kind: 'done', text: '完成度判断：已满足验收标准 3/3', prob: 88, why: 'SaveManagerTests 12/12 通过，覆盖了老格式读取和中断回退；存档格式没有改动' }); if (j) add(`<div class="judge-inline">${j}</div>`);
           if (window.aicSess.get().autoMerge) {
             setTimeout(() => { add(sysnote('测试全部通过，已按本任务设置自动合并到 main（压缩成一个提交）')); setHead('ok', '已合并'); toast('已自动合并到 main，可以在改动面板回滚'); }, 600);
-          } });
+          } })();
       setHead('ok', '待验收');
       const now = $('.plan li.now');
       if (now) { now.className = 'done'; now.querySelector('.mk').innerHTML = ic('check'); now.nextElementSibling?.classList.add('now'); }
@@ -1011,7 +1040,10 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
     const why = $('#rr-input').value.trim();
     resolve(false, '已拒绝' + (why ? `，理由：${why}` : ''));
     setHead('run', '运行中');
-    add(agentMsg(window.aicCur.agent, window.aicCur.model, `<p>好的，不运行这条命令。${why ? `按你的意见：“${esc(why)}”，我换个做法。` : '我先改为只做静态检查，有需要再请你确认。'}</p>`));
+    const proc = $('#turn-cur .process'); delete proc.dataset.pending;
+    const pl = $('.pl', proc); pl.classList.remove('thinking'); pl.textContent = '用时 4 分 30 秒';
+    if (!proc.dataset.user) proc.open = false;
+    proc.insertAdjacentHTML('afterend', `<div class="text answer md"><p>好的，不运行这条命令。${why ? `按你的意见：“${esc(why)}”，我换个做法。` : '我先改为只做静态检查，有需要再请你确认。'}</p></div>`);
   }));
   $('#rr-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('[data-rr="ok"]', rr).click(); });
   card.addEventListener('keydown', (e) => {
@@ -1221,7 +1253,8 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
   const info = {
     'Claude Code': ['claude', 'C', ['Opus 5.5', 'Sonnet 5'], '%APPDATA%\\npm\\claude.cmd'],
     'Codex': ['codex', 'X', ['gpt-5.5-codex'], '%APPDATA%\\npm\\codex.cmd'],
-    'CodeBuddy': ['codebuddy', 'B', ['glm-5.1', 'kimi-k2.5', 'minimax-m2.7', 'deepseek-v3-2'], '…\\WorkBuddy\\resources\\app.asar.unpacked\\cli\\dist\\codebuddy.js'],
+    'CodeBuddy': ['codebuddy', 'B', ['glm-5.1', 'kimi-k2.5', 'minimax-m2.7', 'deepseek-v3-2'], '工作台自带：node_modules\\@tencent-ai\\codebuddy-code（2.181.0）'],
+    'WorkBuddy': ['workbuddy', 'W', ['（暂不支持，没有可用模型）'], '…\\WorkBuddy\\resources\\app.asar.unpacked\\cli（只有精简引擎）'],
     'ZCode': ['zcode', 'Z', ['glm-5.1'], '…\\ZCode\\resources\\glm\\zcode.cjs'],
   };
   const detail = $('.detail');
@@ -1244,14 +1277,23 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
   const redetect = $('.main-head .btn');
   wire(redetect).addEventListener('click', () => progress(redetect, () => {
     $('.page-lead').firstChild.textContent = `上次检测：今天 ${hhmm()}。`;
-    toast('检测完成：找到 4 个 Agent');
+    toast('检测完成：找到 5 个 Agent，其中 WorkBuddy 暂不支持');
   }, '检测中'));
 
   $$('.agent-card .btn').forEach((b) => {
     wire(b);
     const card = b.closest('.agent-card');
     const t = b.textContent;
-    if (t.includes('登录')) b.addEventListener('click', () => modal({
+    if (b.dataset.cbLogin) b.addEventListener('click', () => modal({
+      title: `用${b.dataset.cbLogin}登录 CodeBuddy`,
+      body: `<ol class="steps"><li>已在默认浏览器中打开 CodeBuddy 的登录页面（原型未真正打开）</li><li>在网页上用${esc(b.dataset.cbLogin)}完成登录</li><li>回到这里，状态会自动变成“就绪”</li></ol><p style="margin:0;color:var(--fg-3)">登录信息由 CodeBuddy 引擎自己保存，AI Console 不经手你的密码。WorkBuddy 的登录和这里无关。</p>`,
+      actions: [{ label: '取消' }, { label: '我已完成登录', kind: 'primary', onClick() {
+        setStatus(card, 'ok', '就绪'); $$('dl dd', card)[1].textContent = `已登录（${b.dataset.cbLogin}）`; $('.acts', card).remove();
+        toast('CodeBuddy 已登录');
+      } }],
+    }));
+    else if (b.hasAttribute('data-wb-recheck')) b.addEventListener('click', () => progress(b, () => toast('WorkBuddy 仍然只带精简引擎，保持“暂不支持”。等 WorkBuddy 更新或我们支持精简引擎后会自动可用', 'attn'), '检测中'));
+    else if (t.includes('登录')) b.addEventListener('click', () => modal({
       title: '在浏览器中登录 Codex',
       body: '<ol class="steps"><li>已在默认浏览器中打开 ChatGPT 授权页面（原型未真正打开）</li><li>在网页上点“允许”</li><li>回到这里，状态会自动变成“就绪”</li></ol><p style="margin:0;color:var(--fg-3)">登录信息由 Codex 自己保存，AI Console 不经手你的密码。</p>',
       actions: [{ label: '取消' }, { label: '我已完成登录', kind: 'primary', onClick() {

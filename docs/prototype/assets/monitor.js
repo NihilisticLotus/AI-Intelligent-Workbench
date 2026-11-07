@@ -17,7 +17,7 @@
   // ---------- 概览 ----------
   const quotas = [
     ['个人订阅', 'Claude Code', 46, '本周已用，周一 08:00 重置'],
-    ['WorkBuddy 登录', 'CodeBuddy', 82, '本周已用，超过告警线 80%'],
+    ['CodeBuddy 账号', 'CodeBuddy', 82, '本周已用，超过告警线 80%'],
     ['ChatGPT 账号', 'Codex', 12, '登录已过期，暂停计数'],
   ];
   const renderTiles = () => {
@@ -50,7 +50,7 @@
       { name: '个人订阅', slot: 1, vals: raw.claude.map((v) => r1(v * 0.6)) },
       { name: '工作室 API Key', slot: 2, vals: raw.claude.map((v) => r1(v * 0.4)) },
       { name: 'ChatGPT 账号', slot: 3, vals: raw.codex },
-      { name: 'WorkBuddy 登录', slot: 4, vals: raw.codebuddy },
+      { name: 'CodeBuddy 账号', slot: 4, vals: raw.codebuddy },
       { name: 'Z.AI 账号', slot: 5, vals: raw.zcode },
     ];
     // 按项目：复用侧栏的项目列表；前两个项目分摊示例用量，之后新加的项目还没有用量
@@ -232,7 +232,7 @@
 
   // ---------- 告警规则 ----------
   const ruleTypes = {
-    quota: { name: '账号额度超过', unit: '%', def: 80, opts: [50, 70, 80, 90, 95], scope: ['任何账号', '个人订阅', '工作室 API Key', 'ChatGPT 账号', 'WorkBuddy 登录', 'Z.AI 账号'] },
+    quota: { name: '账号额度超过', unit: '%', def: 80, opts: [50, 70, 80, 90, 95], scope: ['任何账号', '个人订阅', '工作室 API Key', 'ChatGPT 账号', 'CodeBuddy 账号', 'Z.AI 账号'] },
     stuck: { name: '任务卡住超过', unit: '分钟', def: 10, opts: [5, 10, 20, 30], scope: ['任何任务', '只看自动化产生的任务'], hint: '卡住指一直没有新输出' },
     autofail: { name: '自动化连续失败', unit: '次', def: 2, opts: [1, 2, 3, 5], scope: ['任何自动化', '每晚全量构建并汇总报错', '新 FBX 自动转 glb 并检查面数和命名'] },
     disk: { name: '工作副本占用磁盘超过', unit: 'GB', def: 20, opts: [5, 10, 20, 50, 100], scope: ['所有项目', ...SB.projects.map((p) => p.name)] },
@@ -241,7 +241,7 @@
   };
   const notifyNames = { os: '系统通知', sidebar: '侧栏“等你处理”', phone: '已配对的手机', sound: '提示音' };
   const rules = [
-    { id: 'r1', type: 'quota', val: 80, scope: '任何账号', notify: ['os', 'sidebar'], on: true, fired: '正在触发：WorkBuddy 登录已用 82%' },
+    { id: 'r1', type: 'quota', val: 80, scope: '任何账号', notify: ['os', 'sidebar'], on: true, fired: '正在触发：CodeBuddy 账号已用 82%' },
     { id: 'r2', type: 'stuck', val: 10, scope: '任何任务', notify: ['os'], on: true },
     { id: 'r3', type: 'autofail', val: 2, scope: '任何自动化', notify: ['os', 'phone'], on: true },
     { id: 'r4', type: 'disk', val: 20, scope: '所有项目', notify: ['sidebar'], on: true, cur: '现在 14.2 GB' },
@@ -316,7 +316,7 @@
   const events = [
     { at: minsAgo(18), type: 'auto', lv: 'ok', title: '自动化“新 FBX 自动转 glb”成功', detail: 'SM_Chest_v2.glb，412 个三角面，命名正确' },
     { at: minsAgo(52), type: 'auto', lv: 'err', title: '自动化“新 FBX 自动转 glb”失败', detail: 'SM_Lantern.fbx 超面数。快速判断：严重程度中（71%），按规则通知了你', act: '<a class="btn sm ghost" data-wired="1" href="automations.html">查看运行历史</a>' },
-    { at: minsAgo(70), type: 'alert', lv: 'wait', title: '额度超过 80%：WorkBuddy 登录已用 82%', detail: '规则“账号额度超过 80%”，已发系统通知', act: '<button class="btn sm ghost" data-wired="1" data-ev="usage">查看用量</button>' },
+    { at: minsAgo(70), type: 'alert', lv: 'wait', title: '额度超过 80%：CodeBuddy 账号已用 82%', detail: '规则“账号额度超过 80%”，已发系统通知', act: '<button class="btn sm ghost" data-wired="1" data-ev="usage">查看用量</button>' },
     { at: minsAgo(140), type: 'crash', lv: 'ok', title: 'CodeBuddy 进程崩溃，3 秒后自动恢复', detail: '正在运行的“宝箱模型”从断点继续，没有丢失进度', act: '<button class="btn sm ghost" data-wired="1" data-ev="log">查看日志</button>' },
     { at: minsAgo(60 * 9), type: 'auto', lv: 'ok', title: '自动化“构建成功后跑冒烟测试”成功', detail: '3 张截图，主菜单加载 4.2 秒' },
     { at: minsAgo(60 * 9.5), type: 'auto', lv: 'ok', title: '自动化“每晚全量构建”成功', detail: '3 条警告，比上次少 2 条' },
@@ -378,7 +378,7 @@
   const agName = (k) => (AG[k] ? AG[k][0] : window.aicAgentName?.[k] || k);
   const modelsOf = (k) => (AG[k] ? AG[k][1] : ['默认模型']);
   const modelW = { claude: [0.55, 0.45], codebuddy: [0.4, 0.25, 0.2, 0.15] };
-  const ACCT = { claude: ['个人订阅', '工作室 API Key'], codex: ['ChatGPT 账号'], codebuddy: ['WorkBuddy 登录'], zcode: ['Z.AI 账号'] };
+  const ACCT = { claude: ['个人订阅', '工作室 API Key'], codex: ['ChatGPT 账号'], codebuddy: ['CodeBuddy 账号'], zcode: ['Z.AI 账号'] };
   // 示例价格表：美元 / 百万 token（输入、输出）。缓存命中按输入价的 10%，思考按输出价。正式版用用户可编辑的价格表。
   const PRICE = { 'Opus 5.5': [5, 25], 'Sonnet 5': [3, 15], 'gpt-5.5-codex': [1.25, 10], 'glm-5.1': [0.6, 2.2], 'kimi-k2.5': [0.6, 2.5], 'minimax-m2.7': [0.3, 1.2], 'deepseek-v3-2': [0.28, 0.42] };
   const SUCC = { 'Opus 5.5': 0.9, 'Sonnet 5': 0.86, 'gpt-5.5-codex': 0.8, 'glm-5.1': 0.82, 'kimi-k2.5': 0.78, 'minimax-m2.7': 0.72, 'deepseek-v3-2': 0.75 };

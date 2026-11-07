@@ -251,3 +251,39 @@ dialog.dlg[open] { display: flex; flex-direction: column; animation: toast-in va
 .perm-chip[data-level="ws"] svg.i { color: var(--ok); }
 .perm-chip[data-level="full"] { box-shadow: inset 0 0 0 1px var(--attn); color: var(--attn); }
 .perm-chip[data-level="full"] svg.i { color: var(--attn); }
+
+/* ---------- 一轮回复（design.md 15.2）：过程折叠成“用时 N 秒”，最终回答在下面；与正式网页 components.css 一致 ---------- */
+.process { margin: 2px 0 6px; }
+.process > summary { list-style: none; display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--fg-3); font-size: var(--fs-13); padding: 2px 0; user-select: none; }
+.process > summary::-webkit-details-marker { display: none; }
+.process > summary:hover { color: var(--fg-2); }
+.process > summary svg.i { width: 12px; height: 12px; transition: transform var(--dur-fast) var(--ease); }
+.process[open] > summary svg.i { transform: rotate(90deg); }
+.process[open] > summary { border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-bottom: 8px; width: 100%; }
+.process-body { display: flex; flex-direction: column; gap: 6px; padding-left: 2px; }
+.process-body .tools-group { margin: 0; }
+.process-body .step-text { color: var(--fg-2); }
+.process-body .step-text p { margin: 0; }
+.process-body .approval { margin: 4px 0; }
+.msg.turn .answer { color: var(--fg-1); }
+.search-group > summary svg.i:not(.chev) { color: var(--fg-3); width: 13px; height: 13px; }
+.search-list { list-style: none; margin: 4px 0 4px 22px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.search-list li { display: flex; align-items: center; gap: 6px; color: var(--fg-3); font-size: var(--fs-13); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.search-list li svg.i { width: 12px; height: 12px; flex: none; }
+
+/* Markdown（回答、思考） */
+.md { line-height: 1.7; overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; }
+.md h3 { color: var(--fg-1); font-size: 1.08em; font-weight: 600; line-height: 1.4; margin: 1em 0 0.4em; }
+.md strong, .thought-body strong { color: var(--fg-1); font-weight: 600; }
+.md a { color: var(--accent); text-decoration: none; }
+.md a:hover { text-decoration: underline; }
+.md ul { margin: 4px 0 0.6em; padding-left: 1.4em; }
+.md li { margin: 0.15em 0; }
+
+/* 选中对话文字后的小菜单 */
+.sel-menu { position: fixed; z-index: 50; transform: translate(-50%, calc(-100% - 8px)); display: inline-flex; background: var(--bg-3); border-radius: var(--r-ctl); box-shadow: 0 6px 20px rgb(0 0 0 / .35); overflow: hidden; }
+.sel-menu button { border: 0; background: transparent; color: var(--fg-1); font: inherit; font-size: var(--fs-13); padding: 6px 12px; cursor: pointer; }
+.sel-menu button + button { border-left: 1px solid var(--line); }
+.sel-menu button:hover { background: var(--bg-2); }
+.sel-menu button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

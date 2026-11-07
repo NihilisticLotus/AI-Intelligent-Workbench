@@ -57,7 +57,7 @@ say();
 
 if (!existsSync(path.join(root, 'node_modules', '.package-lock.json'))) {
   say('第一次运行，正在安装依赖，大约需要一两分钟……');
-  if (!npm(['install', '--no-fund', '--no-audit'])) fail('安装依赖失败。请检查网络连接后，重新双击“启动 AI Console”。');
+  if (!npm(['ci', '--no-fund', '--no-audit'])) fail('安装依赖失败。请检查网络连接后，重新双击“启动 AI Console”。');
   say();
 }
 

@@ -5,7 +5,7 @@
 | 日期 | 2026-11-06 |
 | 提交范围 | 尚未提交：分支 `step/1.2-agents` 的工作区（提交后见 `git log --grep "step-1.2"`） |
 | 验收人 | Claude（联调与真实冒烟：一个 Agent 对齐接口、修复、跑真实冒烟和浏览器验收） |
-| 结论 | 部分通过：Claude Code、Codex 通过；CodeBuddy 未登录，未验证（ISSUE-0010） |
+| 结论 | 通过：Claude Code、Codex 首次冒烟通过；CodeBuddy 于 2026-11-07 用户登录后补测通过（ISSUE-0010 已关闭） |
 
 ## 完成标准（plans/phase-1.md 第 1.2 步）
 
@@ -122,3 +122,20 @@
 验证：`npm run typecheck`、`npm test`（adapters 59 项 + 3 项跳过、gateway 89、protocol 8、web 56）、`npm run build` 全部通过。浏览器回归（preview `app`）：配对、打开已有 Claude 任务历史、Agent 页“默认模型 / 默认思考强度 / 工作区设置”、设默认模型后新建任务对话框带出该模型（随后改回）、Codex 的工作区提示、真实 Agent 后两档权限置灰、切换器弹出层、演示 Agent 两次审批（处理第一条后仍是“等待审批”，处理完变“待验收”），控制台无错误。本轮没有调用真实 Agent 发消息。
 
 未验证：Claude 的 `settingSources`、`CLAUDE_CODE_SUBPROCESS_ENV_SCRUB` 和 CodeBuddy 的 `--setting-sources user` 只核对了锁定版本的源码，没有用真实 Agent 跑带恶意 settings.json 的仓库；H1 启动时指定模型只在假 Agent 上验证；“执行中切换先问”、页面 alert 块的实际点击没有在浏览器里触发（演示 Agent 不会进入这些分支），只有单元测试。
+
+## CodeBuddy 补测（2026-11-07）
+
+用户在 WorkBuddy 里登录后执行 `AIC_REAL_AGENTS=1 AIC_REAL_AGENTS_ONLY=codebuddy`，共 3 条消息，在空的临时目录里进行。
+
+| 项 | 结果 |
+|---|---|
+| 检测 | 已登录，引擎 2.115.0（已验证），约 5.8 秒 |
+| session/new | 1.6 秒，注入的 MCP 被拉起 |
+| 模型 / 思考强度 | 18 个模型（auto、hy4、hy3、deepseek、glm、kimi、minimax 等），思考强度 7 档 |
+| 回复 OK | 通过，11.4 秒，没有调用工具 |
+| 审批 | “需审批”下写文件弹出 1 次审批（Write，选项为允许一次和拒绝）；允许后 hello.txt 生成，内容为 hi |
+| 会话内切换 | 模型换到 hy4free、思考强度换到 high 都成功，再次回复 3.3 秒 |
+| 恢复会话 | 成功（load，1.7 秒）；恢复后模型和思考强度回到默认，记入 ISSUE-0012 |
+| 登录保持 | 强制检测 3 次（间隔 15 秒）都已登录；用户确认 WorkBuddy 仍为已登录（ISSUE-0008 已关闭） |
+
+未验证：网页里的 CodeBuddy 登录按钮流程（用户是在 WorkBuddy 里登录的，ISSUE-0013）。

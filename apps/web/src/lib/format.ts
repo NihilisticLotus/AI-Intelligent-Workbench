@@ -38,6 +38,7 @@ export const agentFallback: Record<AgentKind, { name: string; mono: string }> = 
   codex: { name: 'Codex', mono: 'X' },
   codebuddy: { name: 'CodeBuddy', mono: 'B' },
   zcode: { name: 'ZCode', mono: 'Z' },
+  workbuddy: { name: 'WorkBuddy', mono: 'W' },
 };
 
 /** 相对时间：“刚刚 / 5 分钟 / 3 小时 / 昨天 / 4 天” */

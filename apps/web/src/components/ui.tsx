@@ -261,7 +261,7 @@ export function runErrorAction(a: string | ActionLike, onRetryOrCtx?: (() => voi
       const profileId = argStr(args, 'profileId');
       void confirmDialog({
         title: '退出现在的账号并重新登录？', ok: '退出并重新登录', danger: true,
-        body: <p style={{ margin: 0 }}>{kind === 'codebuddy' ? '重新登录会同时退出 WorkBuddy 里的账号（两者共用同一份登录）。' : '重新登录会替换现在的登录。'}</p>,
+        body: <p style={{ margin: 0 }}>重新登录会替换现在的登录。</p>,
       }).then((ok) => {
         if (!ok) return;
         navigate(profileId ? { page: 'agents', agent: kind, profileId } : { page: 'agents', agent: kind });

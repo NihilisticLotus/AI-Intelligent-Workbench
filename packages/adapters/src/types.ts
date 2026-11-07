@@ -35,6 +35,8 @@ export interface DetectResult {
   loginCheck?: 'cli' | 'acp' | 'secret' | 'none' | 'unknown';
   /** 检测时间 */
   checkedAt?: number;
+  /** 装了但这个版本不能在工作台里使用（例如 WorkBuddy 只带精简引擎）；message 写明原因 */
+  unsupported?: boolean;
 }
 
 export type AuthMethod = 'none' | 'oauth' | 'apiKey' | 'customEndpoint';

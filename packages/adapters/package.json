@@ -3,7 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
+  "exports": {
+    ".": "./src/index.ts"
+  },
   "scripts": {
     "test": "vitest run",
     "typecheck": "tsc -p tsconfig.json"
@@ -13,6 +15,7 @@
     "@agentclientprotocol/codex-acp": "2.5.0",
     "@agentclientprotocol/sdk": "2.4.0",
     "@aic/protocol": "0.1.0",
+    "@tencent-ai/codebuddy-code": "2.181.0",
     "zod": "4.6.7"
   },
   "devDependencies": {

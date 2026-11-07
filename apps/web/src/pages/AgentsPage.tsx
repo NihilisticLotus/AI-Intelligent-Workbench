@@ -73,7 +73,7 @@ export function AgentsPage() {
         const ok = await confirmDialog({
           title: `换一个 ${a.displayName} 账号？`, ok: '退出并重新登录', danger: true,
           body: <><p>{e.error.message}</p>
-            <p style={{ margin: 0 }}>{a.kind === 'codebuddy' ? '重新登录会同时退出 WorkBuddy 里的账号（两者共用同一份登录）。' : '重新登录会替换现在的登录。'}</p></>,
+            <p style={{ margin: 0 }}>重新登录会替换现在的登录。</p></>,
         });
         if (ok) return login(a, methodId, profileId, true);
         return;
@@ -262,11 +262,11 @@ function LoginSection({ a, my, login, onLogin, onRedetect, redetecting }: {
 
   const start = async (m: AuthMethod) => {
     if (starting || running) return;
-    // CodeBuddy 已登录时“换账号”要二次确认：会同时退出 WorkBuddy 里的账号
+    // CodeBuddy 已登录时“换账号”要二次确认：引擎会先退出现在的账号（Gateway 也要求 force）
     if (loggedIn && a.kind === 'codebuddy' && m.flow !== 'external_app') {
       const ok = await confirmDialog({
         title: '换一个 CodeBuddy 账号？', ok: '退出并重新登录', danger: true,
-        body: <p style={{ margin: 0 }}>重新登录会同时退出 WorkBuddy 里的账号（两者共用同一份登录）。</p>,
+        body: <p style={{ margin: 0 }}>会先退出现在的 CodeBuddy 账号，再打开浏览器登录新账号。</p>,
       });
       if (!ok) return;
       setStarting(m.id);
@@ -278,7 +278,7 @@ function LoginSection({ a, my, login, onLogin, onRedetect, redetecting }: {
   };
 
   const workbuddy = methods.find((m) => m.flow === 'external_app' || m.id === WORKBUDDY_APP_METHOD)
-    ?? (a.kind === 'codebuddy' ? { id: WORKBUDDY_APP_METHOD, name: '在 WorkBuddy 中登录', description: '启动 WorkBuddy，在那里登录后回来点“重新检测”', flow: 'external_app' as const } : null);
+    ?? (a.kind === 'workbuddy' ? { id: WORKBUDDY_APP_METHOD, name: '在 WorkBuddy 中登录', description: '启动 WorkBuddy，在那里登录后回来点“重新检测”', flow: 'external_app' as const } : null);
   const browserMethods = methods.filter((m) => m !== workbuddy && m.flow === 'browser');
 
   return (
@@ -288,11 +288,11 @@ function LoginSection({ a, my, login, onLogin, onRedetect, redetecting }: {
         <LoginProgress a={a} login={login} methodId={my?.loginId === login.loginId ? my.methodId : null} methodName={methods.find((m) => m.id === my?.methodId)?.name ?? null} onRedetect={onRedetect} />
       ) : null}
       {a.status === 'not_installed' ? (
-        <p className="muted-note">这台电脑上没有找到 {a.displayName}。{a.kind === 'codebuddy' ? '装好 WorkBuddy 后' : '装好后'}点“重新检测”。</p>
+        <p className="muted-note">这台电脑上没有找到 {a.displayName}。{a.kind === 'workbuddy' ? '装好 WorkBuddy 后' : '装好后'}点“重新检测”。</p>
       ) : !running ? (
         <>
           {!loggedIn ? <p className="muted-note">选一种方式登录。需要浏览器授权的，会在运行 AI Console 的这台电脑上打开浏览器，授权完这里会自动更新。</p>
-            : <p className="muted-note">{a.kind === 'codebuddy' ? '已经登录（和 WorkBuddy 共用）。换账号会同时退出 WorkBuddy 里的账号。' : '已经登录。需要换账号时可以重新登录，或者在下面添加别的账号。'}</p>}
+            : <p className="muted-note">{a.kind === 'workbuddy' ? '已经登录（在 WorkBuddy 里登录的）。要换账号，请在 WorkBuddy 里操作。' : '已经登录。需要换账号时可以重新登录，或者在下面添加别的账号。'}</p>}
           <div className="login-methods">
             {browserMethods.map((m) => (
               <button key={m.id} type="button" className={'btn' + (!loggedIn ? ' attn' : '')} aria-busy={starting === m.id} disabled={!!starting}
@@ -310,7 +310,7 @@ function LoginSection({ a, my, login, onLogin, onRedetect, redetecting }: {
           ) : null}
           {!browserMethods.length && !workbuddy ? <p className="muted-note">没有可以在界面里完成的登录方式。{hasApiKeyMethod ? '可以在下面添加“官方 API Key”账号。' : '点“重新检测”再看看。'}</p> : null}
           {hasApiKeyMethod ? <p className="muted-note">用 API Key：在下面“添加账号 → 官方 API Key”里粘贴密钥，不用在这里登录。</p> : null}
-          {a.kind === 'codebuddy' && !loggedIn ? (
+          {a.kind === 'workbuddy' && !loggedIn ? (
             <p className="muted-note">在 WorkBuddy 里登录后，回到这里点 <button type="button" className="linkish" onClick={onRedetect} disabled={redetecting}>重新检测</button>。</p>
           ) : null}
         </>

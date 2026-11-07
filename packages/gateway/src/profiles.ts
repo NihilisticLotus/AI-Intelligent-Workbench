@@ -15,7 +15,7 @@ export type ProfileRow = {
 
 /** 自动建的默认账号“本机登录”：id 固定，不能删除 */
 export const localProfileId = (agent: AgentKind) => `pf_local_${agent}`;
-const LOCAL_NAME: Partial<Record<AgentKind, string>> = { codebuddy: '沿用 WorkBuddy 登录' };
+const LOCAL_NAME: Partial<Record<AgentKind, string>> = { workbuddy: '沿用 WorkBuddy 登录' };
 
 export interface ProfileServiceOptions {
   dataDir: string;
@@ -39,6 +39,10 @@ export class ProfileService {
         `INSERT INTO agent_profiles (id, agent, name, kind, config_dir, is_default, created_at, updated_at) VALUES (?, ?, ?, 'subscription', 'shared', ?, ?, ?)`,
         id, agent, LOCAL_NAME[agent] ?? '本机登录', hasDefault ? 0 : 1, t, t,
       );
+      r = this.db.get<ProfileRow>('SELECT * FROM agent_profiles WHERE id = ?', id)!;
+    } else if (agent === 'codebuddy' && r.name === '沿用 WorkBuddy 登录') {
+      // CodeBuddy 和 WorkBuddy 拆成两个 Agent 之后（ISSUE-0016），旧数据里的名称改为通用的“本机登录”
+      this.db.run('UPDATE agent_profiles SET name = ?, updated_at = ? WHERE id = ?', '本机登录', now(), id);
       r = this.db.get<ProfileRow>('SELECT * FROM agent_profiles WHERE id = ?', id)!;
     }
     return r;

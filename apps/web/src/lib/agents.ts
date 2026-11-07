@@ -151,9 +151,9 @@ export function capsSummary(caps: AgentCaps | undefined): string[] {
 
 export function engineSourceText(a: Pick<AgentInfo, 'kind' | 'engineSource'>): string | null {
   switch (a.engineSource) {
-    case 'bundled': return '适配器自带的引擎';
+    case 'bundled': return a.kind === 'codebuddy' ? '工作台自带的官方独立版引擎' : '适配器自带的引擎';
     case 'local': return '本机安装的引擎';
-    case 'app': return a.kind === 'codebuddy' ? 'WorkBuddy 内置引擎' : '应用内置引擎';
+    case 'app': return a.kind === 'workbuddy' ? 'WorkBuddy 内置引擎' : '应用内置引擎';
     default: return null;
   }
 }
@@ -205,7 +205,7 @@ export const isLocalLogin = (p: Pick<AgentProfile, 'kind' | 'configDir'>) => p.k
 export function profileDesc(p: AgentProfile): string {
   const parts: string[] = [];
   if (p.kind === 'subscription') {
-    parts.push(p.configDir === 'shared' ? (p.agent === 'codebuddy' ? '沿用 WorkBuddy 登录' : '这台电脑上已有的登录') : '单独的订阅登录');
+    parts.push(p.configDir === 'shared' ? (p.agent === 'workbuddy' ? '沿用 WorkBuddy 登录' : '这台电脑上已有的登录') : '单独的订阅登录');
     if (p.loggedIn === true) parts.push('已登录');
     if (p.loggedIn === false) parts.push('未登录');
   } else {

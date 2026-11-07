@@ -103,7 +103,8 @@ describe('账号', () => {
     const key = profile({ id: 'k', kind: 'apiKey', name: '工作室', hasSecret: true, secretHint: '7Q2c', isDefault: false, loggedIn: null });
     expect(profileDesc(key)).toContain('结尾 …7Q2c');
     expect(profileDesc(key)).toContain('Windows 数据保护');
-    expect(profileDesc(profile({ agent: 'codebuddy' }))).toContain('沿用 WorkBuddy 登录');
+    expect(profileDesc(profile({ agent: 'workbuddy' }))).toContain('沿用 WorkBuddy 登录');
+    expect(profileDesc(profile({ agent: 'codebuddy' }))).not.toContain('WorkBuddy');
     expect(profileDesc(profile({ loggedIn: false }))).toContain('未登录');
     expect(profileDesc(profile({ kind: 'customEndpoint', baseUrl: 'https://relay.example.com/v1', hasSecret: true, secretHint: 'abcd' }))).toMatch(/^relay\.example\.com，结尾 …abcd/);
     expect(isLocalLogin(profile())).toBe(true);

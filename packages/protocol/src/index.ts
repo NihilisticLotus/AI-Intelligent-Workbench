@@ -11,7 +11,7 @@ export const Id = z.string().min(1).max(64);
 /** 毫秒时间戳 */
 export const Ts = z.number().int().nonnegative();
 
-export const AgentKind = z.enum(['fake', 'claude', 'codex', 'codebuddy', 'zcode']);
+export const AgentKind = z.enum(['fake', 'claude', 'codex', 'codebuddy', 'zcode', 'workbuddy']);
 export type AgentKind = z.infer<typeof AgentKind>;
 
 export const PermissionLevel = z.enum(['readonly', 'ask', 'workspace', 'full']);

@@ -253,7 +253,7 @@ export class AgentService {
     const d = this.detected.get(a.id);
     const caps = a.real ? this.cachedCaps(a.id) : null;
     const cat = this.catalog(a.id, null);
-    const status: AgentInfo['status'] = !d ? 'error' : d.error ? 'error' : !d.installed ? 'not_installed' : !d.loggedIn ? 'needs_login' : 'ready';
+    const status: AgentInfo['status'] = !d ? 'error' : d.error || d.unsupported ? 'error' : !d.installed ? 'not_installed' : !d.loggedIn ? 'needs_login' : 'ready';
     const info: AgentInfo = {
       kind: a.id, displayName: a.displayName, status,
       version: d?.engineVersion ?? d?.version ?? null,
@@ -437,11 +437,14 @@ export class AgentService {
         data: { loginId, kind, profileId: profile.id, state, ...(extra.authUrl ? { authUrl: extra.authUrl } : {}), ...(extra.message ? { message: extra.message } : {}) },
       });
     };
-    const handle = a.startLogin({
+    // 先建记录再启动登录：适配器会在 startLogin 里同步回调一次 onProgress（'started'），
+    // 之前 rec 在回调之后才声明，回调里访问 rec 抛 ReferenceError，登录接口直接 500（2026-11-07 用户报告）
+    const rec: LoginRec = { id: loginId, kind, profileId: profile.id, handle: null as unknown as LoginHandle, done: false };
+    rec.handle = a.startLogin({
       methodId: body.methodId, profile: account, env,
       onProgress: (p) => { if (!rec.done) emit(p.state, p); },
     });
-    const rec: LoginRec = { id: loginId, kind, profileId: profile.id, handle, done: false };
+    const handle = rec.handle;
     this.logins.set(loginId, rec);
     this.o.audit(deviceId, 'agent.login', `${kind} ${profile.id} ${profile.name} ${body.methodId}`);
     void handle.done.then(async (r) => {

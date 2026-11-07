@@ -26,6 +26,7 @@ import { newId } from './util';
 
 const delay = (ms: number) => new Promise<void>((r) => { const t = setTimeout(r, ms); t.unref?.(); });
 import { attachWs } from './ws';
+import { gatewayLog, installCrashHandlers } from './crash-log';
 
 export const VERSION = '0.1.0';
 
@@ -287,6 +288,18 @@ async function openExisting(port: number) {
 }
 
 async function main() {
+  const dataDir = defaultDataDir();
+  let gwRef: Gateway | null = null;
+  // 兜底：没接住的错误写进 logs/gateway.log（ISSUE-0015）；致命错误时尽量收尾，最多等 3 秒
+  installCrashHandlers({
+    dataDir,
+    onFatal: () => {
+      const done = () => process.exit(1);
+      const t = setTimeout(done, 3000); t.unref?.();
+      if (gwRef) void gwRef.close({ deadlineMs: 2500 }).catch(() => {}).finally(done); else done();
+    },
+  });
+  gatewayLog(dataDir, 'INFO', `启动 v${VERSION}，Node ${process.version}，pid ${process.pid}`);
   let gw: Gateway;
   try {
     gw = await createGateway({ pairing: { onPairingCode: printCode } });
@@ -302,6 +315,8 @@ async function main() {
     }
     throw e;
   }
+  gwRef = gw;
+  gatewayLog(dataDir, 'INFO', `已启动：${gw.url}`);
   console.log(`AI Console 已启动：${gw.url}`);
   console.log('浏览器没有自动打开的话，请手动打开上面的地址。关闭这个窗口即可退出。');
   let stopping = false;
@@ -309,6 +324,7 @@ async function main() {
     if (stopping) return;
     stopping = true;
     console.log('正在退出……');
+    gatewayLog(dataDir, 'INFO', '正常退出');
     await gw.close({ deadlineMs });
     process.exit(0);
   };
@@ -326,6 +342,8 @@ const isEntry = (() => {
 })();
 if (isEntry) {
   main().catch((e) => {
+    gatewayLog(defaultDataDir(), 'FATAL', `启动失败：${e instanceof Error ? `${e.message}
+${e.stack ?? ''}` : String(e)}`);
     console.error('AI Console 启动失败：', e instanceof Error ? e.message : e);
     process.exit(1);
   });

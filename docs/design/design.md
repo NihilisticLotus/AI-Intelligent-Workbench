@@ -1,6 +1,7 @@
 # AI Console 设计文档
 
 > 版本 0.4.1 · 2026-11-07 · 状态：设计中
+> v0.4.1 补充（2026-11-07 轻量化）：参照 OpenBitFun 精简界面；上下文用量与 token 统计的数据来源和规则（15.5）。
 > v0.4.1 补充（2026-11-07 用户试用）：Agent 启用开关，默认只开 Claude Code、Codex（6.7）；对话注释按任务保存（15.2）；侧聊连续换模型只留一行提示。
 > v0.4.1 变更：CodeBuddy 与 WorkBuddy 拆成两个独立的 Agent，CodeBuddy 改用工作台自带的官方独立版引擎（第 6 节、25.1）；对话按“轮”显示、Markdown 渲染、连续切换只留一行提示、选中文字的小菜单（15.2）；Gateway 兜底日志 `logs/gateway.log`（第 17 节）。依据 ISSUE-0015～0018。
 > v0.4 新增：第 22 节自动化（定时与事件触发）、第 23 节监控与告警、第 24 节快速判断层、第 25 节能力中心（统一管理 MCP 和 Skill）、第 26 节侧边聊天、第 27 节媒体生成预留；任务分组与最近活动排序（第 13 节）。
@@ -1133,6 +1134,22 @@ audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, action TEXT, de
 - 交接：分隔条"已从 Claude Code（Opus 5.5）交接到 Codex"，可展开交接包，查看各部分 token 用量和被裁剪的内容。
 - 切换方式提示：每次切换后显示实际走的级别，例如"会话内切换（无损）""恢复会话（无损）""交接（有损）"。
 - 资产卡片：Agent 修改了资产文件时，对话流里显示缩略图卡片，点击打开预览。
+
+### 15.5 上下文用量与 token 统计（2026-11-07）
+
+界面见 ui-design.md 6.12，调研见 docs/research/openbitfun.md。
+
+| 数据 | 来源 | 现状 |
+|---|---|---|
+| 当前上下文 token、窗口大小、累计费用 | ACP `usage_update`（稳定版：used、size、cost） | Gateway 已记成 `session.usage` 事件，网页还没显示 |
+| 每轮输入、输出、思考、缓存读写 | ACP `PromptResponse.usage`（草案：inputTokens、outputTokens、thoughtTokens、cachedReadTokens、cachedWriteTokens） | 适配器还没接，要实测哪家报告 |
+| 上下文分类明细（系统提示、工具、MCP、记忆、对话） | ACP 没有。Claude Code 的 `/context` 能给出，需研究能否通过扩展拿到 | 待研究；拿不到时只显示总量 |
+| 订阅账号的周期额度 | ACP 没有，各家单独研究（zcode-acp 有智谱的配额接口可参考） | 待研究；拿不到时写“额度未知” |
+
+规则：
+- 只显示 Agent 报告的数，不自己估算；没报告的写“未报告”，没有窗口大小就不显示百分比。
+- 协议新增（只增不改）：`SessionUsage`（会话当前上下文、窗口、累计 token、费用、分类明细可选）和每轮的 `TurnUsage`；`GET /tasks/:id/usage` 返回各会话段的汇总。
+- 每轮用量按会话段累计（交接前后分开），任务汇总是各段之和；监控页的调用统计（23.4）用同一份数据。
 
 ### 15.3 响应式
 

@@ -31,6 +31,13 @@ export class EventStore {
 
   /** 同步写库、分配 seq，再交给总线分发 */
   append(input: NewEvent): EventEnvelope {
+    const ev = this.persist(input);
+    this.db.afterCommit(() => this.bus.emit(ev));
+    return ev;
+  }
+
+  /** 供业务事务使用：先与业务一起提交，再由调用方推送 bus，回滚时不能提前通知。 */
+  persist(input: NewEvent): EventEnvelope {
     const ts = input.ts ?? now();
     const { seq: _s, ts: _t, ...rest } = input as NewEvent & { seq?: number };
     // 边界校验：写进库里的每个事件都必须符合协议（seq 先用占位值 1 校验）
@@ -40,7 +47,6 @@ export class EventStore {
       checked.taskId, checked.sessionId, checked.type, JSON.stringify(checked.data), ts,
     );
     const ev = { ...checked, seq: r.lastInsertRowid } as EventEnvelope;
-    this.bus.emit(ev);
     return ev;
   }
 

@@ -14,6 +14,8 @@ export interface Db {
   exec(sql: string): void;
   /** 同步事务：fn 抛错时回滚 */
   tx<T>(fn: () => T): T;
+  /** 只在最外层事务提交后通知；回滚时丢弃，不允许通知异常改变已提交结果。 */
+  afterCommit(fn: () => void): void;
   close(): void;
 }
 
@@ -132,6 +134,27 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_independent_tools_state ON independent_tool_calls(state, session_id);
   `,
+  // v7：工作台自有服务、模型和任务绑定，与第三方 profiles 分离。
+  `
+  CREATE TABLE independent_services (
+    id TEXT PRIMARY KEY, config_json TEXT NOT NULL,
+    revision INTEGER NOT NULL, config_revision INTEGER NOT NULL,
+    secret_id TEXT REFERENCES secrets(id), created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  );
+  CREATE TABLE independent_models (
+    id TEXT PRIMARY KEY, service_id TEXT NOT NULL REFERENCES independent_services(id) ON DELETE CASCADE,
+    remote_model_id TEXT NOT NULL, name TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 1,
+    revision INTEGER NOT NULL, evidence_json TEXT NOT NULL DEFAULT '[]',
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+    UNIQUE(service_id, remote_model_id)
+  );
+  CREATE TABLE independent_task_models (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    service_id TEXT NOT NULL REFERENCES independent_services(id),
+    model_id TEXT NOT NULL REFERENCES independent_models(id),
+    config_revision INTEGER NOT NULL, model_revision INTEGER NOT NULL, created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -149,6 +172,7 @@ export function openDb(file: string): Db {
     return s;
   };
   let depth = 0;
+  let notifications: (() => void)[] = [];
 
   const db: Db = {
     run(sql, ...params) {
@@ -158,14 +182,25 @@ export function openDb(file: string): Db {
     get<T>(sql: string, ...params: SqlValue[]) { return stmt(sql).get(...params) as T | undefined; },
     all<T>(sql: string, ...params: SqlValue[]) { return stmt(sql).all(...params) as T[]; },
     exec(sql) { raw.exec(sql); },
+    afterCommit(fn) { if (depth > 0) notifications.push(fn); else fn(); },
     tx(fn) {
-      // 支持嵌套：只有最外层真正开启 / 提交事务
-      if (depth > 0) { depth++; try { return fn(); } finally { depth--; } }
+      // 内层失败只回滚自己的修改与通知，调用方即使捕获错误也不会提交半次操作。
+      if (depth > 0) {
+        const savepoint = `aic_tx_${depth}`; const mark = notifications.length;
+        raw.exec(`SAVEPOINT ${savepoint}`); depth++;
+        try { const result = fn(); raw.exec(`RELEASE SAVEPOINT ${savepoint}`); return result; }
+        catch (e) { raw.exec(`ROLLBACK TO SAVEPOINT ${savepoint}`); raw.exec(`RELEASE SAVEPOINT ${savepoint}`); notifications.length = mark; throw e; }
+        finally { depth--; }
+      }
       raw.exec('BEGIN IMMEDIATE');
       depth = 1;
-      try { const r = fn(); raw.exec('COMMIT'); return r; }
-      catch (e) { raw.exec('ROLLBACK'); throw e; }
+      let result: ReturnType<typeof fn>;
+      try { result = fn(); raw.exec('COMMIT'); }
+      catch (e) { raw.exec('ROLLBACK'); notifications = []; throw e; }
       finally { depth = 0; }
+      const committed = notifications; notifications = [];
+      for (const notify of committed) { try { notify(); } catch { console.error('[db] 提交后的通知失败'); } }
+      return result;
     },
     close() { cache.clear(); raw.close(); },
   };

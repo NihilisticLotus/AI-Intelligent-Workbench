@@ -28,6 +28,8 @@ export function systemRoutes(s: Services) {
         [FeatureKey.SideChat]: false,
         [FeatureKey.AgentToggle]: true,
         [FeatureKey.Drafts]: true,
+        [FeatureKey.IndependentCatalog]: true,
+        [FeatureKey.IndependentRuntime]: false,
         [FeatureKey.PageAssets]: false,
         [FeatureKey.PageGenerate]: false,
         [FeatureKey.PageAutomations]: false,

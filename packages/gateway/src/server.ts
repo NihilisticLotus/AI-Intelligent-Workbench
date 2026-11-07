@@ -22,6 +22,7 @@ import { createApp } from './http/app';
 import { GroupService, ProjectService } from './projects';
 import type { Services } from './services';
 import { AttachmentService } from './attachments';
+import { IndependentCatalog } from './independent/catalog';
 import { TaskService } from './tasks';
 import { newId } from './util';
 
@@ -190,6 +191,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
     try { db.run('INSERT INTO audit_log (device_id, action, detail, ts) VALUES (?, ?, ?, ?)', deviceId, action, detail, Date.now()); } catch { /* 忽略 */ }
   };
   const secrets = new SecretService(db, opts.secretStore ?? defaultSecretStore(db));
+  const independent = new IndependentCatalog(db, secrets, events);
   const agentSvc = new AgentService(db, events, agents, { dataDir, log, audit });
   const profiles = new ProfileService(db, secrets, {
     dataDir, audit,
@@ -217,7 +219,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   const groups = new GroupService(db, tasks);
 
   const services: Services = {
-    db, attachments, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks,
+    db, attachments, independent, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks,
     port: () => port,
     machine: { id: machineId, name: hostname(), os: process.platform === 'win32' ? 'windows' : process.platform },
     version: VERSION,

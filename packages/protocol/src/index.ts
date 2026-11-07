@@ -778,3 +778,96 @@ export const ImportIndependentModelsBody = z.object({
 export type ImportIndependentModelsBody = z.infer<typeof ImportIndependentModelsBody>;
 export const ImportIndependentModelsResult = z.object({ items: z.array(IndependentModel).max(500), nextCursor: z.null() }).strict();
 export type ImportIndependentModelsResult = z.infer<typeof ImportIndependentModelsResult>;
+
+// ---------- 独立 Agent：持久会话与 SDK 无关的回合循环 ----------
+const IndependentText = z.string().max(1024 * 1024);
+const IndependentCallId = z.string().min(1).max(200).regex(/^[^\x00-\x1f\x7f]+$/);
+/** 先用有界迭代核对 JSON，避免工具参数被隐式转换或携带非 JSON 值。 */
+export const IndependentToolArguments = z.unknown().refine((input) => {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) return false;
+  const pending: { value: unknown; depth: number }[] = [{ value: input, depth: 0 }];
+  let nodes = 0;
+  while (pending.length) {
+    const { value, depth } = pending.pop()!;
+    if (++nodes > 10_000 || depth > 16) return false;
+    if (value === null || typeof value === 'boolean' || typeof value === 'string') continue;
+    if (typeof value === 'number') { if (!Number.isFinite(value)) return false; continue; }
+    if (typeof value !== 'object') return false;
+    if (!Array.isArray(value) && Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null) return false;
+    for (const [key, child] of Object.entries(value)) {
+      if (['__proto__', 'constructor', 'prototype'].includes(key)) return false;
+      pending.push({ value: child, depth: depth + 1 });
+    }
+  }
+  return new TextEncoder().encode(JSON.stringify(input)).length <= 256 * 1024;
+}, '工具参数必须为有界 JSON，不进行类型转换').pipe(z.record(z.string(), z.unknown()));
+export type IndependentToolArguments = z.infer<typeof IndependentToolArguments>;
+export const IndependentUsage = z.object({
+  inputTokens: z.number().int().nonnegative().nullable(), outputTokens: z.number().int().nonnegative().nullable(),
+  cacheReadTokens: z.number().int().nonnegative().nullable(), cacheWriteTokens: z.number().int().nonnegative().nullable(),
+}).strict();
+export type IndependentUsage = z.infer<typeof IndependentUsage>;
+export const IndependentToolCall = z.object({
+  id: IndependentCallId, name: z.string().regex(/^[a-zA-Z_][a-zA-Z0-9_-]{0,99}$/), arguments: IndependentToolArguments,
+}).strict();
+export type IndependentToolCall = z.infer<typeof IndependentToolCall>;
+export const IndependentUserMessage = z.object({
+  role: z.literal('user'), text: IndependentText,
+  attachments: z.array(z.object({ attachmentId: Id }).strict()).max(10),
+}).strict();
+export type IndependentUserMessage = z.infer<typeof IndependentUserMessage>;
+export const IndependentAssistantMessage = z.object({
+  role: z.literal('assistant'), text: IndependentText, toolCalls: z.array(IndependentToolCall).max(64),
+  stopReason: z.enum(['complete', 'tool_calls', 'length', 'error', 'cancelled']), usage: IndependentUsage,
+  // 上游签名 / item ID 等续传资料由相应传输适配器编码；不发送到事件或审计。
+  continuation: z.string().max(256 * 1024).optional(),
+}).strict().refine((m) => new Set(m.toolCalls.map((c) => c.id)).size === m.toolCalls.length
+  && (m.stopReason === 'tool_calls' ? m.toolCalls.length > 0 : m.toolCalls.length === 0), '工具调用身份或终止原因不一致');
+export type IndependentAssistantMessage = z.infer<typeof IndependentAssistantMessage>;
+export const IndependentToolMessage = z.object({
+  role: z.literal('tool'), callId: IndependentCallId, name: IndependentToolCall.shape.name, text: IndependentText,
+  outcome: z.enum(['ok', 'error', 'rejected', 'cancelled', 'interrupted', 'budget_exceeded']),
+}).strict();
+export type IndependentToolMessage = z.infer<typeof IndependentToolMessage>;
+export const IndependentConversationMessage = z.union([IndependentUserMessage, IndependentAssistantMessage, IndependentToolMessage]);
+export type IndependentConversationMessage = z.infer<typeof IndependentConversationMessage>;
+export const IndependentRunLimits = z.object({
+  maxModelCalls: z.number().int().min(1).max(100), maxToolCalls: z.number().int().min(0).max(500),
+  maxOutputTokens: z.number().int().min(1).max(10_000_000), timeoutMs: z.number().int().min(1).max(3_600_000),
+  // 本地 JSON 字节保护，不能作为模型 token 窗口的声明。
+  maxContextBytes: z.number().int().min(1024).max(8 * 1024 * 1024),
+}).strict();
+export type IndependentRunLimits = z.infer<typeof IndependentRunLimits>;
+export const IndependentTurnStop = z.enum(['completed', 'model_error', 'tool_error', 'model_limit', 'tool_limit',
+  'output_limit', 'usage_unknown', 'context_limit', 'configuration_changed', 'cancelled', 'timed_out', 'interrupted']);
+export type IndependentTurnStop = z.infer<typeof IndependentTurnStop>;
+export const IndependentTurnRecord = z.object({
+  id: Id, taskId: Id, sessionId: Id, binding: IndependentModelBinding, limits: IndependentRunLimits,
+  status: z.enum(['running', 'completed', 'failed', 'cancelled', 'interrupted']),
+  phase: z.enum(['ready', 'model', 'tools']), revision: Revision,
+  modelCalls: z.number().int().nonnegative(), toolCalls: z.number().int().nonnegative(),
+  outputTokens: z.number().int().nonnegative().nullable(), stop: IndependentTurnStop.nullable(),
+  createdAt: Ts, updatedAt: Ts,
+}).strict();
+export type IndependentTurnRecord = z.infer<typeof IndependentTurnRecord>;
+export const IndependentConversationEntry = z.object({
+  sessionId: Id, turnId: Id, seq: z.number().int().positive(), message: IndependentConversationMessage,
+  previousHash: z.string().regex(/^[a-f0-9]{64}$/), hash: z.string().regex(/^[a-f0-9]{64}$/), createdAt: Ts,
+}).strict();
+export type IndependentConversationEntry = z.infer<typeof IndependentConversationEntry>;
+export const IndependentContextCheckpoint = z.object({
+  id: Id, sessionId: Id, throughSeq: z.number().int().positive(), sourceHash: z.string().regex(/^[a-f0-9]{64}$/),
+  summary: IndependentText, createdAt: Ts,
+}).strict();
+export type IndependentContextCheckpoint = z.infer<typeof IndependentContextCheckpoint>;
+/** 仅供 Gateway 内部传输 / 工具适配器使用；没有凭据和网络默认值。 */
+export interface IndependentModelDriver {
+  checkBinding(binding: IndependentModelBinding): void | Promise<void>;
+  complete(request: {
+    binding: IndependentModelBinding; systemPrompt: string; checkpoint: IndependentContextCheckpoint | null;
+    messages: IndependentConversationMessage[]; maxOutputTokens: number;
+  }, signal: AbortSignal): Promise<IndependentAssistantMessage>;
+}
+export interface IndependentToolDriver {
+  execute(call: IndependentToolCall, identity: { taskId: string; sessionId: string; turnId: string }, signal: AbortSignal): Promise<IndependentToolMessage>;
+}

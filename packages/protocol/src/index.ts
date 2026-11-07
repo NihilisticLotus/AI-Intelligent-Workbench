@@ -62,6 +62,7 @@ export const ErrorCode = {
   AttachmentTooMany: 'attachment.too_many',
   AttachmentNotFound: 'attachment.not_found',
   AttachmentBadType: 'attachment.bad_type',
+  AgentNativeConfiguration: 'agent.native_configuration',
 } as const;
 
 /**
@@ -212,6 +213,8 @@ export const AgentInfo = z.object({
   /** 2026-11-07 新增：装了但这个版本还不能在工作台里用（WorkBuddy 精简引擎、ZCode 等桥接）；status 仍为 error，message 写明原因 */
   unsupported: z.boolean().optional(),
   modelFailures: z.array(z.object({ profileId: Id.nullable(), model: z.string(), reason: z.string(), at: Ts })).optional(),
+  /** 第三方 Agent 沿用自身配置，工作台不管理其 API 或登录。 */
+  usesNativeConfig: z.boolean().optional(),
 });
 export type AgentInfo = z.infer<typeof AgentInfo>;
 
@@ -515,6 +518,8 @@ export const AgentProfile = z.object({
   experimental: z.boolean(),
   lastTestAt: Ts.nullable(), lastTestOk: z.boolean().nullable(),
   createdAt: Ts, updatedAt: Ts,
+  /** 旧的第三方认证配置仅保留待清理，不能用于任务、测试或刷新模型。 */
+  retired: z.boolean().optional(),
 });
 export type AgentProfile = z.infer<typeof AgentProfile>;
 

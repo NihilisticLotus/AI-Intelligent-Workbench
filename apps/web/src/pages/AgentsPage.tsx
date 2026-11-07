@@ -1,6 +1,6 @@
 // Agent 管理页（docs/prototype/agents.html，phase-1.md 6.7）：
 // 上方每个 Agent 一张状态卡片（状态、版本、引擎、账号、运行中的会话、模型、能力；按钮只放和当前状态相关的）；
-// 下方是选中 Agent 的详情：登录、账号列表（订阅登录 / 官方 API Key / 自定义地址）、默认设置、测试连接。
+// 下方是选中 Agent 的详情：原生配置说明、工作台任务默认值、测试连接。旧认证配置仅保留待清理。
 // 网页不拼本机路径：引擎位置只显示 AgentInfo.engineLocation 的文本。
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -145,7 +145,7 @@ export function AgentsPage() {
         <div className="page agents-page">
           <p className="page-lead">
             {lastChecked ? `上次检测：${clock(lastChecked)}。` : ''}
-            登录、账号、测试连接都在这里点按钮完成，不需要打开命令行。{toggleOn ? '只有打开的 Agent 会检测、出现在新建任务和切换器里。' : ''}
+            第三方 Agent 沿用软件自身的 API、登录与模型设置。{toggleOn ? '只有打开的 Agent 会检测、出现在新建任务和切换器里。' : ''}
           </p>
           {toggleOn ? <h2 className="sec-h">已启用 <span className="muted">{agents.length} 个</span></h2> : null}
           {!allAgents.length ? <div className="empty"><h3>还没有检测到 Agent</h3><p>点右上角的“重新检测”。</p></div>
@@ -238,14 +238,14 @@ function AgentCard({ a, current, busy, test, onSelect, onLogin, onTest, onRedete
         <dd className={!a.verified && version !== '—' ? 'unverified' : undefined}>
           {!a.verified && version !== '—' ? <><Icon name="warn" size={13} /> </> : null}{version}{version === '—' ? '' : a.verified ? '（已验证）' : '，未验证版本'}
         </dd>
-        {real && profiles.length ? <><dt>账号</dt><dd>{profiles.map((p) => p.name).join('、')}</dd></> : null}
+        {real && a.usesNativeConfig ? <><dt>配置</dt><dd>沿用软件自身配置与登录</dd></> : real && profiles.length ? <><dt>账号</dt><dd>{profiles.map((p) => p.name).join('、')}</dd></> : null}
         {a.runningSessions !== undefined ? <><dt>运行中</dt><dd>{a.runningSessions} 个会话{a.concurrencyLimit ? `（并发上限 ${a.concurrencyLimit}）` : ''}</dd></> : null}
         <dt>模型</dt><dd>{a.models.length ? a.models.map((m) => m.name).join('、') : emptyModelsText(a)}</dd>
         {caps.length ? <><dt>能力</dt><dd>{caps.join('、')}</dd></> : null}
       </dl>
       {real ? (
         <div className="acts">
-          {a.status === 'needs_login' ? <button type="button" className="btn sm attn" onClick={stop(onLogin)}>登录</button> : null}
+          {a.status === 'needs_login' && !a.usesNativeConfig ? <button type="button" className="btn sm attn" onClick={stop(onLogin)}>登录</button> : null}
           {a.status !== 'not_installed' ? (
             <button type="button" className="btn sm" onClick={stop(onTest)} aria-busy={test?.running} disabled={test?.running}>
               {test?.running ? '正在测试…' : '测试连接'}</button>
@@ -287,12 +287,12 @@ function AgentDetail({ a, focusProfileId, my, onLogin, onRedetect, redetecting, 
       <h2><AgentBadge kind={a.kind} />{a.displayName}</h2>
       <div className="detail">
         <div>
-          {real ? <LoginSection a={a} my={my} login={login} onLogin={onLogin} onRedetect={onRedetect} redetecting={redetecting} /> : (
+          {real && a.usesNativeConfig ? <NativeConfigSection a={a} onRedetect={onRedetect} redetecting={redetecting} /> : real ? <LoginSection a={a} my={my} login={login} onLogin={onLogin} onRedetect={onRedetect} redetecting={redetecting} /> : (
             <p className="muted-note">演示 Agent 不需要登录，也没有账号。它用来体验工作台：对话、审批、换模型都能试。</p>
           )}
-          {real && profilesOn ? (
+          {real && !a.usesNativeConfig && profilesOn ? (
             <ProfileSection a={a} focusProfileId={focusProfileId} onLogin={onLogin} onTest={onTest} test={test} />
-          ) : real ? <p className="muted-note">账号配置需要更新 AI Console 服务后才能使用。</p> : null}
+          ) : real && !a.usesNativeConfig ? <p className="muted-note">账号配置需要更新 AI Console 服务后才能使用。</p> : null}
         </div>
         <div>
           <SettingsSection a={a} />
@@ -301,6 +301,31 @@ function AgentDetail({ a, focusProfileId, my, onLogin, onRedetect, redetecting, 
       </div>
     </>
   );
+}
+
+/** 第三方认证只读；旧测试配置不提供编辑、测试或删除，避免历史任务换用其他认证。 */
+function NativeConfigSection({ a, onRedetect, redetecting }: { a: AgentInfo; onRedetect: () => void; redetecting: boolean }) {
+  const list = useApp((s) => s.profiles[a.kind]);
+  const [err, setErr] = useState<ApiError | null>(null);
+  const load = () => { setErr(null); loadProfiles(a.kind).catch((e) => setErr(asApiError(e))); };
+  useEffect(load, [a.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  const retired = list?.filter((p) => p.retired) ?? [];
+  return <>
+    <h3>软件自身配置</h3>
+    <p className="muted-note">API、登录和模型由 {a.displayName} 自己管理，工作台沿用这些设置。完成配置后，回到这里重新检测。</p>
+    <p className="muted-note">模型列表来自该软件报告的会话能力；已配置的自定义模型也需要由软件提供。工作台内换模型只作用于任务会话。</p>
+    <button type="button" className="btn sm" disabled={redetecting} onClick={onRedetect}>重新检测</button>
+    {err ? <ErrorNotice error={err} onRetry={load} /> : null}
+    {!list && !err ? <p className="muted-note" role="status">正在读取旧测试配置状态…</p> : null}
+    {retired.length ? <>
+      <h3>已停用的工作台测试配置</h3>
+      <p className="muted-note">这些配置来自旧版工作台，已停止使用。原有加密密钥和历史记录暂时保留，清理功能尚未开放。</p>
+      {retired.map((p) => <div className="acct" key={p.id}>
+        <Icon name="key" /><div className="info"><b>{p.name}<span className="tag attn">已停用</span></b><span>{profileKindText[p.kind]} · {p.hasSecret ? '加密密钥已保留，不再使用' : '历史配置已保留'}</span></div>
+      </div>)}
+    </> : null}
+    <p className="muted-note">AI Console 自有 API 服务将由独立 Agent 使用，该功能尚未开放。</p>
+  </>;
 }
 
 // ---------------------------------------------------------------------
@@ -573,7 +598,8 @@ function SettingsSection({ a }: { a: AgentInfo }) {
   const staleModel = real && a.defaultModel && !a.models.some((m) => m.id === a.defaultModel) ? a.defaultModel : null;
   return (
     <>
-      <h3>默认设置</h3>
+      <h3>{a.usesNativeConfig ? '工作台任务默认值' : '默认设置'}</h3>
+      {a.usesNativeConfig ? <p className="muted-note">以下选项只用于工作台的新任务，不修改软件自身的默认设置。</p> : null}
       {err ? <ErrorNotice error={err} ctx={{ kind: a.kind }} onDismiss={() => setErr(null)} /> : null}
       {real ? (
         <div className="field"><label htmlFor={'dm-' + a.kind}>默认模型</label>

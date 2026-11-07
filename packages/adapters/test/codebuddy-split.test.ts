@@ -52,7 +52,7 @@ describe('CodeBuddy / WorkBuddy 拆分', () => {
     expect(d.engineSource).toBe('app');
   });
 
-  it('登录方式分开：CodeBuddy 在浏览器里登录，WorkBuddy 只能在 WorkBuddy 里登录', async () => {
+  it('两者均沿用自身登录，工作台不提供替换认证的入口', async () => {
     const cb = createCodebuddyAdapter({ ...rt, enginePath: path.join(tmpdir(), 'aic-not-there') });
     const d = await cb.detect({ force: true });
     expect(d.installed).toBe(false);
@@ -60,6 +60,8 @@ describe('CodeBuddy / WorkBuddy 拆分', () => {
     expect(d.message).not.toContain('WorkBuddy');
     const wb = createWorkbuddyAdapter({ ...rt, enginePath: fakeCli(['codebuddy-lite-wb.mjs']) });
     expect(((await wb.detect({ force: true })).authMethods ?? []).map((m) => m.id)).toEqual(['workbuddy-app']);
-    expect(wb.authMethods).toEqual(['oauth']);
+    expect(wb.authMethods).toEqual([]);
+    expect(cb.startLogin).toBeUndefined();
+    expect(wb.startLogin).toBeUndefined();
   });
 });

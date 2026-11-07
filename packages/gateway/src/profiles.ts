@@ -2,7 +2,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { ModelInfo, type AgentKind, type AgentProfile, type CreateProfileBody, type PatchProfileBody, type ProfileKind, type ProfileSummary } from '@aic/protocol';
-import type { AccountProfile, AgentAdapter } from '@aic/adapters';
+import { buildNativeEnv, type AccountProfile, type AgentAdapter } from '@aic/adapters';
 import type { Db } from './db';
 import type { SecretService } from './secrets';
 import { Errors, newId, now } from './util';
@@ -55,6 +55,7 @@ export class ProfileService {
   }
 
   defaultRow(agent: AgentKind): ProfileRow {
+    if (this.o.adapter(agent)?.usesNativeConfig) return this.ensureLocal(agent);
     return this.db.get<ProfileRow>('SELECT * FROM agent_profiles WHERE agent = ? AND is_default = 1', agent) ?? this.ensureLocal(agent);
   }
 
@@ -63,7 +64,15 @@ export class ProfileService {
     if (!profileId) return this.defaultRow(agent);
     const r = this.row(profileId);
     if (r.agent !== agent) throw Errors.badRequest('这个账号不属于这个 Agent');
+    this.assertUsable(r);
     return r;
+  }
+
+  /** 旧账号可以查看或清理，但不能再给第三方进程替换认证。 */
+  assertUsable(r: ProfileRow) {
+    if (this.o.adapter(r.agent)?.usesNativeConfig && (r.id !== localProfileId(r.agent) || r.kind !== 'subscription' || r.config_dir !== 'shared' || r.secret_id)) {
+      throw Errors.nativeConfiguration('这个 Agent 沿用软件自身的配置与登录', '旧的工作台测试账号已停止使用；自定义 API 属于 AI Console 独立 Agent');
+    }
   }
 
   toApi(r: ProfileRow): AgentProfile {
@@ -72,15 +81,16 @@ export class ProfileService {
       id: r.id, agent: r.agent, name: r.name, kind: r.kind, configDir: r.config_dir,
       baseUrl: r.base_url, authHeader: r.auth_header, models: parseModels(r.models_json),
       hasSecret: !!r.secret_id, secretHint: this.secrets.hint(r.secret_id),
-      isDefault: !!r.is_default, loggedIn: this.o.loggedIn(r.id),
+      isDefault: a?.usesNativeConfig ? r.id === localProfileId(r.agent) : !!r.is_default, loggedIn: this.o.loggedIn(r.id),
       experimental: a?.experimentalProfile?.(r.kind) ?? false,
       lastTestAt: r.last_test_at, lastTestOk: r.last_test_ok === null ? null : !!r.last_test_ok,
       createdAt: r.created_at, updatedAt: r.updated_at,
+      ...(a?.usesNativeConfig ? { retired: r.id !== localProfileId(r.agent) } : {}),
     };
   }
 
   summary(agent: AgentKind): ProfileSummary[] {
-    return this.rows(agent).map((r) => ({ id: r.id, name: r.name, kind: r.kind, isDefault: !!r.is_default, loggedIn: this.o.loggedIn(r.id), sessionStore: this.sessionStore(r) }));
+    return this.rows(agent).filter((r) => !this.o.adapter(agent)?.usesNativeConfig || r.id === localProfileId(agent)).map((r) => ({ id: r.id, name: r.name, kind: r.kind, isDefault: this.toApi(r).isDefault, loggedIn: this.o.loggedIn(r.id), sessionStore: this.sessionStore(r) }));
   }
 
   /** 会话存在哪：键相同的账号之间可以恢复彼此的会话（换账号是否需要交接） */
@@ -108,6 +118,7 @@ export class ProfileService {
   async create(body: CreateProfileBody, deviceId: string | null): Promise<AgentProfile> {
     const a = this.o.adapter(body.agent);
     if (!a || !a.real) throw Errors.badRequest('这个 Agent 不需要账号');
+    if (a.usesNativeConfig) throw Errors.nativeConfiguration('第三方 Agent 的 API 与登录由软件自己管理', '请在对应软件中完成配置；工作台自定义 API 将由独立 Agent 使用');
     this.ensureLocal(body.agent);
     if (body.kind === 'customEndpoint' && !body.baseUrl) throw Errors.badRequest('自定义地址需要填写 Base URL');
     if (body.kind !== 'subscription' && !body.apiKey) throw Errors.badRequest('请填写 API Key');
@@ -132,6 +143,7 @@ export class ProfileService {
 
   async patch(id: string, body: PatchProfileBody, deviceId: string | null): Promise<AgentProfile> {
     const r = this.row(id);
+    if (this.o.adapter(r.agent)?.usesNativeConfig) throw Errors.nativeConfiguration('工作台不修改这个 Agent 的认证配置', '旧测试配置仅保留待清理；请在对应软件中管理 API 与登录');
     const sets: string[] = [];
     const params: (string | number | null)[] = [];
     if (body.name !== undefined) { sets.push('name = ?'); params.push(body.name); }
@@ -172,6 +184,7 @@ export class ProfileService {
   delete(id: string, inUse: (id: string) => boolean, deviceId: string | null): { keptDir: string | null } {
     const r = this.row(id);
     if (r.id === localProfileId(r.agent)) throw Errors.badRequest('默认的“本机登录”账号不能删除');
+    if (this.o.adapter(r.agent)?.usesNativeConfig) throw Errors.nativeConfiguration('旧测试配置已停用，清理功能尚未开放', '清理前需要保留历史任务的认证归属，避免任务自动改用其他账号；当前不会读取或使用旧密钥');
     if (inUse(id)) throw Errors.profileInUse('这个账号还有正在运行的会话', '请先停止使用这个账号的任务');
     this.db.tx(() => {
       this.db.run('UPDATE tasks SET profile_id = NULL WHERE profile_id = ?', id);
@@ -206,6 +219,12 @@ export class ProfileService {
   /** 启动 Agent 用的环境变量：解密密钥 → buildEnv。返回需要脱敏的原文 */
   async envFor(adapter: AgentAdapter, r: ProfileRow): Promise<{ env: Record<string, string>; redact: string[]; account: AccountProfile }> {
     const account = this.account(r);
+    if (adapter.usesNativeConfig) {
+      this.assertUsable(r);
+      const env = adapter.buildEnv(account);
+      const redact = Object.entries(buildNativeEnv(env)).filter(([key, value]) => /KEY|TOKEN|SECRET|PASSWORD|CREDENTIAL/i.test(key) && value.length >= 4).map(([, value]) => value);
+      return { env, redact, account };
+    }
     const secret = r.secret_id ? await this.secrets.read(r.secret_id) : null;
     if (r.kind !== 'subscription' && !secret) throw Errors.secretUnavailable('这个账号没有保存 API Key', '请在 Agent 页给这个账号重新填写 API Key');
     const env = adapter.buildEnv(account, secret);
@@ -214,6 +233,7 @@ export class ProfileService {
 
   /** 只取密钥（请求 /models 用） */
   async secretOf(r: ProfileRow): Promise<string | null> {
+    this.assertUsable(r);
     return r.secret_id ? this.secrets.read(r.secret_id) : null;
   }
 }

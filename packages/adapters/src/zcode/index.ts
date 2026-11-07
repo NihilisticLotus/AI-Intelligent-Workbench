@@ -8,10 +8,11 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import type { PermissionLevel } from '@aic/protocol';
-import { buildChildEnv, killTree, runCli } from '../acp/launch';
+import { buildNativeEnv, killTree, runCli } from '../acp/launch';
 import { agentErrors } from '../acp/errors';
 import type { AgentAdapter, DetectResult, LogFn, ProbeResult, ProbeStep } from '../types';
 import { isVerified } from '../verified';
+import { nativeAccountEnv } from '../common';
 
 const NAME = 'ZCode';
 export const ZCODE_BRIDGE_PENDING = '已找到 ZCode，但它用自家的通信协议，工作台还不能和它对话。协议桥接会在后续步骤提供（design.md 6.5）';
@@ -40,7 +41,7 @@ export function pingAppServer(js: string, timeoutMs = 15_000): Promise<{ ok: boo
       void killTree(child.pid ?? 0).finally(() => { try { rmSync(cwd, { recursive: true, force: true }); } catch { /* 忽略 */ } });
       resolve(r);
     };
-    const child = spawn(process.execPath, [js, 'app-server'], { cwd, env: buildChildEnv(), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    const child = spawn(process.execPath, [js, 'app-server'], { cwd, env: buildNativeEnv(), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
     let buf = '';
     child.stdout.on('data', (d: Buffer) => {
       buf += d.toString('utf8');
@@ -63,13 +64,13 @@ export function pingAppServer(js: string, timeoutMs = 15_000): Promise<{ ok: boo
 
 export function createZcodeAdapter(o: ZcodeOptions = {}): AgentAdapter {
   const version = async (js: string) => {
-    const r = await runCli({ entry: js, args: ['--version'] }, { env: buildChildEnv(), timeoutMs: 20_000 });
+    const r = await runCli({ entry: js, args: ['--version'] }, { env: buildNativeEnv(), timeoutMs: 20_000 });
     const m = /\d+\.\d+\.\d+/.exec(r.stdout);
     return m ? m[0] : null;
   };
   return {
-    id: 'zcode', displayName: NAME, real: true,
-    authMethods: ['oauth'],
+    id: 'zcode', displayName: NAME, real: true, usesNativeConfig: true,
+    authMethods: [],
     permissionLevels: ['readonly', 'ask'] satisfies PermissionLevel[],
     autoProbe: false,
     workspaceConfig: 'ignored',
@@ -87,7 +88,7 @@ export function createZcodeAdapter(o: ZcodeOptions = {}): AgentAdapter {
     },
 
     async login() { throw agentErrors.unsupported(NAME, '在工作台里登录（请在 ZCode 里登录）'); },
-    buildEnv() { return {}; },
+    buildEnv: nativeAccountEnv,
     async listModels() { return []; },
     async listEfforts() { return null; },
     async spawn() { throw agentErrors.unsupported(NAME, `对话：${ZCODE_BRIDGE_PENDING}`); },

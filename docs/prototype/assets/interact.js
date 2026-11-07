@@ -741,7 +741,7 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
   });
 
   // ---------- Agent / 账号 / 模型 / 思考强度 切换器（每个输入框都有） ----------
-  const accounts = { claude: ['个人订阅', '工作室 API Key'], codex: ['ChatGPT 账号'], codebuddy: ['CodeBuddy 账号'], zcode: ['Z.AI 账号'] };
+  const accounts = { claude: ['软件自身配置'], codex: ['软件自身配置'], codebuddy: ['软件自身配置'], zcode: ['软件自身配置'] };
   const status = { claude: '空闲', codex: '登录已过期', codebuddy: '空闲', zcode: '未连接' };
   // 思考强度：Agent 通过 ACP 配置项提供时才可调；null 表示由模型自己决定
   const efforts = { claude: ['低', '中', '高', '最高'], codex: ['低', '中', '高'], codebuddy: null, zcode: null };
@@ -891,14 +891,12 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
       pop.innerHTML = `<div class="group-label">Agent（换 Agent 后，发送下一条消息时才交接）</div>
         ${Object.keys(agents).map((k) => `<div class="opt-wrap">${opt('agent', k, `<span class="ag ${k}">${letter[k]}</span>${agents[k][0]}`, (k === cur.agent ? '当前' : status[k]) + (agents[k][1].length > 1 ? ` · ${agents[k][1].length} 个模型` : ''), k === cur.agent)}
           ${k === cur.agent || agents[k][1].length < 2 ? '' : `<div class="sub-opts" role="group" aria-label="${agents[k][0]} 的模型">${agents[k][1].map((m) => `<div class="opt" role="option" tabindex="-1" data-kind="agent" data-val="${k}" data-model="${m}" aria-selected="false">${m}</div>`).join('')}</div>`}</div>`).join('')}
-        <div class="group-label">账号</div>
-        ${accounts[cur.agent].map((a) => opt('account', a, a, a === cur.account ? '当前' : '恢复原会话（无损）', a === cur.account)).join('')}
         <div class="group-label">模型</div>
         ${agents[cur.agent][1].map((m) => opt('model', m, m, m === cur.model ? '当前' : '会话内切换（无损）', m === cur.model)).join('')}
         <div class="group-label">思考强度</div>
         ${ef ? `<div class="seg" role="radiogroup" aria-label="思考强度">${ef.map((e) => `<button role="radio" aria-checked="${e === cur.effort}" data-kind="effort" data-val="${e}">${e}</button>`).join('')}</div>`
           : `<div class="hint" style="margin-top:2px">${agents[cur.agent][0]} 的思考强度由模型自己决定，这里不能调。</div>`}
-        <div class="hint">换模型、换账号、调思考强度都保留完整上下文。换到其他 Agent 只是选定下一条消息交给谁，发送时才自动交接；不发就不交接，可以撤销。</div>`;
+        <div class="hint">换模型和思考强度保留上下文；第三方 Agent 沿用软件自身配置。换到其他 Agent 只是选定下一条消息交给谁，发送时才自动交接；不发就不交接，可以撤销。</div>`;
     };
     render();
     // 换 Agent 只是“选定下一条消息交给谁”，真正发出消息时才交接（2026-11-07 用户反馈：没输入就交接不对）。
@@ -984,8 +982,8 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
         cur.account = val; render(); toast(`已切换到账号“${val}”`);
       } else if (kind === 'agent' && val !== cur.agent) {
         if (pending && val === pending.back.agent) return cancelPending();
-        if (val === 'codex') return modal({ title: 'Codex 登录已过期', body: '<p>重新登录后才能交接给 Codex。登录会在浏览器里打开授权页面，完成后回到这里即可。</p>',
-          actions: [{ label: '取消' }, { label: '去重新登录', kind: 'primary', onClick() { location.href = 'agents.html'; } }] });
+        if (val === 'codex') return modal({ title: 'Codex 登录已过期', body: '<p>请在 Codex 中完成配置或登录，再回到工作台重新检测。工作台沿用软件自身认证。</p>',
+          actions: [{ label: '取消' }, { label: '查看 Agent', kind: 'primary', onClick() { location.href = 'agents.html'; } }] });
         if (val === 'zcode') return modal({ title: 'ZCode 还没连接', body: '<p>ZCode 需要先在 Agent 管理里启用实验桥接。</p>',
           actions: [{ label: '取消' }, { label: '去 Agent 管理', kind: 'primary', onClick() { location.href = 'agents.html'; } }] });
         // 只记下“下一条交给谁”，不交接；发送消息时由 aicFlushSwitch 真正交接
@@ -1002,7 +1000,7 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
     const fake = (kind, val, model) => ({ dataset: { kind, val, ...(model ? { model } : {}) } });
     const openPicker = (b) => window.aicAgentPicker(b, {
       agent: cur.agent, model: cur.model, effort: cur.effort, account: cur.account, accounts: true,
-      hint: '换模型、账号、思考强度都保留完整上下文。换 Agent 只是选定下一条消息交给谁，发送时才交接。',
+      hint: '换模型和思考强度保留上下文；第三方 Agent 沿用软件自身配置。换 Agent 只是选定下一条消息交给谁，发送时才交接。',
       onPick: (p) => {
         if (p.agent !== cur.agent) { choose(fake('agent', p.agent, p.model)); if (cur.agent === p.agent && p.effort) { cur.effort = p.effort; render(); if (pending) pendingNote(); } }
         else if (p.model !== cur.model) choose(fake('model', p.model));
@@ -1532,71 +1530,12 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
   $$('.agent-card .btn').forEach((b) => {
     wire(b);
     const card = b.closest('.agent-card');
-    const t = b.textContent;
-    if (b.dataset.cbLogin) b.addEventListener('click', () => modal({
-      title: `用${b.dataset.cbLogin}登录 CodeBuddy`,
-      body: `<ol class="steps"><li>已在默认浏览器中打开 CodeBuddy 的登录页面（原型未真正打开）</li><li>在网页上用${esc(b.dataset.cbLogin)}完成登录</li><li>回到这里，状态会自动变成“就绪”</li></ol><p style="margin:0;color:var(--fg-3)">登录信息由 CodeBuddy 引擎自己保存，AI Console 不经手你的密码。WorkBuddy 的登录和这里无关。</p>`,
-      actions: [{ label: '取消' }, { label: '我已完成登录', kind: 'primary', onClick() {
-        setStatus(card, 'ok', '就绪'); $$('dl dd', card)[1].textContent = `已登录（${b.dataset.cbLogin}）`; $('.acts', card).remove();
-        toast('CodeBuddy 已登录');
-      } }],
-    }));
-    else if (b.hasAttribute('data-wb-recheck')) b.addEventListener('click', () => progress(b, () => toast('WorkBuddy 仍然只带精简引擎，保持“暂不支持”。等 WorkBuddy 更新或我们支持精简引擎后会自动可用', 'attn'), '检测中'));
-    else if (t.includes('登录')) b.addEventListener('click', () => modal({
-      title: '在浏览器中登录 Codex',
-      body: '<ol class="steps"><li>已在默认浏览器中打开 ChatGPT 授权页面（原型未真正打开）</li><li>在网页上点“允许”</li><li>回到这里，状态会自动变成“就绪”</li></ol><p style="margin:0;color:var(--fg-3)">登录信息由 Codex 自己保存，AI Console 不经手你的密码。</p>',
-      actions: [{ label: '取消' }, { label: '我已完成登录', kind: 'primary', onClick() {
-        setStatus(card, 'ok', '就绪'); $('.alert', card)?.remove(); b.remove();
-        toast('Codex 已登录，失败的任务可以从看板里继续');
-      } }],
-    }));
-    else if (t.includes('更新')) b.addEventListener('click', () => progress(b, () => {
-      $('dl dd', card).textContent = '0.63.2（已验证）'; b.remove(); toast('Codex 已更新到 0.63.2');
-    }, '更新中'));
+    if (b.hasAttribute('data-native-recheck')) b.addEventListener('click', () => progress(b, () => toast('原型：沿用软件自身配置，未发起登录或修改认证', 'demo'), '检测中'));
+    else if (b.hasAttribute('data-wb-recheck')) b.addEventListener('click', () => progress(b, () => toast('WorkBuddy 仍然只带精简引擎，保持“暂不支持”', 'attn'), '检测中'));
     else if (b.hasAttribute('data-zc-test')) b.addEventListener('click', () => runTest('zcode'));
   });
 
-  // 账号行
-  $$('.acct').forEach((row) => {
-    const name = $('.info b', row).textContent;
-    $$('.btn', row).forEach((b) => {
-      wire(b);
-      if (b.textContent.includes('测试')) b.addEventListener('click', () => progress(b, () => toast(`${name}：连接正常，1.6 秒收到回复`), '测试中'));
-      else b.addEventListener('click', () => window.aicMenu(b, [
-        ['设为默认账号', () => { $$('.acct .status').forEach((s) => s.remove()); $('.info', row).insertAdjacentHTML('afterend', '<span class="status ok"><span class="dot"></span>默认</span>'); toast(`默认账号改为“${name}”`); }],
-        ['重命名', () => toast('正式版会弹出重命名输入框', 'demo')],
-        ['删除账号', () => modal({ title: `删除“${name}”？`, body: '<p>会同时从 Windows 凭据管理器删除对应的密钥。使用这个账号的任务需要改用其他账号。</p>',
-          actions: [{ label: '取消' }, { label: '删除', kind: 'danger', onClick() { row.remove(); toast(`已删除“${name}”`); } }] }), 'danger'],
-      ]));
-    });
-  });
-
-  // 添加账号
-  const addRow = (title, sub, icon) => {
-    $$('.detail .acct').pop().insertAdjacentHTML('afterend', `<div class="acct">${ic(icon)}<div class="info"><b>${esc(title)}</b><span>${esc(sub)}</span></div></div>`);
-    toast(`已添加账号“${esc(title)}”`);
-  };
-  $$('.method button').forEach((b) => {
-    wire(b);
-    const kind = $('b', b).textContent;
-    b.addEventListener('click', () => {
-      if (kind === '订阅登录') return modal({ title: '订阅登录', body: '<p>会在浏览器中打开官方授权页面，完成后自动回到这里。</p>',
-        actions: [{ label: '取消' }, { label: '打开浏览器授权', kind: 'primary', onClick() { addRow('订阅账号 2', '订阅登录，刚刚授权', 'link'); } }] });
-      const custom = kind === '自定义地址';
-      modal({ title: custom ? '添加自定义地址' : '添加官方 API Key',
-        body: `<div class="form-row"><label for="an">名称</label><input class="input" id="an" value="${custom ? '公司中转' : '我的 API Key'}"></div>
-          ${custom ? '<div class="form-row"><label for="au">Base URL</label><input class="input" id="au" placeholder="https://example.com/v1"></div>' : ''}
-          <div class="form-row"><label for="ak">API Key</label><input class="input" id="ak" type="password" placeholder="粘贴密钥" autocomplete="off"></div>
-          ${custom ? '<div class="form-row"><label for="am">模型</label><input class="input" id="am" placeholder="留空则自动从接口拉取"></div>' : ''}
-          <p style="margin:0;color:var(--fg-3)">密钥保存在 Windows 凭据管理器，不写入任何配置文件。只在启动这个 Agent 时传给它，不改动你的全局配置。</p>`,
-        actions: [{ label: '取消' }, { label: '测试并保存', kind: 'primary', onClick(d) {
-          const key = $('#ak', d).value.trim();
-          if (!key) { $('#ak', d).focus(); toast('请先粘贴 API Key', 'attn'); return false; }
-          addRow($('#an', d).value || '未命名', `${custom ? '自定义地址' : '官方 API Key'}，结尾 …${key.slice(-4)}`, 'key');
-        } }] });
-    });
-  });
-
+  // 第三方认证由软件自己管理，工作台不提供添加账号或代登录。
   // 再测一次
   const retest = $$('.detail h3 .btn').find((b) => b.textContent.includes('再测'));
   wire(retest)?.addEventListener('click', () => runTest($('.agent-card[aria-current="true"]').dataset.agent));

@@ -168,6 +168,7 @@ export function engineSourceText(a: Pick<AgentInfo, 'kind' | 'engineSource'>): s
 // ---------------------------------------------------------------------
 /** 能在界面里直接发起的登录方式（apiKey 走“添加账号 → 官方 API Key”，不调用 authenticate） */
 export function loginMethods(a: AgentInfo): AuthMethod[] {
+  if (a.usesNativeConfig) return [];
   return (a.authMethods ?? []).filter((m) => m.flow !== 'apiKey');
 }
 export const LOGIN_TERMINAL = new Set(['succeeded', 'failed', 'cancelled']);

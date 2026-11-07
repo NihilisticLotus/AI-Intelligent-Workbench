@@ -23,6 +23,16 @@ describe('事件调度',()=>{
   });
 });
 describe('选择器与附件',()=>{
+  it('第三方原生目录不使用旧账号模型缓存，也不提供切换认证', () => {
+    const a = agent({ kind: 'claude', usesNativeConfig: true, profiles: [
+      { id: 'local', name: '本机', kind: 'subscription', isDefault: true, loggedIn: true },
+      { id: 'legacy', name: '旧 API', kind: 'customEndpoint', isDefault: false, loggedIn: true, models: [{ id: 'legacy', name: '旧模型', contextWindow: null }] },
+    ] });
+    expect(profileInfo(a, 'legacy')?.models).toEqual(a.models);
+    const items = pickerItems(a, 'claude', { model: 'yes', effort: 'enabled' }, 'legacy', 'new');
+    expect(items.profiles).toEqual([]);
+    expect(items.models.map((m) => m.id)).toEqual(['yes', 'no']);
+  });
   it('新任务换自定义账号后只列该账号模型，清除旧模型和思考强度；旧服务端仍兼容',()=>{
     const profiles=[{id:'local',isDefault:true,models:[{id:'native',name:'订阅模型',contextWindow:null}],efforts:['high']},
       {id:'api',models:[{id:'glm',name:'GLM',contextWindow:null,vision:false}],efforts:null}] as ProfileSummary[];

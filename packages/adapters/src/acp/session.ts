@@ -10,7 +10,7 @@ import { AbortError, isRecord, newId, str } from '../util';
 import { configSignature, EMPTY_CONFIG, legacyIsCombo, modelSwitchOf, parseConfigState } from './config';
 import { AcpConnection, type AcpTimeouts, type ExitInfo } from './connection';
 import { textResponseError, agentErrors, classifyError, invalidValue, isNotFound } from './errors';
-import { buildChildEnv, type LaunchSpec } from './launch';
+import { buildChildEnv, buildNativeEnv, type LaunchSpec } from './launch';
 import { normalizePermission } from './permissions';
 import { UpdateMapper } from './updates';
 import { readFile, stat } from 'node:fs/promises';
@@ -20,6 +20,7 @@ import { mkdirSync } from 'node:fs';
 export interface AcpAgentSpec {
   kind: AgentKind;
   displayName: string;
+  usesNativeConfig?: boolean;
   /** 解析启动方式；找不到时抛 AgentError（notInstalled） */
   launch(env: Record<string, string>): LaunchSpec;
   clientCapabilities?: Record<string, unknown>;
@@ -53,8 +54,8 @@ const MAX_TOKENS_NOTICE = '回复达到长度上限，可以让它继续';
 
 /** 合并后的环境变量：删掉会串号的变量，再叠加账号变量；需要的配置目录先建好 */
 export function agentEnv(spec: AcpAgentSpec, overlay: Record<string, string> = {}): Record<string, string> {
-  const env = buildChildEnv(overlay);
-  for (const k of spec.dirEnvKeys ?? []) {
+  const env = spec.usesNativeConfig ? buildNativeEnv(overlay) : buildChildEnv(overlay);
+  for (const k of spec.usesNativeConfig ? [] : spec.dirEnvKeys ?? []) {
     const d = env[k];
     if (d) { try { mkdirSync(d, { recursive: true }); } catch { /* 启动时会报错 */ } }
   }
@@ -550,8 +551,9 @@ export async function acpSpawn(spec: AcpAgentSpec, rt: AcpRuntime, opts: SpawnOp
   const signal = opts.signal;
   if (signal?.aborted) throw new AbortError();
   // H1：Agent 不能在会话里换模型时，由 Gateway 要求在启动时指定模型
-  const lm = opts.launchModel && opts.model && spec.launchModel ? spec.launchModel(opts.model, opts.env ?? {}) : null;
-  const env = agentEnv(spec, { ...(opts.env ?? {}), ...(lm?.env ?? {}) });
+  const inherited = agentEnv(spec, opts.env ?? {});
+  const lm = opts.launchModel && opts.model && spec.launchModel ? spec.launchModel(opts.model, inherited) : null;
+  const env = { ...inherited, ...(lm?.env ?? {}) };
   const runSpec: AcpAgentSpec = lm?.args?.length ? { ...spec, launch: (e) => { const l = spec.launch(e); return { ...l, args: [...l.args, ...lm.args!] }; } } : spec;
   const holder: { session: AcpSession | null } = { session: null };
   let conn: AcpConnection | null = null;

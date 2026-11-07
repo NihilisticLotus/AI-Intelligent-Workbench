@@ -3,14 +3,13 @@
 // 两者读同一个配置目录（CLAUDE_CONFIG_DIR，默认 ~/.claude），登录态共享。我们不读这个目录里的任何文件。
 import { existsSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { tmpdir } from 'node:os';
 import type { PermissionLevel } from '@aic/protocol';
 import { agentErrors } from '../acp/errors';
-import { buildChildEnv, killTree, runCli, spawnAgent } from '../acp/launch';
+import { buildNativeEnv, runCli } from '../acp/launch';
 import { acpProbe, acpSpawn, type AcpAgentSpec, type AcpRuntime } from '../acp/session';
-import { allowedAuthUrl, initAuthMethods, LOGIN_TIMEOUT_MS, loginLifecycle, pkgDirOf, readVersion, resolveFrom } from '../common';
+import { initAuthMethods, nativeAccountEnv, pkgDirOf, readVersion, resolveFrom } from '../common';
 import type {
-  AccountProfile, AgentAdapter, AgentSettings, AuthMethodInfo, DetectResult, LoginHandle, LoginRequest,
+  AgentAdapter, AgentSettings, AuthMethodInfo, DetectResult,
 } from '../types';
 import { isVerified } from '../verified';
 import { isRecord } from '../util';
@@ -27,8 +26,6 @@ const MODE_RANK: Record<string, number> = { plan: 0, default: 1, acceptEdits: 2,
 export const CLAUDE_SESSION_META = { claudeCode: { options: { settingSources: ['user'], allowDangerouslySkipPermissions: false } } } as const;
 /** 工具子进程（Bash 等）不继承 Anthropic 凭据：Claude Code 启动子进程前清理这些环境变量 */
 export const CLAUDE_SCRUB_ENV = { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', CLAUDE_CODE_MAX_RETRIES: '2' } as const;
-/** 订阅登录时 CLI 输出里可能出现的授权链接（只推这些主机） */
-const AUTH_HOSTS = ['claude.ai', 'console.anthropic.com', 'platform.claude.com', 'anthropic.com', 'claude.com'];
 
 export const CLAUDE_AUTH_METHODS: AuthMethodInfo[] = [
   { id: 'claude-ai-login', name: 'Claude 订阅登录', description: '用 Claude Pro / Max 订阅账号登录（会打开浏览器）', flow: 'browser' },
@@ -59,7 +56,7 @@ export function createClaudeAdapter(rt: AcpRuntime): AgentAdapter {
   const engineEnv = (): Record<string, string> => (settings.engine === 'local' && paths.localExe ? { CLAUDE_CODE_EXECUTABLE: paths.localExe } : {});
 
   const spec: AcpAgentSpec = {
-    kind: 'claude', displayName: NAME,
+    kind: 'claude', displayName: NAME, usesNativeConfig: true,
     launch: () => {
       if (!paths.entry || !existsSync(paths.entry)) throw agentErrors.notInstalled('claude', NAME, '找不到 claude-agent-acp，请重新安装 AI Console 的依赖');
       const exe = engineExe();
@@ -88,7 +85,7 @@ export function createClaudeAdapter(rt: AcpRuntime): AgentAdapter {
     let key = exe;
     try { key = `${exe}|${statSync(exe).mtimeMs}`; } catch { /* 用路径 */ }
     if (versionCache.has(key)) return versionCache.get(key) ?? null;
-    const r = await runCli({ command: exe, args: ['--version'] }, { env: buildChildEnv({}), timeoutMs: 20_000 });
+    const r = await runCli({ command: exe, args: ['--version'] }, { env: buildNativeEnv({}), timeoutMs: 20_000 });
     const v = /(\d+\.\d+\.\d+)/.exec(r.stdout)?.[1] ?? null;
     if (v) versionCache.set(key, v);
     return v;
@@ -96,7 +93,7 @@ export function createClaudeAdapter(rt: AcpRuntime): AgentAdapter {
 
   /** claude.exe auth status --json：只解析 loggedIn / authMethod / apiProvider，其余字段丢弃，输出不写日志 */
   async function authStatus(exe: string, env: Record<string, string>): Promise<boolean | null> {
-    const r = await runCli({ command: exe, args: ['auth', 'status', '--json'] }, { env: buildChildEnv(env), timeoutMs: 20_000 });
+    const r = await runCli({ command: exe, args: ['auth', 'status', '--json'] }, { env: buildNativeEnv(env), timeoutMs: 20_000 });
     const m = /\{[\s\S]*\}/.exec(r.stdout);
     if (!m) return null;
     try {
@@ -106,8 +103,8 @@ export function createClaudeAdapter(rt: AcpRuntime): AgentAdapter {
   }
 
   return {
-    id: 'claude', displayName: NAME, real: true,
-    authMethods: ['oauth', 'apiKey', 'customEndpoint'],
+    id: 'claude', displayName: NAME, real: true, usesNativeConfig: true,
+    authMethods: [],
     permissionLevels: ['readonly', 'ask'],
     autoProbe: true,
     launchModel: true,
@@ -141,26 +138,9 @@ export function createClaudeAdapter(rt: AcpRuntime): AgentAdapter {
       };
     },
 
-    async login() { throw agentErrors.unsupported(NAME, '直接登录，请使用 startLogin'); },
+    async login() { throw agentErrors.unsupported(NAME, '在工作台里登录，请在 Claude Code 中完成登录'); },
 
-    buildEnv(profile: AccountProfile, secret?: string | null) {
-      const env: Record<string, string> = {};
-      const kind = profile.kind ?? 'subscription';
-      if (kind === 'subscription') {
-        if (profile.configDir === 'isolated' && profile.profileDir) env.CLAUDE_CONFIG_DIR = path.join(profile.profileDir, 'claude');
-      } else if (kind === 'apiKey') {
-        if (secret) env.ANTHROPIC_API_KEY = secret;
-      } else {
-        if (profile.baseUrl) env.ANTHROPIC_BASE_URL = profile.baseUrl;
-        if (secret) {
-          if (profile.authHeader === 'bearer') env.ANTHROPIC_AUTH_TOKEN = secret;
-          else env.ANTHROPIC_API_KEY = secret;
-        }
-        const first = profile.models?.[0]?.id;
-        if (first) env.ANTHROPIC_CUSTOM_MODEL_OPTION = first;
-      }
-      return env;
-    },
+    buildEnv: nativeAccountEnv,
 
     async listModels() { return []; },
     async listEfforts() { return null; },
@@ -172,54 +152,5 @@ export function createClaudeAdapter(rt: AcpRuntime): AgentAdapter {
     },
     probe(opts) { return acpProbe(spec, rt, { ...opts, env: { ...opts.env, ...engineEnv(), ...CLAUDE_SCRUB_ENV } }); },
     mapPermissionLevel(level) { return { modeId: spec.modeFor(level) ?? undefined }; },
-
-    /**
-     * 订阅登录：ACP authenticate 不支持（terminal 类型），由 Gateway 以隐藏子进程运行
-     * `node <adapter>/dist/index.js --cli auth login --claudeai|--console`。CLI 会打开浏览器走 OAuth。
-     * 输出里只提取白名单内的授权链接推给界面，其余输出不记录（ISSUE-0007）。
-     */
-    startLogin(req: LoginRequest): LoginHandle {
-      const flag = req.methodId === 'claude-ai-login' ? '--claudeai' : req.methodId === 'console-login' ? '--console' : null;
-      if (!flag) throw agentErrors.unsupported(NAME, `这种登录方式（${req.methodId}）`);
-      const launch = spec.launch({});
-      const env = buildChildEnv({ ...req.env, ...engineEnv() });
-      const child = spawnAgent({ entry: launch.entry!, args: ['--cli', 'auth', 'login', flag] }, { cwd: tmpdir(), env });
-      if (child.pid) rt.tracker?.started({ pid: child.pid, agent: 'claude', sessionId: null, startedAt: Date.now() });
-      const life = loginLifecycle(LOGIN_TIMEOUT_MS, () => { void killTree(child.pid ?? 0); });
-      let urlSent = false;
-      let codeAsked = false;
-      let buf = '';
-      req.onProgress({ state: 'started' });
-      const scan = (d: Buffer) => {
-        buf = (buf + d.toString('utf8')).slice(-8192);
-        if (!urlSent) {
-          for (const m of buf.matchAll(/https:\/\/[^\s"'<>`]+/g)) {
-            const url = m[0].replace(/[).,;]+$/, '');
-            if (allowedAuthUrl(url, AUTH_HOSTS)) { urlSent = true; req.onProgress({ state: 'waiting_browser', authUrl: url }); break; }
-          }
-        }
-        if (!codeAsked && /(paste|enter)[^\n]{0,40}code|授权码/i.test(buf)) {
-          codeAsked = true;
-          req.onProgress({ state: 'need_code', message: '请把浏览器里显示的授权码粘贴到这里' });
-        }
-      };
-      child.stdout.on('data', scan);
-      child.stderr.on('data', scan);
-      child.stdin.on('error', () => {});
-      child.on('exit', async (code) => {
-        if (child.pid) rt.tracker?.exited(child.pid);
-        if (life.finished) return;
-        if (code !== 0) { life.finish({ state: 'failed', message: `登录没有完成（退出码 ${code}）` }); return; }
-        const exe = engineExe();
-        const ok = exe ? await authStatus(exe, { ...req.env, ...engineEnv() }) : null;
-        life.finish(ok ? { state: 'succeeded' } : { state: 'failed', message: '登录流程结束了，但仍然显示未登录' });
-      });
-      child.on('error', (e) => life.finish({ state: 'failed', message: e.message }));
-      return {
-        done: life.promise,
-        cancel() { void killTree(child.pid ?? 0); life.finish({ state: 'cancelled' }); },
-        submitCode(code: string) { if (!child.stdin.destroyed) child.stdin.write(`${code.trim()}\n`); },
-      };
-    },
   };
 }

@@ -5,17 +5,17 @@
 // 我们不读引擎配置目录里的任何文件；登录检查结果缓存 10 分钟（ISSUE-0008）。
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import type { PermissionLevel } from '@aic/protocol';
 import { AcpConnection } from '../acp/connection';
 import { agentErrors } from '../acp/errors';
 import { acpProbe, acpSpawn, agentEnv, type AcpAgentSpec, type AcpRuntime } from '../acp/session';
-import { acpAuthenticateLogin, readVersion } from '../common';
-import type { AccountProfile, AgentAdapter, AuthMethodInfo, DetectResult, LoginHandle, LoginRequest } from '../types';
+import { nativeAccountEnv, readVersion } from '../common';
+import type { AgentAdapter, AuthMethodInfo, DetectResult } from '../types';
 import { isRecord } from '../util';
 import { isVerified } from '../verified';
+import { redact } from '../redact';
 
 const MODE_RANK: Record<string, number> = { plan: 0, dontAsk: 0, default: 1, acceptEdits: 2, auto: 3, bypassPermissions: 4, fullAccess: 5 };
 // 引擎入口，按优先级：
@@ -28,7 +28,6 @@ const RELS = [
 ];
 const LOGIN_CACHE_MS = 10 * 60_000;
 const LITE_ONLY = '这个版本的 WorkBuddy 只带精简引擎，在工作台里没有响应，暂时不能使用（ISSUE-0016）。需要 CodeBuddy 的模型时，请用 CodeBuddy';
-const AUTH_HOSTS = ['codebuddy.ai', 'codebuddy.cn', 'copilot.tencent.com', 'tencent.com', 'qq.com', 'github.com', 'google.com'];
 export const WORKBUDDY_APP_METHOD = 'workbuddy-app';
 
 export const CODEBUDDY_AUTH_METHODS: AuthMethodInfo[] = [
@@ -112,7 +111,7 @@ const CODEBUDDY: Variant = {
   kind: 'codebuddy', name: 'CodeBuddy', find: findCodebuddyStandalone,
   engineSource: 'bundled', engineLocation: '工作台自带（官方独立版）', authMethods: CODEBUDDY_AUTH_METHODS,
   notFound: '没有找到工作台自带的 CodeBuddy 引擎，请重新安装依赖（双击启动脚本会自动安装）',
-  notLoggedIn: '还没有登录：点 [登录]，在浏览器里完成授权',
+  notLoggedIn: '还没有登录：请在 CodeBuddy 中完成配置或登录，然后重新检测',
 };
 const WORKBUDDY: Variant = {
   kind: 'workbuddy', name: 'WorkBuddy', find: (o) => findCodebuddy(o),
@@ -135,7 +134,7 @@ function createVariant(v: Variant, rt: CodebuddyOptions): AgentAdapter {
   const loginCache = new Map<string, { at: number; loggedIn: boolean | null }>();
 
   const spec: AcpAgentSpec = {
-    kind: v.kind, displayName: NAME,
+    kind: v.kind, displayName: NAME, usesNativeConfig: true,
     launch: () => {
       if (!loc.js || !existsSync(loc.js)) loc = v.find(rt.enginePath);
       if (!loc.js) throw agentErrors.notInstalled(v.kind, NAME, v.notFound);
@@ -156,19 +155,19 @@ function createVariant(v: Variant, rt: CodebuddyOptions): AgentAdapter {
   };
 
   /** initialize → _codebuddy.ai/getUserInfo：只看有没有 userInfo.userId，其余丢弃，不存用户信息 */
-  async function checkLogin(env: Record<string, string>): Promise<boolean | null> {
+  async function checkLogin(env: Record<string, string>, secrets: string[]): Promise<boolean | null> {
     const full = agentEnv(spec, env);
     let conn: AcpConnection | null = null;
     try {
       conn = await AcpConnection.start({
-        kind: v.kind, displayName: NAME, launch: spec.launch(full), cwd: tmpdir(), env: full, log: rt.log, label: 'detect',
+        kind: v.kind, displayName: NAME, launch: spec.launch(full), cwd: tmpdir(), env: full, redact: secrets, log: rt.log, label: 'detect',
         ...(rt.tracker ? { tracker: rt.tracker } : {}), timeouts: { ...rt.timeouts, initialize: Math.min(rt.timeouts?.initialize ?? 30_000, 30_000) },
       });
       const r = await conn.request('_codebuddy.ai/getUserInfo', {}, 15_000);
       const ui = isRecord(r) && isRecord(r.userInfo) ? r.userInfo : null;
       return !!(ui && (typeof ui.userId === 'string' || typeof ui.userId === 'number') && String(ui.userId));
     } catch (e) {
-      rt.log('warn', `[agent:${v.kind}] 检查登录状态失败：${e instanceof Error ? e.message : String(e)}`);
+      rt.log('warn', `[agent:${v.kind}] 检查登录状态失败：${redact(e instanceof Error ? e.message : String(e), secrets)}`);
       return null;
     } finally {
       await conn?.close().catch(() => {});
@@ -176,14 +175,14 @@ function createVariant(v: Variant, rt: CodebuddyOptions): AgentAdapter {
   }
 
   return {
-    id: v.kind, displayName: NAME, real: true,
-    authMethods: v.kind === 'workbuddy' ? ['oauth'] : ['oauth', 'apiKey', 'customEndpoint'],
+    id: v.kind, displayName: NAME, real: true, usesNativeConfig: true,
+    authMethods: [],
     permissionLevels: ['readonly', 'ask'],
     // 不自动探测：需要登录，且登录态脆弱（ISSUE-0008）
     autoProbe: false,
     launchModel: true,
     workspaceConfig: 'ignored',
-    experimentalProfile: (kind) => kind !== 'subscription',
+    experimentalProfile: () => false,
 
     async detect(opts = {}): Promise<DetectResult> {
       loc = v.find(rt.enginePath);
@@ -202,7 +201,7 @@ function createVariant(v: Variant, rt: CodebuddyOptions): AgentAdapter {
       let loggedIn: boolean | null;
       if (!opts.force && cached && Date.now() - cached.at < LOGIN_CACHE_MS) loggedIn = cached.loggedIn;
       else {
-        loggedIn = await checkLogin(env);
+        loggedIn = await checkLogin(env, opts.redact ?? []);
         loginCache.set(key, { at: Date.now(), loggedIn });
       }
       return {
@@ -211,24 +210,9 @@ function createVariant(v: Variant, rt: CodebuddyOptions): AgentAdapter {
       };
     },
 
-    async login() { throw agentErrors.unsupported(NAME, '直接登录，请使用 startLogin'); },
+    async login() { throw agentErrors.unsupported(NAME, `在工作台里登录，请在 ${NAME} 中完成登录`); },
 
-    buildEnv(profile: AccountProfile, secret?: string | null) {
-      const env: Record<string, string> = {};
-      const kind = profile.kind ?? 'subscription';
-      if (kind === 'subscription') {
-        if (profile.configDir === 'isolated' && profile.profileDir) env.CODEBUDDY_CONFIG_DIR = path.join(profile.profileDir, 'codebuddy');
-      } else if (kind === 'apiKey') {
-        if (secret) env.CODEBUDDY_API_KEY = secret;
-      } else {
-        if (profile.baseUrl) env.CODEBUDDY_BASE_URL = profile.baseUrl;
-        if (secret) {
-          if (profile.authHeader === 'bearer') env.CODEBUDDY_AUTH_TOKEN = secret;
-          else env.CODEBUDDY_API_KEY = secret;
-        }
-      }
-      return env;
-    },
+    buildEnv: nativeAccountEnv,
 
     async listModels() { return []; },
     async listEfforts() { return null; },
@@ -240,34 +224,5 @@ function createVariant(v: Variant, rt: CodebuddyOptions): AgentAdapter {
     },
     probe(opts) { return acpProbe(spec, rt, opts); },
     mapPermissionLevel(level) { return { modeId: spec.modeFor(level) ?? undefined }; },
-
-    startLogin(req: LoginRequest): LoginHandle {
-      loginCache.clear();
-      if (v.kind === 'workbuddy') {
-        if (req.methodId !== WORKBUDDY_APP_METHOD) throw agentErrors.unsupported(NAME, `这种登录方式（${req.methodId}）`);
-        // 启动 WorkBuddy，用户在那里登录后回来点 [重新检测]
-        const exe = loc.root ? path.join(loc.root, 'WorkBuddy.exe') : null;
-        req.onProgress({ state: 'started' });
-        if (!exe || !existsSync(exe)) {
-          return { done: Promise.resolve({ state: 'failed', message: '没有找到 WorkBuddy.exe' }), cancel() {} };
-        }
-        try {
-          spawn(exe, [], { detached: true, stdio: 'ignore', shell: false }).unref();
-        } catch (e) {
-          return { done: Promise.resolve({ state: 'failed', message: `打开 WorkBuddy 失败：${(e as Error).message}` }), cancel() {} };
-        }
-        return { done: Promise.resolve({ state: 'succeeded', message: '已打开 WorkBuddy。请在 WorkBuddy 里登录，完成后回到这里点 [重新检测]' }), cancel() {} };
-      }
-      if (!['external', 'internal', 'iOA'].includes(req.methodId)) throw agentErrors.unsupported(NAME, `这种登录方式（${req.methodId}）`);
-      // 对已登录的用户调用 authenticate 会先登出（Gateway 已要求 force 二次确认）
-      return acpAuthenticateLogin(spec, rt, req, {
-        authUrlMethod: '_codebuddy.ai/authUrl', authUrlHosts: AUTH_HOSTS,
-        verify: (resp) => {
-          const meta = isRecord(resp) && isRecord(resp._meta) ? resp._meta : {};
-          const ui = isRecord(meta['codebuddy.ai/userinfo']) ? meta['codebuddy.ai/userinfo'] : null;
-          return !!(ui && ui.userId);
-        },
-      });
-    },
   };
 }

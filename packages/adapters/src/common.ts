@@ -3,14 +3,22 @@ import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
-import type { AgentKind } from '@aic/protocol';
+import { ErrorCode, type AgentKind } from '@aic/protocol';
 import { AcpConnection } from './acp/connection';
 import { classifyError } from './acp/errors';
 import { agentEnv, type AcpAgentSpec, type AcpRuntime } from './acp/session';
-import type { LoginHandle, LoginRequest } from './types';
+import { AgentError, type AccountProfile, type LoginHandle, type LoginRequest } from './types';
 import { isRecord } from './util';
 
 const req = createRequire(import.meta.url);
+
+/** 原生 Agent 的认证归软件自己管理，兼容保留 buildEnv 接口但不注入工作台账号。 */
+export function nativeAccountEnv(profile: AccountProfile, secret?: string | null): Record<string, string> {
+  if ((profile.kind ?? 'subscription') !== 'subscription' || profile.configDir === 'isolated' || secret) {
+    throw new AgentError({ code: ErrorCode.AgentNativeConfiguration, message: '这个 Agent 使用软件自身的配置与登录', hint: '自定义 API 请配置给 AI Console 独立 Agent；旧测试账号已停止使用', actions: [] }, 'unsupported');
+  }
+  return {};
+}
 
 /** 解析某个包里的文件；from：从哪个包的位置开始解析（处理嵌套依赖） */
 export function resolveFrom(spec: string, from?: string): string | null {

@@ -233,7 +233,7 @@ export class AgentService {
     if (row?.catalog_json) {
       try { return { ...(JSON.parse(row.catalog_json) as Catalog), source: 'cache' }; } catch { /* 下面 */ }
     }
-    if (p.models.length) return { models: p.models, efforts: null, modes: [], source: 'manual' };
+    if (!a.usesNativeConfig && p.models.length) return { models: p.models, efforts: null, modes: [], source: 'manual' };
     return { models: [], efforts: null, modes: [], source: 'none' };
   }
 
@@ -273,6 +273,7 @@ export class AgentService {
       ...(d?.engineSource ? { engineSource: d.engineSource } : {}),
       engineLocation: d?.engineLocation ?? null,
       authMethods: d?.authMethods ?? [],
+      ...(a.usesNativeConfig ? { usesNativeConfig: true, authMethods: [] } : {}),
       modelsSource: a.real ? cat.source : 'cache',
       runningSessions: this.running.get(a.id) ?? 0,
       concurrencyLimit: this.concurrencyLimit(a.id),
@@ -310,6 +311,7 @@ export class AgentService {
       ...(d?.checkedAt ? { checkedAt: d.checkedAt } : {}),
       permissionLevels: a.permissionLevels ?? ['readonly', 'ask', 'workspace', 'full'],
       enabled: false,
+      ...(a.usesNativeConfig ? { usesNativeConfig: true } : {}),
     };
   }
 
@@ -456,6 +458,7 @@ export class AgentService {
   async login(kind: AgentKind, body: AgentLoginBody, deviceId: string | null): Promise<{ loginId: string }> {
     const a = this.registry.get(kind);
     if (!a) throw Errors.notFound('没有这个 Agent');
+    if (a.usesNativeConfig) throw Errors.nativeConfiguration('请在对应 Agent 软件中登录', '工作台沿用该软件的设置，不代登录、登出或替换认证；完成后点重新检测');
     if (!a.real || !a.startLogin) throw Errors.badRequest(`${a.displayName} 不需要登录`);
     const d = await this.ensureDetected(kind);
     const method = (d.authMethods ?? []).find((m) => m.id === body.methodId);

@@ -4,7 +4,7 @@ import { agentStatusText, isEnabled, pickEfforts, pickModels, profileSwitchKind 
 import type { SessionCfg } from '../state/core';
 export const effortLabel = (value: string) => value === 'enabled' ? '自动' : value;
 export function profileInfo(info: AgentInfo | undefined, profileId: string | null): AgentInfo | undefined {
-  if (!info) return info;
+  if (!info || info.usesNativeConfig) return info;
   const profile = info.profiles?.find((p) => p.id === profileId) ?? info.profiles?.find((p) => p.isDefault);
   return profile ? { ...info, ...(profile.models !== undefined ? { models: profile.models } : {}),
     ...(profile.efforts !== undefined ? { efforts: profile.efforts } : {}), ...(profile.caps ? { caps: profile.caps } : {}),
@@ -28,7 +28,7 @@ export function pickerItems(info: AgentInfo, current: AgentKind, cfg: SessionCfg
     failure: info.modelFailures?.find((f)=>f.model===m.id && f.profileId===(profileId ?? info.profiles?.find((p)=>p.isDefault)?.id ?? null))?.reason ?? null,
   }));
   const efforts = pickEfforts(info,session)?.slice().sort((a,b)=>a==='enabled'?-1:b==='enabled'?1:0) ?? null;
-  const profiles = info.kind === current && (info.profiles?.length ?? 0)>1 ? info.profiles!.map((p)=>({ ...p,
+  const profiles = !info.usesNativeConfig && info.kind === current && (info.profiles?.length ?? 0)>1 ? info.profiles!.map((p)=>({ ...p,
     blocked: mode==='task' && p.id!==profileId && profileSwitchKind(info.profiles?.find((x)=>x.id===profileId) ?? null,p)==='handoff',
   })) : [];
   return { models, efforts, profiles };

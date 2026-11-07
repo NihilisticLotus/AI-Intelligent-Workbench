@@ -52,6 +52,9 @@ describe('协议', () => {
   it('1.2 新增字段：老数据照样能解析，新字段可以带上', () => {
     const ag = { kind: 'claude', displayName: 'Claude Code', status: 'ready', version: '0.100.0', verified: true, models: [], efforts: null, message: null };
     expect(AgentInfo.parse(ag).kind).toBe('claude');
+    expect(AgentInfo.parse(ag).usesNativeConfig).toBeUndefined();
+    expect(AgentInfo.parse({ ...ag, usesNativeConfig: true }).usesNativeConfig).toBe(true);
+    expect(AgentInfo.safeParse({ ...ag, usesNativeConfig: 'true' }).success).toBe(false);
     const full = AgentInfo.parse({
       ...ag, adapterVersion: '0.100.0', engineVersion: '2.1.316', engineSource: 'bundled', engineLocation: '适配器自带',
       authMethods: [{ id: 'claude-ai-login', name: '订阅登录', description: null, flow: 'browser' }],
@@ -76,6 +79,9 @@ describe('协议', () => {
       hasSecret: true, secretHint: '7Q2c', isDefault: false, loggedIn: null, experimental: false, lastTestAt: null, lastTestOk: null, createdAt: 1, updatedAt: 1,
     });
     expect(p).not.toHaveProperty('apiKey');
+    expect(p.retired).toBeUndefined();
+    expect(AgentProfile.parse({ ...p, retired: true }).retired).toBe(true);
+    expect(AgentProfile.safeParse({ ...p, retired: 'true' }).success).toBe(false);
     expect(isAllowedBaseUrl('https://relay.example.com/v1')).toBe(true);
     expect(isAllowedBaseUrl('http://127.0.0.1:8080')).toBe(true);
     expect(isAllowedBaseUrl('http://relay.example.com')).toBe(false);

@@ -251,6 +251,8 @@ export interface ProbeOptions {
 export interface AgentAdapter {
   id: AgentKind;
   displayName: string;
+  /** 与协议 AgentInfo 同义：只使用第三方软件自身的配置和认证。 */
+  usesNativeConfig?: boolean;
 
   // 环境
   detect(opts?: DetectOptions): Promise<DetectResult>;

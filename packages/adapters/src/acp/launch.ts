@@ -39,6 +39,18 @@ export function buildChildEnv(overlay: Record<string, string> = {}, base: NodeJS
   return out;
 }
 
+/** 原生接入保留软件自己的 API、认证和配置目录；仅清理工作台残留与宿主会话标识。 */
+export function buildNativeEnv(overlay: Record<string, string> = {}, base: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const transient = new Set(['AIC_PROVIDER_KEY', 'DEFAULT_AUTH_REQUEST', 'CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION']);
+  const out: Record<string, string> = {};
+  for (const [key, value] of Object.entries(base)) {
+    if (value === undefined || transient.has(key.toUpperCase())) continue;
+    if (key.toUpperCase() === 'HOME' && process.platform === 'win32' && value.startsWith('/')) continue;
+    out[key] = value;
+  }
+  return { ...out, ...overlay };
+}
+
 export interface LaunchSpec {
   /** 可执行文件：默认 process.execPath（Node） */
   command?: string;

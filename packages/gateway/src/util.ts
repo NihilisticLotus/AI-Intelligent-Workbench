@@ -43,6 +43,7 @@ export const Errors = {
   profileInUse: mk(409, ErrorCode.ProfileInUse),
   secretUnavailable: mk(503, ErrorCode.SecretUnavailable),
   notRecoverable: mk(409, ErrorCode.SessionNotRecoverable),
+  nativeConfiguration: mk(409, ErrorCode.AgentNativeConfiguration),
 };
 
 /** 适配器错误的 HTTP 状态码 */

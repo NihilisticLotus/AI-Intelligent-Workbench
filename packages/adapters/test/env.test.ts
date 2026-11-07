@@ -1,84 +1,58 @@
-// 账号环境变量（phase-1.md 6.4.2）：buildEnv 是纯函数，逐格对照表格；适配器不接触密钥存储，密钥由 Gateway 传入。
-import path from 'node:path';
-import { describe, expect, it } from 'vitest';
+// 第三方软件沿用自身配置；旧的工作台认证不能再注入进程（phase-1.md 9.15）。
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { ErrorCode } from '@aic/protocol';
 import {
-  buildChildEnv, CODEX_KEY_ENV, createClaudeAdapter, createCodebuddyAdapter, createCodexAdapter, type AccountProfile, type AgentAdapter,
+  AgentError, buildNativeEnv, createClaudeAdapter, createCodebuddyAdapter, createCodexAdapter,
+  createWorkbuddyAdapter, createZcodeAdapter, specFromOptions, type AccountProfile,
 } from '../src/index';
+import { codexModelEnv } from '../src/codex';
+import { acpSpawn } from '../src/acp/session';
+import { FIXTURE, RecordingHost, scenario } from './helpers';
 
 const rt = { log: () => {} };
-const claude = createClaudeAdapter(rt);
-const codex = createCodexAdapter(rt);
-const codebuddy = createCodebuddyAdapter({ ...rt, enginePath: null });
-const DIR = path.join('D:', 'data', 'profiles', 'pf_1');
-const KEY = 'sk-test-abcdefghijklmnop1234';
+const adapters = [createClaudeAdapter(rt), createCodexAdapter(rt), createCodebuddyAdapter(rt), createWorkbuddyAdapter(rt), createZcodeAdapter()];
+const key = 'sk-fake-native-boundary-1234';
+afterEach(() => vi.unstubAllEnvs());
 
-const prof = (agent: AgentAdapter, p: Partial<AccountProfile>): AccountProfile => ({
-  id: 'pf_1', agentId: agent.id, name: '测试', authMethod: 'oauth', kind: 'subscription', configDir: 'shared', profileDir: DIR, ...p,
-});
+describe('第三方认证边界', () => {
+  it.each(adapters)('$displayName 不提供工作台登录，也不向本机配置注入变量', (a) => {
+    const p: AccountProfile = { id: 'local', agentId: a.id, name: '软件自身配置', authMethod: 'oauth', kind: 'subscription', configDir: 'shared' };
+    expect(a.usesNativeConfig).toBe(true);
+    expect(a.startLogin).toBeUndefined();
+    expect(a.authMethods).toEqual([]);
+    expect(a.buildEnv(p, null)).toEqual({});
+    for (const extra of [{ kind: 'apiKey' }, { kind: 'customEndpoint', baseUrl: 'https://example.test/v1' }, { configDir: 'isolated' }]) {
+      try { a.buildEnv({ ...p, ...extra } as AccountProfile); throw new Error('不应允许替换认证'); }
+      catch (e) { expect(e).toBeInstanceOf(AgentError); expect((e as AgentError).body.code).toBe(ErrorCode.AgentNativeConfiguration); }
+    }
+    expect(() => a.buildEnv(p, key)).toThrow(AgentError);
+  });
 
-describe('订阅登录', () => {
-  it('shared：三家都不注入任何变量', () => {
-    for (const a of [claude, codex, codebuddy]) expect(a.buildEnv(prof(a, {}), null)).toEqual({});
+  it('保留软件自己的 API、配置目录与 provider，只清理工作台残留和宿主会话标识', () => {
+    const own = { PATH: 'p', ANTHROPIC_API_KEY: key, ANTHROPIC_BASE_URL: 'https://a.example.test', CLAUDE_CONFIG_DIR: 'C:/own/claude',
+      CODEX_HOME: 'C:/own/codex', CODEX_CONFIG: '{"model_provider":"own"}', OPENAI_API_KEY: key,
+      CODEBUDDY_CONFIG_DIR: 'C:/own/buddy', CODEBUDDY_API_KEY: key, MODEL_PROVIDER: 'own' };
+    expect(buildNativeEnv({}, { ...own, AIC_PROVIDER_KEY: 'legacy', DEFAULT_AUTH_REQUEST: 'legacy', CLAUDECODE: '1', CLAUDE_CODE_SESSION_ID: 'host' })).toEqual(own);
   });
-  it('isolated：各自的配置目录指向账号目录', () => {
-    expect(claude.buildEnv(prof(claude, { configDir: 'isolated' }), null)).toEqual({ CLAUDE_CONFIG_DIR: path.join(DIR, 'claude') });
-    expect(codex.buildEnv(prof(codex, { configDir: 'isolated' }), null)).toEqual({ CODEX_HOME: path.join(DIR, 'codex') });
-    expect(codebuddy.buildEnv(prof(codebuddy, { configDir: 'isolated' }), null)).toEqual({ CODEBUDDY_CONFIG_DIR: path.join(DIR, 'codebuddy') });
-  });
-});
 
-describe('官方 API Key', () => {
-  it('Claude：ANTHROPIC_API_KEY，配置目录不变', () => {
-    expect(claude.buildEnv(prof(claude, { kind: 'apiKey', authMethod: 'apiKey' }), KEY)).toEqual({ ANTHROPIC_API_KEY: KEY });
+  it('Codex 会话换模型保留原有 provider，拒绝无效配置而不退回默认服务', () => {
+    const original = { model_provider: 'own', model: 'first', model_providers: { own: { base_url: 'https://own.example.test/v1', env_key: 'OWN_API_KEY' } } };
+    expect(JSON.parse(codexModelEnv('second', { CODEX_CONFIG: JSON.stringify(original) }).CODEX_CONFIG!)).toEqual({ ...original, model: 'second' });
+    expect(original.model).toBe('first');
+    for (const invalid of ['broken', 'null', '[]', '"text"']) expect(() => codexModelEnv('second', { CODEX_CONFIG: invalid })).toThrow();
   });
-  it('Codex：独立 CODEX_HOME + 会话级 provider，登录请求从环境读取密钥', () => {
-    const env = codex.buildEnv(prof(codex, { kind: 'apiKey', authMethod: 'apiKey' }), KEY);
-    expect(env.CODEX_HOME).toBe(path.join(DIR, 'codex'));
-    expect(env[CODEX_KEY_ENV]).toBe(KEY);
-    const cfg = JSON.parse(env.CODEX_CONFIG!);
-    expect(cfg).toMatchObject({ model_provider: 'aic', model_providers: { aic: { base_url: 'https://api.openai.com/v1', env_key: CODEX_KEY_ENV, wire_api: 'responses' } } });
-    // 密钥不出现在 CODEX_CONFIG 里（CODEX_CONFIG 可能被 Agent 写进日志）
-    expect(env.CODEX_CONFIG).not.toContain(KEY);
-    expect(JSON.parse(env.DEFAULT_AUTH_REQUEST!)).toEqual({ methodId: 'api-key' });
-    expect(env.CODEX_API_KEY).toBe(KEY);
-    expect(env.DEFAULT_AUTH_REQUEST).not.toContain(KEY);
-  });
-  it('CodeBuddy：CODEBUDDY_API_KEY（实验）', () => {
-    expect(codebuddy.buildEnv(prof(codebuddy, { kind: 'apiKey', authMethod: 'apiKey' }), KEY)).toMatchObject({ CODEBUDDY_API_KEY: KEY });
-    expect(codebuddy.experimentalProfile?.('apiKey')).toBe(true);
-    expect(claude.experimentalProfile?.('apiKey')).toBe(false);
-  });
-});
 
-describe('自定义地址', () => {
-  const base = { kind: 'customEndpoint' as const, authMethod: 'customEndpoint' as const, baseUrl: 'https://relay.example.com/v1', models: [{ id: 'm-1', name: 'M1', contextWindow: null }] };
-  it('Claude：x-api-key → ANTHROPIC_API_KEY；bearer → ANTHROPIC_AUTH_TOKEN；手填模型 → ANTHROPIC_CUSTOM_MODEL_OPTION', () => {
-    expect(claude.buildEnv(prof(claude, { ...base, authHeader: 'x-api-key' }), KEY)).toEqual({
-      ANTHROPIC_BASE_URL: base.baseUrl, ANTHROPIC_API_KEY: KEY, ANTHROPIC_CUSTOM_MODEL_OPTION: 'm-1',
-    });
-    expect(claude.buildEnv(prof(claude, { ...base, authHeader: 'bearer' }), KEY)).toEqual({
-      ANTHROPIC_BASE_URL: base.baseUrl, ANTHROPIC_AUTH_TOKEN: KEY, ANTHROPIC_CUSTOM_MODEL_OPTION: 'm-1',
-    });
-  });
-  it('Codex：provider 的 base_url 换成用户填的地址，wire_api 可选', () => {
-    const env = codex.buildEnv(prof(codex, { ...base, wireApi: 'chat' }), KEY);
-    expect(JSON.parse(env.CODEX_CONFIG!)).toMatchObject({ model: 'm-1', model_providers: { aic: { base_url: base.baseUrl, wire_api: 'chat' } } });
-    expect(env[CODEX_KEY_ENV]).toBe(KEY);
-  });
-  it('CodeBuddy：CODEBUDDY_BASE_URL + 密钥（实验）', () => {
-    const env = codebuddy.buildEnv(prof(codebuddy, base), KEY);
-    expect(env.CODEBUDDY_BASE_URL).toBe(base.baseUrl);
-    expect(Object.values(env)).toContain(KEY);
-  });
-});
-
-describe('与删除清单配合', () => {
-  it('账号变量在删除清单之后叠加，父进程的同名变量不会混进来', () => {
-    const parent = { PATH: 'p', ANTHROPIC_API_KEY: 'parent-key', CODEX_HOME: 'C:/other', CODEBUDDY_CONFIG_DIR: 'C:/x', OPENAI_API_KEY: 'o' };
-    const env = buildChildEnv(claude.buildEnv(prof(claude, { kind: 'apiKey', authMethod: 'apiKey' }), KEY), parent);
-    expect(env).toEqual({ PATH: 'p', ANTHROPIC_API_KEY: KEY });
-  });
-  it('不继承宿主的 ACP 默认认证和 provider 设置', () => {
-    expect(buildChildEnv({}, { PATH: 'p', DEFAULT_AUTH_REQUEST: 'private', MODEL_PROVIDER: 'other', AIC_PROVIDER_KEY: 'private' })).toEqual({ PATH: 'p' });
+  it('实际 ACP 子进程继承软件原有设置，不调用认证接口', async () => {
+    vi.stubEnv('CODEX_CONFIG', '{"model_provider":"own","model":"first"}');
+    vi.stubEnv('ANTHROPIC_BASE_URL', 'https://native.example.test/v1');
+    const sc = scenario({ watchEnv: ['CODEX_CONFIG', 'ANTHROPIC_BASE_URL'] });
+    const spec = specFromOptions({ kind: 'codex', displayName: '原生配置测试', entry: FIXTURE, usesNativeConfig: true });
+    spec.launchModel = (model, env) => ({ env: codexModelEnv(model, env) });
+    let conn;
+    try {
+      conn = await acpSpawn(spec, rt, { cwd: sc.dir, env: sc.env, model: 'second', effort: null, permission: 'ask', host: new RecordingHost(), launchModel: true });
+      expect(sc.log().find((x) => x.event === 'start')?.env).toEqual({ CODEX_CONFIG: '{"model_provider":"own","model":"second"}', ANTHROPIC_BASE_URL: 'https://native.example.test/v1' });
+      expect(sc.log().some((x) => x.method === 'authenticate')).toBe(false);
+    } finally { await conn?.close(); sc.cleanup(); }
   });
 });

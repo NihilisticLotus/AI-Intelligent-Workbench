@@ -2,6 +2,7 @@
 // 也可以用来临时接入其他原生支持 ACP 的 Agent。
 import type { AgentKind, PermissionLevel } from '@aic/protocol';
 import { agentErrors } from './acp/errors';
+import { nativeAccountEnv } from './common';
 import { acpProbe, acpSpawn, type AcpAgentSpec, type AcpRuntime } from './acp/session';
 import type { AgentAdapter, AuthMethodInfo, DetectResult } from './types';
 
@@ -18,6 +19,8 @@ export interface SpecAdapterOptions {
   detect?: Partial<DetectResult>;
   authMethods?: AuthMethodInfo[];
   autoProbe?: boolean;
+  /** 使用原生配置边界（迁移和环境继承测试）。 */
+  usesNativeConfig?: boolean;
   /** 建会话时带的 _meta（测试 Claude 的设置隔离用） */
   sessionMeta?: Record<string, unknown>;
   /** 启动时指定模型用的环境变量名（测试 H1 用） */
@@ -29,6 +32,7 @@ export function specFromOptions(o: SpecAdapterOptions): AcpAgentSpec {
   const rank = o.modeRank ?? { plan: 0, default: 1, acceptEdits: 2, auto: 3, bypassPermissions: 4 };
   return {
     kind: o.kind, displayName: o.displayName,
+    ...(o.usesNativeConfig ? { usesNativeConfig: true } : {}),
     launch: () => ({ entry: o.entry, args: o.args ?? [] }),
     modeFor: (l) => modes[l] ?? null,
     modeRank: (m) => rank[m] ?? 99,
@@ -47,6 +51,7 @@ export function createSpecAdapter(o: SpecAdapterOptions, rt: AcpRuntime): AgentA
   const withEnv = (env?: Record<string, string>) => ({ ...(o.env ?? {}), ...(env ?? {}) });
   return {
     id: o.kind, displayName: o.displayName, real: true,
+    ...(o.usesNativeConfig ? { usesNativeConfig: true } : {}),
     authMethods: ['oauth', 'apiKey'],
     permissionLevels: o.permissionLevels ?? ['readonly', 'ask'],
     autoProbe: o.autoProbe ?? false,
@@ -59,7 +64,7 @@ export function createSpecAdapter(o: SpecAdapterOptions, rt: AcpRuntime): AgentA
       };
     },
     async login() { throw agentErrors.unsupported(o.displayName, '登录'); },
-    buildEnv(profile, secret): Record<string, string> { return profile.kind === 'apiKey' && secret ? { AIC_FAKE_SECRET: secret } : {}; },
+    buildEnv(profile, secret): Record<string, string> { return o.usesNativeConfig ? nativeAccountEnv(profile, secret) : profile.kind === 'apiKey' && secret ? { AIC_FAKE_SECRET: secret } : {}; },
     async listModels() { return []; },
     async listEfforts() { return null; },
     spawn(opts) { return acpSpawn(spec, rt, { ...opts, env: withEnv(opts.env) }); },

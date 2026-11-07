@@ -61,14 +61,14 @@
     </header>
     <div class="content-scroll">
       <div class="page">
-        <p class="page-lead">上次检测：今天 13:58。安装、登录、更新都在这里点按钮完成，不需要打开命令行。只有打开的 Agent 会检测、出现在新建任务和切换器里。</p>
+        <p class="page-lead">上次检测：今天 13:58。第三方 Agent 沿用软件自身的 API、登录与模型设置。只有打开的 Agent 会检测、出现在新建任务和切换器里。</p>
         <h2 class="sec-h">已启用 <span class="muted" id="on-count"></span></h2>
         <div class="cards">
           <article class="agent-card" tabindex="0" aria-current="true" data-agent="claude">
             <span class="top"><span class="ag claude lg">C</span><span><span class="name">Claude Code</span><br><span class="src">npm 全局安装</span></span><span style="margin-left:auto" class="status ok"><span class="dot"></span>就绪</span></span>
             <dl>
               <dt>版本</dt><dd>2.3.8（已验证）</dd>
-              <dt>账号</dt><dd>个人订阅、工作室 API Key</dd>
+              <dt>配置</dt><dd>沿用软件自身配置与登录</dd>
               <dt>运行中</dt><dd>2 个会话（并发上限 2）</dd>
             </dl>
           </article>
@@ -77,20 +77,20 @@
             <span class="top"><span class="ag codex lg">X</span><span><span class="name">Codex</span><br><span class="src">npm 全局安装</span></span><span style="margin-left:auto" class="status wait"><span class="dot"></span>需要登录</span></span>
             <div class="alert attn" style="padding:8px 10px">
               <svg class="i" aria-hidden="true"><use href="#i-warn"/></svg>
-              <div class="body"><strong>ChatGPT 登录已过期</strong><p>1 个任务因此失败。重新登录会在浏览器中打开授权页面。</p></div>
+              <div class="body"><strong>ChatGPT 登录已过期</strong><p>请在 Codex 中完成配置或登录，再回到工作台重新检测。</p></div>
             </div>
             <dl><dt>版本</dt><dd>0.61.0，可更新到 0.63.2</dd></dl>
-            <div class="acts"><button class="btn sm attn">重新登录</button><button class="btn sm">更新到 0.63.2</button></div>
+            <div class="acts"><button class="btn sm" data-native-recheck>重新检测</button></div>
           </article>
 
           <article class="agent-card" tabindex="0" data-agent="codebuddy">
             <span class="top"><span class="ag codebuddy lg">B</span><span><span class="name">CodeBuddy</span><br><span class="src">工作台自带的官方独立版引擎</span></span><span style="margin-left:auto" class="status wait"><span class="dot"></span>需要登录</span></span>
             <dl>
               <dt>版本</dt><dd>2.181.0（已验证）</dd>
-              <dt>账号</dt><dd>还没登录。在浏览器里完成，登录信息由 CodeBuddy 自己保存</dd>
+              <dt>配置</dt><dd>请在 CodeBuddy 中完成配置或登录，工作台沿用</dd>
               <dt>模型</dt><dd>glm-5.1、kimi-k2.5、minimax-m2.7、deepseek-v3-2</dd>
             </dl>
-            <div class="acts"><button class="btn sm attn" data-cb-login="微信">微信登录</button><button class="btn sm" data-cb-login="Google / GitHub">Google / GitHub 登录</button><button class="btn sm" data-cb-login="iOA">iOA 登录</button></div>
+            <div class="acts"><button class="btn sm" data-native-recheck>重新检测</button></div>
           </article>
 
           <article class="agent-card" tabindex="0" data-agent="workbuddy">
@@ -123,28 +123,14 @@
         <section class="detail" aria-label="Claude Code 详情">
           <div>
             <h2><span class="ag claude">C</span>Claude Code</h2>
-            <h3>账号</h3>
-            <div class="acct">
-              <svg class="i" aria-hidden="true"><use href="#i-link"/></svg>
-              <div class="info"><b>个人订阅</b><span>订阅登录，本周额度已用 46%，周一 08:00 重置</span></div>
-              <span class="status ok"><span class="dot"></span>默认</span>
-              <button class="btn ghost icon sm" aria-label="个人订阅的更多操作"><svg class="i" aria-hidden="true"><use href="#i-more"/></svg></button>
-            </div>
-            <div class="acct">
-              <svg class="i" aria-hidden="true"><use href="#i-key"/></svg>
-              <div class="info"><b>工作室 API Key</b><span>官方 API Key，结尾 …7Q2c，保存在 Windows 凭据管理器</span></div>
-              <button class="btn sm">测试</button>
-              <button class="btn ghost icon sm" aria-label="工作室 API Key 的更多操作"><svg class="i" aria-hidden="true"><use href="#i-more"/></svg></button>
-            </div>
-            <h3>添加账号</h3>
-            <div class="method">
-              <button><b>订阅登录</b><span>在浏览器中授权</span></button>
-              <button><b>官方 API Key</b><span>粘贴密钥</span></button>
-              <button><b>自定义地址</b><span>兼容第三方中转</span></button>
-            </div>
+            <h3>软件自身配置</h3>
+            <p>API、登录和模型由软件自己管理，工作台沿用这些设置。完成配置后，回到这里重新检测。</p>
+            <p>模型来自软件报告的会话能力，包含其提供的自定义模型。工作台换模型只作用于任务会话。</p>
+            <p class="muted">旧工作台测试配置已停止使用，清理功能尚未开放。AI Console 自有 API 服务归独立 Agent，功能仍待实现。</p>
           </div>
           <div>
-            <h3>默认设置</h3>
+            <h3>工作台任务默认值</h3>
+            <p class="muted">只用于工作台的新任务，不修改软件自身的默认设置。</p>
             <div class="field"><label for="dm">默认模型</label><select class="select" id="dm"><option>Opus 5.5</option><option>Sonnet 5</option></select></div>
             <div class="field"><label for="cc">并发上限</label><select class="select" id="cc"><option>1</option><option selected>2</option><option>3</option><option>4</option></select></div>
             <div class="field"><label>引擎位置</label><span class="mono" style="font-size:12px">%APPDATA%\npm\claude.cmd</span></div>

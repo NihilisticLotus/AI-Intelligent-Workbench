@@ -22,6 +22,9 @@ const profile = (over: Partial<AgentProfile> = {}): AgentProfile => ({
 });
 
 describe('状态与就绪', () => {
+  it('原生配置标记优先于旧的登录方式缓存，不提供工作台认证流程', () => {
+    expect(loginMethods(agent({ usesNativeConfig: true, authMethods: [{ id: 'old-login', name: '旧登录', description: null, flow: 'browser' }] }))).toEqual([]);
+  });
   it('就绪但版本没验证过：显示“未验证版本”，仍然可以派发', () => {
     const a = agent({ verified: false });
     expect(agentStatusView(a)).toEqual({ text: '未验证版本', shape: 'wait' });

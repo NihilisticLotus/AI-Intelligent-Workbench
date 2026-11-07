@@ -222,7 +222,10 @@ export class TaskService {
     // 用 API Key 的账号不看“本机登录”的状态
     const profile = a.real && this.agentSvc ? this.agentSvc.profiles.resolve(kind, profileId) : null;
     const needLogin = profile ? profile.kind === 'subscription' && this.agentSvc!.profileLoggedIn(profile.id) === false : !d.loggedIn;
-    if (needLogin) throw Errors.agentUnavailable(`${a.displayName} 还没有登录`, '请先在 Agent 页登录', [{ label: '去登录', action: 'agents.login', args: { kind, ...(profile ? { profileId: profile.id } : {}) } }]);
+    if (needLogin) {
+      if (a.usesNativeConfig) throw Errors.agentUnavailable(`${a.displayName} 还没有登录`, '请在该软件中完成配置或登录，再回到工作台重新检测', [{ label: '查看 Agent', action: 'open_agents', args: { kind } }]);
+      throw Errors.agentUnavailable(`${a.displayName} 还没有登录`, '请先在 Agent 页登录', [{ label: '去登录', action: 'agents.login', args: { kind, ...(profile ? { profileId: profile.id } : {}) } }]);
+    }
     return a;
   }
 
@@ -492,11 +495,14 @@ export class TaskService {
       if (this.getRow(taskId).status === 'queued' && this.turnAborts.has(taskId)) this.setStatus(taskId, 'running');
       // 上一个会话：同一个任务、同一个 Agent，有 agent_session_id → 恢复（H1）。不限定账号：换账号后也先试着恢复，
       // 恢复不了时适配器会新建会话并提示“Agent 不记得之前的对话”，不会悄悄丢掉上下文
-      const prev = this.db.get<{ id: string; agent_session_id: string; caps_json: string | null }>(
-        `SELECT id, agent_session_id, caps_json FROM sessions WHERE task_id = ? AND agent_id = ? AND agent_session_id IS NOT NULL
+      const prev = this.db.get<{ id: string; agent_session_id: string; profile_id: string | null; caps_json: string | null }>(
+        `SELECT id, agent_session_id, profile_id, caps_json FROM sessions WHERE task_id = ? AND agent_id = ? AND agent_session_id IS NOT NULL
          ORDER BY started_at DESC LIMIT 1`,
         taskId, row.agent,
       );
+      if (a.usesNativeConfig && prev?.profile_id && prev.profile_id !== profile?.id) {
+        throw Errors.nativeConfiguration('这个旧任务曾使用工作台替换的认证，已停止继续调用', '请保留历史并用该软件自身配置新建任务；不会自动改用其他账号计费');
+      }
       const resume = a.real && prev ? { agentSessionId: prev.agent_session_id } : undefined;
       // H1：上次的会话不能在会话里换模型时，启动时就指定模型
       const launchModel = !!(a.real && a.launchModel && row.model && this.modelSwitchOf(prev?.caps_json ?? null, row.agent, profile?.id ?? null) === 'none');
@@ -573,7 +579,11 @@ export class TaskService {
 
   /** 错误事件：动作按钮带上 taskId，界面可以直接执行 */
   private emitError(taskId: string, sessionId: string | null, body: ApiError) {
-    const error: ApiError = { ...body, actions: body.actions.map((x) => ({ ...x, args: { taskId, ...(x.args ?? {}) } })) };
+    const agent = this.getRow(taskId).agent;
+    const nativeAuth = this.agents.get(agent)?.usesNativeConfig && body.code === ErrorCode.AgentAuthRequired;
+    const error: ApiError = nativeAuth
+      ? { ...body, hint: '请在该 Agent 软件中完成配置或登录，然后回到工作台重新检测', actions: [{ label: '查看 Agent', action: 'open_agents', args: { kind: agent, taskId } }] }
+      : { ...body, actions: body.actions.map((x) => ({ ...x, args: { taskId, ...(x.args ?? {}) } })) };
     this.events.append({ type: 'error', taskId, sessionId, data: { error } });
   }
 

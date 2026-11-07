@@ -37,3 +37,4 @@ claude-agent-acp 0.100.0 先发 `tool_call`（标题是占位的“Preparing fil
 ## 时间线
 
 - 2026-11-06 开启：第 1.2 步浏览器验收时发现。
+- 2026-11-08 重新规划（plans/phase-1.md 第 1 节）：目标步改为 1.3。

@@ -41,3 +41,4 @@ WorkBuddy 2.165.0 只打包了给它自己用的精简引擎，ACP 启动方式�
 
 - 2026-11-07 开启：排查 ISSUE-0015 时发现；按用户决定把 CodeBuddy 和 WorkBuddy 拆成两个 Agent。
 - 2026-11-07 用户在工作台里登录 CodeBuddy 独立版后，冒烟测试通过（docs/acceptance/step-1.2.md「CodeBuddy 独立版补测」）。CodeBuddy 部分已解决；WorkBuddy 精简引擎能否接入仍在调研，保持 investigating。
+- 2026-11-08 重新规划（plans/phase-1.md 第 1 节）：不阻塞第一阶段，WorkBuddy 精简引擎的研究推迟到 1.7 之后。

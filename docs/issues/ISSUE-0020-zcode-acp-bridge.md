@@ -31,3 +31,4 @@ ZCode 没有 ACP 模式，只有自家协议的 `zcode app-server`；发 ACP 的
 ## 时间线
 
 - 2026-11-07 开启：ZCode 纳入 Agent 管理，暂不支持对话；调研 zcode-acp 可行。
+- 2026-11-08 重新规划（plans/phase-1.md 第 1 节）：不变：用户决定先不接 zcode-acp，放在第一阶段之后。

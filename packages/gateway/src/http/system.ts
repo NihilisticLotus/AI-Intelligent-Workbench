@@ -25,6 +25,7 @@ export function systemRoutes(s: Services) {
         [FeatureKey.Worktrees]: false,
         [FeatureKey.Handoff]: false,
         [FeatureKey.Lan]: false,
+        [FeatureKey.SideChat]: false,
         [FeatureKey.PageAssets]: false,
         [FeatureKey.PageGenerate]: false,
         [FeatureKey.PageAutomations]: false,

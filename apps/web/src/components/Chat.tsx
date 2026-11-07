@@ -1,7 +1,10 @@
 // 对话流：用户消息、Agent 消息（含思考过程）、工具调用、计划、审批卡片、系统提示。
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import Markdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import type { ApiError, Approval, Task } from '@aic/protocol';
-import type { PlanEntry, ResolvedInfo, TimelineItem, ToolItem } from '../state/core';
+import { groupTurns, type PlanEntry, type ResolvedInfo, type TimelineItem, type ToolItem, type TurnItem, type TurnStep, type ViewItem } from '../state/core';
+import { platform } from '../platform';
 import { approve, loadDevices, useApp } from '../state/app';
 import { usePref } from '../state/prefs';
 import { useStore } from '../state/store';
@@ -10,7 +13,8 @@ import { modelSwitchKind, switchKindText, withDefaultActions } from '../lib/agen
 import { AgentBadge, ErrorNotice, actionNeedsIdle, toastErrorOf, useAgentName } from './ui';
 import { Icon } from './Icon';
 import { useNow } from './hooks';
-import { focusApprovalStore } from './focus';
+import { focusApprovalStore, requestComposerInsert } from './focus';
+import { FeatureKey } from '@aic/protocol';
 
 const busyStatuses = new Set<Task['status']>(['running', 'waiting', 'queued']);
 
@@ -27,8 +31,10 @@ export function TaskError({ error, task, compact, stale }: { error: ApiError; ta
 export function Stream({ task, items, loading, onOpenPlan }: { task: Task; items: TimelineItem[]; loading: boolean; onOpenPlan: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  // 一轮回复的过程收进“用时 N 秒”，最终回答单独显示（和 Codex 等常见 Agent 软件一致）
+  const view = useMemo(() => groupTurns(items), [items]);
   /** 最后一条用户消息的位置：它之后的错误才是“当前的” */
-  const lastUserIdx = useMemo(() => { for (let i = items.length - 1; i >= 0; i--) if (items[i]!.kind === 'user') return i; return -1; }, [items]);
+  const lastUserIdx = useMemo(() => { for (let i = view.length - 1; i >= 0; i--) if (view[i]!.kind === 'user') return i; return -1; }, [view]);
   // 用户在底部附近时，新内容到来自动滚到底；往上翻看时不打扰
   useLayoutEffect(() => {
     const el = ref.current;
@@ -50,17 +56,55 @@ export function Stream({ task, items, loading, onOpenPlan }: { task: Task; items
       <div className="stream-inner">
         {!items.length ? (
           <div className="empty stream-empty">{loading ? <p>正在载入对话…</p> : <><h3>还没有消息</h3><p>在下面的输入框里告诉 Agent 要做什么。</p></>}</div>
-        ) : items.map((it, i) => <Item key={it.key} it={it} task={task} onOpenPlan={onOpenPlan} live={i > lastUserIdx} />)}
+        ) : view.map((it, i) => <Item key={it.key} it={it} task={task} onOpenPlan={onOpenPlan} live={i > lastUserIdx} />)}
       </div>
+      <SelectionMenu container={ref} taskId={task.id} />
     </div>
   );
 }
 
-function Item({ it, task, onOpenPlan, live }: { it: TimelineItem; task: Task; onOpenPlan: () => void; live: boolean }) {
+/**
+ * 选中对话里的文字后出现的小菜单（对照 Codex，用户 2026-11-07）：
+ * - [添加到对话]：把选中的内容作为引用插进输入框（1.2 提供）
+ * - [在侧边聊天中提问]：侧边聊天上线后才显示（功能开关 chat.side，design.md 第 26 节）
+ */
+function SelectionMenu({ container, taskId }: { container: React.RefObject<HTMLDivElement | null>; taskId: string }) {
+  const sideChat = useApp((s) => !!s.hello?.features[FeatureKey.SideChat]);
+  const [sel, setSel] = useState<{ text: string; x: number; y: number } | null>(null);
+  useEffect(() => {
+    const el = container.current;
+    if (!el) return;
+    const update = () => {
+      const s = window.getSelection();
+      const text = s && !s.isCollapsed ? s.toString().trim() : '';
+      if (!s || !text || s.rangeCount === 0 || !el.contains(s.anchorNode) || !el.contains(s.focusNode)) { setSel(null); return; }
+      const r = s.getRangeAt(0).getBoundingClientRect();
+      setSel({ text, x: r.left + r.width / 2, y: r.top });
+    };
+    const onUp = () => setTimeout(update, 0);
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSel(null); else if (e.shiftKey) setTimeout(update, 0); };
+    const hide = () => setSel(null);
+    el.addEventListener('mouseup', onUp);
+    el.addEventListener('keyup', onKey);
+    el.addEventListener('scroll', hide);
+    return () => { el.removeEventListener('mouseup', onUp); el.removeEventListener('keyup', onKey); el.removeEventListener('scroll', hide); };
+  }, [container]);
+  if (!sel) return null;
+  const quote = sel.text.split('\n').map((l) => '> ' + l).join('\n') + '\n\n';
+  const add = () => { requestComposerInsert(taskId, quote); window.getSelection()?.removeAllRanges(); setSel(null); };
+  return (
+    <div className="sel-menu" role="toolbar" aria-label="选中内容的操作" style={{ left: sel.x, top: sel.y }}
+      onMouseDown={(e) => e.preventDefault()}>
+      <button type="button" onClick={add}>添加到对话</button>
+      {sideChat ? <button type="button" disabled title="侧边聊天在后续阶段提供">在侧边聊天中提问</button> : null}
+    </div>
+  );
+}
+
+function Item({ it, task, onOpenPlan, live }: { it: ViewItem; task: Task; onOpenPlan: () => void; live: boolean }) {
   switch (it.kind) {
     case 'user': return <UserMsg text={it.text} ts={it.ts} />;
-    case 'agent': return <AgentMsg it={it} fallbackAgent={task.agent} />;
-    case 'tools': return <div className="tools-group">{it.tools.map((t) => <ToolRow key={t.id} t={t} />)}</div>;
+    case 'turn': return <Turn it={it} task={task} />;
     case 'plan': return <PlanInline items={it.items} onOpen={onOpenPlan} />;
     case 'approval': return <ApprovalCard approval={it.approval} resolvedInLog={it.resolved} task={task} />;
     case 'note': return <div className={'sysnote' + (it.level === 'warn' ? ' warn' : '')} role="note"><span>{it.level === 'warn' ? <Icon name="warn" size={13} /> : null}{it.text}</span></div>;
@@ -91,25 +135,90 @@ function UserMsg({ text, ts }: { text: string; ts: number }) {
   );
 }
 
-function AgentMsg({ it, fallbackAgent }: { it: Extract<TimelineItem, { kind: 'agent' }>; fallbackAgent: string }) {
-  const kind = it.agent ?? fallbackAgent;
+/**
+ * 一轮回复：头像和名称只出现一次。
+ * - 过程（思考、中途说明、工具调用、审批）收进可折叠的“用时 N 秒”：进行中或有待处理的审批时展开，结束后自动收起
+ * - 最终回答（最后一段、之后没有工具调用）显示在下面，按 Markdown 渲染
+ */
+function Turn({ it, task }: { it: TurnItem; task: Task }) {
+  const kind = it.agent ?? task.agent;
   const name = useAgentName(kind);
-  // 事件里是模型 id，显示时换成 /agents 给的名称
   const modelName = useApp((s) => s.agents.find((a) => a.kind === kind)?.models.find((m) => m.id === it.model)?.name) ?? it.model;
+  const answer = it.answer;
+  const working = !it.done || (answer ? !answer.done : false);
+  const now = useNow(working ? 1000 : 3_600_000);
+  const hasProcess = it.steps.length > 0 || !!answer?.thought;
+  const [open, setOpen] = useState<boolean | null>(null);
+  // 有待处理的审批时必须展开；否则进行中且还没开始回答时展开，其余收起；用户手动开合后以用户为准
+  const isOpen = it.pendingApproval || (open ?? (working && !answer?.text));
+  const secs = durationText(Math.max(1000, (working ? now : it.endTs) - it.ts));
   return (
-    // 同一轮回复的后续片段不再重复头像和名称：整轮看起来是一条回复（用户报告：分段显示和常见 Agent 软件差别太大）
-    <article className={'msg' + (it.cont ? ' cont' : '')} aria-label={it.cont ? `${name} 的回复（续）` : `${name} 的消息`}>
-      <div className="who">{it.cont ? null : <AgentBadge kind={kind} />}</div>
+    <article className="msg turn" aria-label={`${name} 的回复`}>
+      <div className="who"><AgentBadge kind={kind} /></div>
       <div>
-        {it.cont ? null : <div className="head"><b>{name}</b>{modelName ? <span>{modelName}</span> : null}<span>{clock(it.ts)}</span></div>}
-        {it.thought ? <Thought it={it} /> : null}
-        <div className="text">
-          {it.text ? <RichText text={it.text} /> : null}
-          {!it.done && !it.thought && !it.text ? <p className="thinking" aria-label="正在生成">正在回复</p> : null}
-          {!it.done && it.text ? <span className="thinking" aria-hidden="true" /> : null}
-        </div>
+        <div className="head"><b>{name}</b>{modelName ? <span>{modelName}</span> : null}<span>{clock(it.ts)}</span></div>
+        {hasProcess ? (
+          <details className="process" open={isOpen}
+            onToggle={(e) => { const o = (e.currentTarget as HTMLDetailsElement).open; if (o !== isOpen) setOpen(o); }}>
+            <summary aria-label={(working ? `正在处理，已用时 ${secs}` : `用时 ${secs}`) + (isOpen ? '，点击收起过程' : '，点击查看过程')}>
+              {working ? <span className="thinking">正在处理 · {secs}</span> : <span>用时 {secs}</span>}<Icon name="right" />
+            </summary>
+            <div className="process-body">
+              {it.steps.map((st) => <Step key={st.key} st={st} task={task} />)}
+              {answer?.thought ? <Thought it={answer} /> : null}
+            </div>
+          </details>
+        ) : null}
+        {answer ? (
+          <div className="text answer">
+            <RichText text={answer.text} />
+            {!answer.done ? <span className="thinking" aria-hidden="true" /> : null}
+          </div>
+        ) : !hasProcess ? <p className="thinking" aria-label="正在生成">正在回复</p> : null}
       </div>
     </article>
+  );
+}
+
+/** 过程里的一步：中途的思考和说明、工具调用（连续的网页搜索合成一组）、审批 */
+function Step({ st, task }: { st: TurnStep; task: Task }) {
+  if (st.kind === 'approval') return <ApprovalCard approval={st.approval} resolvedInLog={st.resolved} task={task} />;
+  if (st.kind === 'agent') {
+    return (
+      <div className="step">
+        {st.thought ? <Thought it={st} /> : null}
+        {st.text ? <div className="text step-text"><RichText text={st.text} /></div> : null}
+      </div>
+    );
+  }
+  const groups: ToolItem[][] = [];
+  for (const t of st.tools) {
+    const prev = groups[groups.length - 1];
+    if (prev && isWebSearch(prev[0]!) && isWebSearch(t)) prev.push(t); else groups.push([t]);
+  }
+  return (
+    <div className="tools-group">
+      {groups.map((g) => (isWebSearch(g[0]!) ? <SearchGroup key={g[0]!.id} tools={g} /> : <ToolRow key={g[0]!.id} t={g[0]!} />))}
+    </div>
+  );
+}
+
+const isWebSearch = (t: ToolItem) => t.kind === 'fetch' || (t.kind === 'search' && /web|网页|网络/i.test(t.title + ' ' + (t.target ?? '')));
+
+/** 连续的网页搜索：折叠成“已搜索网页（N）”，展开后列出每次搜索的内容 */
+function SearchGroup({ tools }: { tools: ToolItem[] }) {
+  const running = tools.some((t) => t.state === 'running');
+  const label = (t: ToolItem) => {
+    const q = t.target && t.target !== t.title ? t.target : (t.output.split('\n').find((l) => l.trim()) ?? t.summary ?? t.title);
+    return q.length > 120 ? q.slice(0, 117) + '…' : q;
+  };
+  return (
+    <details className="tool search-group">
+      <summary><Icon name="right" className="chev" /><Icon name="search" size={13} />
+        <span className="verb">{running ? '正在搜索网页' : '已搜索网页'}</span><span className="end">{tools.length} 次</span>
+      </summary>
+      <ul className="search-list">{tools.map((t) => <li key={t.id}><Icon name="search" size={12} />{label(t)}</li>)}</ul>
+    </details>
   );
 }
 
@@ -306,29 +415,20 @@ function ApprovalCard({ approval, resolvedInLog, task }: { approval: Approval; r
 // 文本渲染：段落、``` 代码块、`行内代码`。不使用 innerHTML，Agent 输出不会被当成 HTML 执行
 // ---------------------------------------------------------------------
 export function RichText({ text }: { text: string }) {
-  const blocks: ReactNode[] = [];
-  const parts = text.split(/```/);
-  parts.forEach((part, i) => {
-    if (i % 2 === 1) {
-      const nl = part.indexOf('\n');
-      const lang = nl > 0 ? part.slice(0, nl).trim() : '';
-      const code = nl >= 0 && /^[\w+-]*$/.test(lang) ? part.slice(nl + 1) : part;
-      blocks.push(<pre key={i} aria-label={lang ? `${lang} 代码` : '代码'}><code>{code.replace(/\n$/, '')}</code></pre>);
-      return;
-    }
-    part.split(/\n{2,}/).forEach((para, j) => {
-      if (!para.trim()) return;
-      blocks.push(<p key={`${i}-${j}`}>{inline(para)}</p>);
-    });
-  });
-  return <>{blocks}</>;
-}
-function inline(s: string): ReactNode[] {
-  const out: ReactNode[] = [];
-  s.split(/(`[^`\n]+`)/).forEach((seg, i) => {
-    if (seg.startsWith('`') && seg.endsWith('`') && seg.length > 2) out.push(<code key={i}>{seg.slice(1, -1)}</code>);
-    else seg.split('\n').forEach((line, j, arr) => { out.push(<Fragment key={`${i}-${j}`}>{line}</Fragment>); if (j < arr.length - 1) out.push(<br key={`${i}-${j}-br`} />); });
-  });
-  return out;
+  return (
+    <div className="md">
+      <Markdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          a: ({ href, children }) => (
+            <a href={href} title={href} rel="noreferrer noopener"
+              onClick={(e) => { if (!href || !/^https?:\/\//i.test(href)) return; e.preventDefault(); void platform.openExternal(href); }}>{children}</a>
+          ),
+          pre: ({ children }) => <pre aria-label="代码">{children}</pre>,
+          table: ({ children }) => <div className="md-table"><table>{children}</table></div>,
+        }}
+      >{text}</Markdown>
+    </div>
+  );
 }
 

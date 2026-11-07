@@ -385,3 +385,73 @@ export function lastUserText(events: readonly EventEnvelope[]): string | null {
   }
   return null;
 }
+
+// ---------------------------------------------------------------------
+// 按“轮”展示（2026-11-07 用户对照 Codex 提出）：一轮回复 = 两条用户消息之间 Agent 的全部输出。
+// 过程（思考、中途的说明、工具调用、审批）收进一个可折叠的“用时 N 秒”，最终回答单独显示在下面。
+// ---------------------------------------------------------------------
+export type TurnStep =
+  | Extract<TimelineItem, { kind: 'agent' }>
+  | Extract<TimelineItem, { kind: 'tools' }>
+  | Extract<TimelineItem, { kind: 'approval' }>;
+export interface TurnItem {
+  kind: 'turn'; key: string; agent: string | null; model: string | null;
+  /** 第一段输出的时间、最后一次活动的时间 */
+  ts: number; endTs: number;
+  /** 过程：除最终回答之外的全部步骤（最终回答的思考也算过程） */
+  steps: TurnStep[];
+  /** 最终回答：最后一段、并且之后没有工具调用和审批的 Agent 输出 */
+  answer: Extract<TimelineItem, { kind: 'agent' }> | null;
+  done: boolean;
+  /** 有还没处理的审批：过程必须展开，审批卡片不能藏起来 */
+  pendingApproval: boolean;
+}
+export type ViewItem = Exclude<TimelineItem, { kind: 'agent' | 'tools' }> | TurnItem;
+
+export function groupTurns(items: readonly TimelineItem[]): ViewItem[] {
+  const out: ViewItem[] = [];
+  let buf: TurnStep[] = [];
+  let deferred: ViewItem[] = [];
+  const flush = () => {
+    if (!buf.length) { out.push(...deferred); deferred = []; return; }
+    const last = buf[buf.length - 1]!;
+    const answer = last.kind === 'agent' && last.text ? last : null;
+    const steps = answer ? buf.slice(0, -1) : buf.slice();
+    const agents = buf.filter((s): s is Extract<TurnStep, { kind: 'agent' }> => s.kind === 'agent');
+    const first = agents[0] ?? null;
+    let ts = Infinity;
+    let endTs = 0;
+    let running = false;
+    let pending = false;
+    for (const s of buf) {
+      if (s.kind === 'agent') {
+        ts = Math.min(ts, s.thoughtStart ?? s.ts);
+        endTs = Math.max(endTs, s.ts, s.thoughtEnd ?? 0);
+        if (!s.done) running = true;
+      } else if (s.kind === 'tools') {
+        for (const t of s.tools) {
+          ts = Math.min(ts, t.startTs);
+          endTs = Math.max(endTs, t.endTs ?? t.startTs);
+          if (t.state === 'running') running = true;
+        }
+      } else {
+        ts = Math.min(ts, s.approval.createdAt);
+        endTs = Math.max(endTs, s.approval.createdAt);
+        if (!s.resolved && s.approval.status === 'pending') pending = true;
+      }
+    }
+    out.push({
+      kind: 'turn', key: 'turn:' + buf[0]!.key, agent: first?.agent ?? null, model: first?.model ?? null,
+      ts: Number.isFinite(ts) ? ts : 0, endTs, steps, answer, done: !running && !pending, pendingApproval: pending,
+    });
+    out.push(...deferred);
+    buf = []; deferred = [];
+  };
+  for (const it of items) {
+    if (it.kind === 'agent' || it.kind === 'tools' || it.kind === 'approval') buf.push(it);
+    else if (it.kind === 'plan' && buf.length) deferred.push(it); // 计划放到这一轮的后面，不打断这一轮
+    else { flush(); out.push(it); }
+  }
+  flush();
+  return out;
+}

@@ -60,3 +60,52 @@ describe('时间线', () => {
     expect(agents[1]!.thoughtEnd).not.toBeNull();
   });
 });
+
+import { groupTurns } from './core';
+
+describe('按轮显示（对照 Codex）', () => {
+  const turnOf = (evs: EventEnvelope[]) => groupTurns(buildTimeline(evs));
+
+  it('一轮里的思考、中途说明、搜索都进“过程”，最后一段是最终回答', () => {
+    const v = turnOf([
+      ev('session.started', { agent: 'codex', model: 'm' }),
+      ev('message.user', { messageId: 'u1', text: '查一下' }),
+      ev('thought.delta', { messageId: 'a1', text: '想' }),
+      ev('message.delta', { messageId: 'a1', text: '我先查官方。' }),
+      ev('tool.start', { toolId: 'k1', kind: 'search', title: 'Web search', target: null }),
+      ev('tool.end', { toolId: 'k1', ok: true, summary: null }),
+      ev('thought.delta', { messageId: 'a2', text: '整理' }),
+      ev('message.delta', { messageId: 'a2', text: '## 结论\n\n**UE 5.9** 预计……' }),
+      ev('message.done', { messageId: 'a2' }),
+    ]);
+    expect(v.map((x) => x.kind)).toEqual(['user', 'turn']);
+    const t = v[1] as Extract<(typeof v)[number], { kind: 'turn' }>;
+    expect(t.answer?.text).toContain('## 结论');
+    expect(t.steps.map((s) => s.kind)).toEqual(['agent', 'tools']);
+    expect(t.done).toBe(true);
+  });
+
+  it('还在调用工具时没有最终回答，过程处于进行中', () => {
+    const v = turnOf([
+      ev('message.user', { messageId: 'u1', text: '查一下' }),
+      ev('message.delta', { messageId: 'a1', text: '我先查。' }),
+      ev('tool.start', { toolId: 'k1', kind: 'search', title: 'Web search', target: null }),
+    ]);
+    const t = v[1] as Extract<(typeof v)[number], { kind: 'turn' }>;
+    expect(t.answer).toBeNull();
+    expect(t.done).toBe(false);
+  });
+
+  it('有待处理的审批：标出 pendingApproval；用户消息把两轮分开', () => {
+    const approval = { id: 'ap1', taskId: 't1', sessionId: 's1', title: '执行', reason: '', detail: 'npm test', cwd: null, options: [], status: 'pending', decidedBy: null, createdAt: 5, expiresAt: null };
+    const v = turnOf([
+      ev('message.user', { messageId: 'u1', text: '跑测试' }),
+      ev('message.delta', { messageId: 'a1', text: '跑一下。' }),
+      ev('approval.requested', { approval }),
+      ev('message.user', { messageId: 'u2', text: '好' }),
+      ev('message.delta', { messageId: 'a2', text: '完成' }),
+    ]);
+    expect(v.map((x) => x.kind)).toEqual(['user', 'turn', 'user', 'turn']);
+    expect((v[1] as { pendingApproval: boolean }).pendingApproval).toBe(true);
+  });
+});

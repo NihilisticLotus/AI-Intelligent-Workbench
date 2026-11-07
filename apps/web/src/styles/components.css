@@ -81,3 +81,58 @@
 .msg.cont { margin-top: calc(var(--sp-4) * -1 + var(--sp-1)); }
 .msg.cont .thought { margin-top: 0; }
 .thought-body p { margin: 0 0 4px; }
+
+/* ---------- 一轮回复：过程折叠成“用时 N 秒”，最终回答单独显示（对照 Codex，用户 2026-11-07） ---------- */
+.process { margin: 2px 0 6px; }
+.process > summary {
+  list-style: none; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  color: var(--fg-3); font-size: var(--fs-13); padding: 2px 0; user-select: none;
+}
+.process > summary::-webkit-details-marker { display: none; }
+.process > summary:hover { color: var(--fg-2); }
+.process > summary .i { width: 12px; height: 12px; transition: transform var(--dur-fast, 120ms) ease; }
+.process[open] > summary .i { transform: rotate(90deg); }
+.process[open] > summary { border-bottom: 1px solid var(--line); padding-bottom: 6px; margin-bottom: 8px; width: 100%; }
+.process-body { display: flex; flex-direction: column; gap: 6px; padding-left: 2px; }
+.process-body .step-text { color: var(--fg-2); }
+.process + .answer { margin-top: 4px; }
+.msg.turn .answer { color: var(--fg-1); }
+
+.search-group > summary .i:not(.chev) { color: var(--fg-3); }
+.search-list { list-style: none; margin: 4px 0 4px 22px; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.search-list li { display: flex; align-items: center; gap: 6px; color: var(--fg-3); font-size: var(--fs-13); min-width: 0; }
+.search-list li { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---------- Markdown（Agent 回复、思考、用户消息） ---------- */
+.md { line-height: 1.7; overflow-wrap: anywhere; }
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 0.6em; }
+.md h1, .md h2, .md h3, .md h4 { color: var(--fg-1); font-weight: 600; line-height: 1.4; margin: 1em 0 0.4em; }
+.md h1 { font-size: 1.35em; } .md h2 { font-size: 1.2em; } .md h3 { font-size: 1.08em; } .md h4 { font-size: 1em; }
+.md strong { color: var(--fg-1); font-weight: 600; }
+.md a { color: var(--accent); text-decoration: none; }
+.md a:hover { text-decoration: underline; }
+.md ul, .md ol { margin: 0 0 0.6em; padding-left: 1.4em; }
+.md li { margin: 0.15em 0; }
+.md li > p { margin: 0; }
+.md blockquote { margin: 0 0 0.6em; padding: 2px 0 2px 12px; border-left: 3px solid var(--line-strong, var(--line)); color: var(--fg-2); }
+.md code { font-family: var(--font-code); font-size: 0.9em; background: var(--bg-3); padding: 1px 5px; border-radius: 4px; }
+.md pre { background: var(--bg-0); padding: 10px 12px; border-radius: var(--r-card, 8px); overflow: auto; margin: 0 0 0.6em; }
+.md pre code { background: none; padding: 0; }
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 1em 0; }
+.md-table { overflow-x: auto; margin: 0 0 0.6em; }
+.md table { border-collapse: collapse; font-size: var(--fs-13); }
+.md th, .md td { border: 1px solid var(--line); padding: 4px 10px; text-align: left; vertical-align: top; }
+.md th { background: var(--bg-2); color: var(--fg-1); font-weight: 600; }
+.thought-body .md { line-height: 1.6; }
+
+/* 选中对话文字后的小菜单 */
+.sel-menu {
+  position: fixed; z-index: 50; transform: translate(-50%, calc(-100% - 8px));
+  display: inline-flex; background: var(--bg-3); border-radius: var(--r-ctl, 6px); box-shadow: var(--shadow-pop, 0 6px 20px rgb(0 0 0 / .35)); overflow: hidden;
+}
+.sel-menu button { border: 0; background: transparent; color: var(--fg-1); font: inherit; font-size: var(--fs-13); padding: 6px 12px; cursor: pointer; }
+.sel-menu button + button { border-left: 1px solid var(--line); }
+.sel-menu button:hover:not(:disabled) { background: var(--bg-2); }
+.sel-menu button:disabled { color: var(--fg-3); cursor: default; }

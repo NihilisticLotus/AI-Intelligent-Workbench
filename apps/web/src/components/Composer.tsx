@@ -13,7 +13,7 @@ import {
 import { AgentBadge, ErrorNotice, asApiError, choiceDialog, confirmDialog, openMenu, toastErrorOf, useAgentName } from './ui';
 import { Icon } from './Icon';
 import { useDismiss } from './hooks';
-import { requestFocusApproval, switcherRequestStore, type SwitcherSection } from './focus';
+import { composerInsertStore, requestFocusApproval, switcherRequestStore, type SwitcherSection } from './focus';
 import { TaskError } from './Chat';
 
 /** 每个任务的草稿：切换任务时保留没发出去的内容（父组件按任务 id 重新挂载本组件） */
@@ -30,6 +30,16 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
   const ta = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => { drafts.set(task.id, text); }, [task.id, text]);
+
+  // 对话里选中文字后点 [添加到对话]：引用追加到输入框末尾，光标放到最后
+  const insertReq = useStore(composerInsertStore, (x) => x);
+  const lastInsert = useRef(0);
+  useEffect(() => {
+    if (!insertReq || insertReq.taskId !== task.id || insertReq.n === lastInsert.current) return;
+    lastInsert.current = insertReq.n;
+    setText((t) => (t.trim() ? t.replace(/\s*$/, '\n\n') : '') + insertReq.text);
+    requestAnimationFrame(() => { const el = ta.current; if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; } });
+  }, [insertReq, task.id]);
 
   const working = busyStatuses.has(task.status);
   const canSend = online && !working && !sending && text.trim().length > 0;

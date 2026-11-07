@@ -18,3 +18,9 @@ export const agentTestRequestStore = createStore<{ kind: string; n: number } | n
 export function requestAgentTest(kind: string) {
   agentTestRequestStore.set(() => ({ kind, n: ++n }));
 }
+
+// 选中对话里的文字 → [添加到对话]：把引用插进这个任务的输入框（对照 Codex，用户 2026-11-07）
+export const composerInsertStore = createStore<{ taskId: string; text: string; n: number } | null>(null);
+export function requestComposerInsert(taskId: string, text: string) {
+  composerInsertStore.set(() => ({ taskId, text, n: ++n }));
+}

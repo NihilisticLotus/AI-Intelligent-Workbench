@@ -357,6 +357,7 @@ export const FeatureKey = {
   Worktrees: 'workspace.worktree',   // 1.3 起
   Handoff: 'context.handoff',        // 1.4 起
   Lan: 'access.lan',                 // 1.5 起
+  SideChat: 'chat.side',             // 侧边聊天（design.md 第 26 节，后续阶段）；网页据此决定是否显示“在侧边聊天中提问”
   // 后续阶段的页面入口（侧栏按这些开关显示）；1.1 全部未开启
   PageAssets: 'pages.assets',
   PageGenerate: 'pages.generate',

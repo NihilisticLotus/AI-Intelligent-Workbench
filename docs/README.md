@@ -6,8 +6,8 @@
 
 | 文档 | 说明 |
 |---|---|
-| [design/design.md](design/design.md) | 架构设计 v0.4.3：第三方配置与登录指引、工作台独立 Agent、自定义 API、Gateway、上下文与交接、权限、存储及扩展 |
-| [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.2：第三方原生配置、独立服务归属、切换与错误提示边界、令牌、布局和组件规格 |
+| [design/design.md](design/design.md) | 架构设计 v0.4.4：第三方原生配置、独立 Agent 多 API / 多模型、能力识别与执行器底线、Gateway、上下文、权限及扩展 |
+| [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.3：第三方原生配置、独立服务与多模型、能力来源 / 未知 / 冲突、动态推理选项、布局和组件规格 |
 | [prototype/index.html](prototype/index.html) | 可点击原型（双击打开）：工作台、看板、Agent、资产、生成、自动化、监控、能力 |
 
 ## 调研

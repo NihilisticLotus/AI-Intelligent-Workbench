@@ -298,6 +298,11 @@ export const EventEnvelope = z.discriminatedUnion('type', [
   })),
   /** 降级、恢复失败、强度被重置等需要告诉用户的情况：对话里的灰色提示行 */
   ev('session.notice', z.object({ level: z.enum(['info', 'warn']), text: z.string(), id: Id.optional() })),
+  /** 目录变化只带身份，不携带地址、凭据、能力原文或工具内容。 */
+  ev('independent.catalog_changed', z.object({
+    scope: z.enum(['service', 'model', 'default']), action: z.enum(['created', 'updated', 'deleted']),
+    serviceId: Id.nullable(), modelId: Id.nullable(),
+  }).strict()),
 ]);
 export type EventEnvelope = z.infer<typeof EventEnvelope>;
 export type EventType = EventEnvelope['type'];
@@ -410,6 +415,8 @@ export const FeatureKey = {
   // 2026-11-07 新增
   AgentToggle: 'agents.toggle',      // Agent 启用开关（PATCH /agents/:kind { enabled }）
   Drafts: 'tasks.draft',             // 任务草稿按任务保存（GET / PUT /tasks/:id/draft）
+  IndependentCatalog: 'independent.catalog', // 独立服务和模型配置，不表示执行器已就绪
+  IndependentRuntime: 'independent.runtime',
 } as const;
 
 // ---------- 设备与配对 ----------
@@ -660,3 +667,88 @@ export const IndependentToolRecord = IndependentToolIntent.extend({
   outcome: IndependentCommandOutcome.nullable(),
 });
 export type IndependentToolRecord = z.infer<typeof IndependentToolRecord>;
+
+// ---------- 独立 Agent：服务、模型与逐字段能力证据 ----------
+export const IndependentApiProtocol = z.enum(['chat_completions', 'responses', 'anthropic_messages']);
+export type IndependentApiProtocol = z.infer<typeof IndependentApiProtocol>;
+/** 不接受查询参数中的凭据；明文 HTTP 仅允许显式配置的本机服务。 */
+export const IndependentBaseUrl = z.string().min(1).max(2000).refine((value) => {
+  try {
+    if (/[\s\\\x00-\x1f\x7f]/.test(value)) return false;
+    const u = new URL(value);
+    return !u.username && !u.password && !u.search && !u.hash &&
+      (u.protocol === 'https:' || u.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(u.hostname));
+  } catch { return false; }
+}, { message: '需要无凭据、查询参数和片段的 HTTPS 地址，本机服务可用 HTTP' });
+const IndependentName = z.string().trim().min(1).max(100);
+const IndependentKey = z.string().min(8).max(8192).regex(/^[^\s\x00-\x1f\x7f]+$/, '密钥不能包含空白或控制字符');
+const Revision = z.number().int().positive();
+const ServiceConfig = z.object({
+  name: IndependentName, protocol: IndependentApiProtocol, baseUrl: IndependentBaseUrl,
+  authentication: z.enum(['api_key', 'none']), apiVersion: z.string().min(1).max(100).nullable(),
+  providerId: z.string().min(1).max(100).nullable(), plan: z.string().min(1).max(100).nullable(), enabled: z.boolean(),
+}).strict();
+export const CreateIndependentServiceBody = ServiceConfig.extend({ apiKey: IndependentKey.optional() }).strict();
+export type CreateIndependentServiceBody = z.infer<typeof CreateIndependentServiceBody>;
+export const PatchIndependentServiceBody = ServiceConfig.partial().extend({ expectedRevision: Revision, apiKey: IndependentKey.nullable().optional() }).strict();
+export type PatchIndependentServiceBody = z.infer<typeof PatchIndependentServiceBody>;
+export const IndependentService = ServiceConfig.extend({
+  id: Id, revision: Revision, configRevision: Revision, hasSecret: z.boolean(), secretHint: z.string().nullable(), createdAt: Ts, updatedAt: Ts,
+}).strict();
+export type IndependentService = z.infer<typeof IndependentService>;
+
+const CapabilityLimit = z.number().int().positive().max(1_000_000_000).nullable();
+const CapabilityFlag = z.boolean().nullable();
+const CapabilityList = z.array(z.string().min(1).max(100)).max(32).refine((v) => new Set(v).size === v.length, '能力列表不能重复').nullable();
+const CapabilityShape = {
+  contextWindow: CapabilityLimit, inputLimit: CapabilityLimit, outputLimit: CapabilityLimit,
+  imageInput: CapabilityFlag, tools: CapabilityFlag, streaming: CapabilityFlag, streamUsage: CapabilityFlag, structuredOutput: CapabilityFlag,
+  thinking: CapabilityFlag, thinkingCanDisable: CapabilityFlag, effortLevels: CapabilityList, defaultEffort: z.string().min(1).max(100).nullable(),
+  thinkingBudgetMin: z.number().int().nonnegative().max(1_000_000_000).nullable(), thinkingBudgetMax: CapabilityLimit,
+  inputModalities: CapabilityList, outputModalities: CapabilityList,
+};
+export const IndependentCapabilityValues = z.object(CapabilityShape).strict();
+export type IndependentCapabilityValues = z.infer<typeof IndependentCapabilityValues>;
+export const IndependentCapabilityField = IndependentCapabilityValues.keyof();
+export type IndependentCapabilityField = z.infer<typeof IndependentCapabilityField>;
+/** null 表示恢复自动值，不把未知转成 false 或零。 */
+export const IndependentCapabilityPatch = IndependentCapabilityValues.partial();
+export type IndependentCapabilityPatch = z.infer<typeof IndependentCapabilityPatch>;
+const CapabilityValue = z.union([z.boolean(), z.number().int().nonnegative().max(1_000_000_000), z.string().min(1).max(100), z.array(z.string().min(1).max(100)).max(32)]).nullable();
+export const IndependentCapabilityScope = z.object({
+  serviceId: Id, configRevision: Revision, protocol: IndependentApiProtocol,
+  apiVersion: ServiceConfig.shape.apiVersion, providerId: ServiceConfig.shape.providerId, plan: ServiceConfig.shape.plan, remoteModelId: z.string().min(1).max(200),
+}).strict();
+export type IndependentCapabilityScope = z.infer<typeof IndependentCapabilityScope>;
+export const IndependentCapabilityEvidence = z.object({
+  id: Id, field: IndependentCapabilityField, value: CapabilityValue,
+  kind: z.enum(['manual', 'endpoint', 'official', 'catalog', 'observation']), scope: IndependentCapabilityScope,
+  sourceUrl: IndependentBaseUrl.nullable(), sourceVersion: z.string().min(1).max(200), fieldPath: z.string().min(1).max(200),
+  observedAt: Ts, expiresAt: Ts.nullable(),
+}).strict().superRefine((v, ctx) => {
+  if (!CapabilityShape[v.field].safeParse(v.value).success) ctx.addIssue({ code: 'custom', path: ['value'], message: '能力字段与值的类型不一致' });
+  if (v.expiresAt !== null && v.expiresAt < v.observedAt) ctx.addIssue({ code: 'custom', path: ['expiresAt'], message: '失效时间早于获取时间' });
+});
+export type IndependentCapabilityEvidence = z.infer<typeof IndependentCapabilityEvidence>;
+export const IndependentCapabilityResolution = z.object({
+  field: IndependentCapabilityField, value: CapabilityValue, sourceKind: IndependentCapabilityEvidence.shape.kind.nullable(),
+  conflict: z.boolean(), stale: z.boolean(), evidenceIds: z.array(Id),
+}).strict();
+export type IndependentCapabilityResolution = z.infer<typeof IndependentCapabilityResolution>;
+export const CreateIndependentModelBody = z.object({ remoteModelId: z.string().min(1).max(200), name: IndependentName }).strict();
+export type CreateIndependentModelBody = z.infer<typeof CreateIndependentModelBody>;
+export const PatchIndependentModelBody = z.object({ expectedRevision: Revision, name: IndependentName.optional(), enabled: z.boolean().optional() }).strict();
+export type PatchIndependentModelBody = z.infer<typeof PatchIndependentModelBody>;
+export const PatchIndependentOverridesBody = z.object({ expectedRevision: Revision, values: IndependentCapabilityPatch }).strict();
+export type PatchIndependentOverridesBody = z.infer<typeof PatchIndependentOverridesBody>;
+export const IndependentModel = z.object({
+  id: Id, serviceId: Id, remoteModelId: z.string(), name: z.string(), enabled: z.boolean(), revision: Revision,
+  capabilities: z.array(IndependentCapabilityResolution), evidence: z.array(IndependentCapabilityEvidence), createdAt: Ts, updatedAt: Ts,
+}).strict();
+export type IndependentModel = z.infer<typeof IndependentModel>;
+export const IndependentSelection = z.object({ serviceId: Id, modelId: Id }).strict();
+export type IndependentSelection = z.infer<typeof IndependentSelection>;
+export const IndependentDefault = z.object({ selection: IndependentSelection.nullable() }).strict();
+export type IndependentDefault = z.infer<typeof IndependentDefault>;
+export const IndependentModelBinding = IndependentSelection.extend({ taskId: Id, configRevision: Revision, modelRevision: Revision, createdAt: Ts }).strict();
+export type IndependentModelBinding = z.infer<typeof IndependentModelBinding>;

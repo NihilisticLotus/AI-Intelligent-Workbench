@@ -987,3 +987,19 @@ Windows 机制依据：[Job Objects](https://learn.microsoft.com/en-us/windows/w
 #### 2026-11-08 基础组件实现进度
 
 已在 Gateway 落地 command-host / commands / command-tool / tool-journal 及迁移 v6；35 项新增默认测试覆盖本节所列普通进程生命周期、严格审批绑定、持久化故障与跨进程恢复。实际结果见 step-1.3 新增节。未接入正式任务 / 审批 API、模型循环、完整会话与界面，不能把这一段视为 9.16 八组门槛整体通过。正常退出尝试删除当次私有 HOME；崩溃或清理失败遗留目录的后续管理尚未接入，仍由 ISSUE-0029 跟踪。
+
+### 9.18 独立服务、模型与能力目录的实现契约（2026-11-08）
+
+按 9.16 的多服务 / 多模型要求实现工作台自己的目录，不复用第三方 profiles。首批配置协议为 chat_completions、responses、anthropic_messages；保存这些协议不表示模型执行路径已经就绪，具体运行与请求语义继续按离线门槛接入。
+
+- protocol 追加 IndependentService / Model、创建 / 修订请求、能力字段 / 证据 / 解析结果、默认选择和任务绑定；旧 AgentKind / ModelInfo 不改变。hello 分别报告 independent.catalog 与 independent.runtime，配置能力不能冒充可执行任务。
+- 路由前缀为 `/api/v1/independent`。services 支持 GET / POST，services/:serviceId 支持 GET / PATCH / DELETE；其 models 支持 GET / POST，models/:modelId 支持 GET / PATCH / DELETE，PATCH models/:modelId/overrides 管理人工值。GET / PUT default 显式读取 / 设置 / 清空默认选择；不因添加、导入或失败自动选第一个模型。普通列表返回 items / nextCursor，目录先限制最多 100 个服务、每服务 500 个模型，完整返回且 nextCursor 为 null。
+- 服务保存名称、协议、地址、鉴权方式（api_key / none）、API 版本、provider 身份与套餐、启用状态。地址只接受无用户信息 / 查询 / 片段的 HTTPS，显式本机服务可用 HTTP；不从目录改变目标。Key 只写，复用 DPAPI，读取只含 hasSecret / secretHint。无认证必须明确选择 none；缺 Key 的 api_key 服务不能运行，不使用环境变量兜底。
+- 新迁移 v7 只追加独立 services / models / task bindings。服务 revision 用于乐观并发，configRevision 只在路由 / 凭据 / API 版本 / provider / 套餐变动时增加，重命名和启用不改变能力范围；模型独立 revision。密钥异步加密后再次核对 revision，冲突时清理本次新密文，不覆盖其他请求。删除只触及工作台本服务和密钥；任务绑定存在时拒绝删除，不改绑其他服务。停用和配置修订导致原绑定失效，后续运行须明确核对，不悄悄换路由。
+- 模型以服务内原样 remoteModelId 唯一；本地模型 ID 不透明。添加重复 ID 幂等返回旧模型，保留名称、人工值、启用和默认选择。没有路由允许远端模型数据夹带 auth / URL / 包名 / 执行模板。
+- 每个能力字段独立存值和证据：contextWindow / inputLimit / outputLimit、图片 / 模态、工具 / 流式 / 流用量 / 结构化输出、thinking / canDisable / effort 列表 / 默认 effort / 预算上下限。数值或布尔未知保留 null，不补猜测窗口或通用档位。证据绑定服务、configRevision、协议、API 版本、provider、套餐和远端模型 ID，含来源 / 版本 / 原字段路径 / 获取与失效日期。
+- 人工覆盖按字段保存，null 清除此字段覆盖、恢复自动值；刷新不删除覆盖。自动优先级为 endpoint → official → catalog；observation 只保留有限样本，不当作通用能力。先选适用范围，优先新鲜来源，再选优先级；同级不同来源冲突返回未知并标 conflict，不能取最后下载或最大窗口。只有过期证据时保留值并标 stale；旧 configRevision 的证据保留可查但不生效。
+- 来源证据入口先供 Gateway 内部的已校验元数据适配器使用，不给客户端提供伪装接口声明的写入入口。相同范围、来源种类、URL 和字段路径的刷新替换该来源当前值，其他来源保留；每字段最多 16 个来源，限制存储体积。未来发现解析器须覆盖坏条目、分页、未知 schema 与安全网络边界；本段不启动网络元数据刷新或付费探测，不把手填目录记成自动识别已完成。
+- `independent.catalog_changed` 全局事件只带 scope / action / serviceId / modelId；变更与事件先持久化，再通知。每个 REST 请求继续经过令牌 / Host / Origin。凭据不进事件、审计详情或错误原文；审计仅身份。正式网页、在线发现和模型循环仍须后续实现并实操验收。
+
+验证至少覆盖两服务各两个模型 / 重名 ID、追加与重复添加不覆盖、人工 false / 清除 / 多源冲突与过期、范围变动失效、默认项不自动改变、密钥加密 / 轮换 / 并发冲突 / 失败脱敏、任务绑定阻止删除与不回退、迁移保留旧表，以及每组路由的鉴权和事件内容边界。

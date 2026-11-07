@@ -753,6 +753,110 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
     set(v) { const a = sess.all(); a[sessKey] = { ...sess.get(), ...v }; try { localStorage.setItem('aic-sess', JSON.stringify(a)); } catch (e) { /* 忽略 */ } },
   };
   Object.assign(window, { aicAccounts: accounts, aicEfforts: efforts, aicAgentStatus: status, aicSess: sess });
+
+  // ---------- Agent · 模型 · 思考强度 选择器（新建任务和对话输入框共用，2026-11-07 用户要求统一成新建任务的样式） ----------
+  // 第一级只列 Agent（徽标、名称、当前模型 · 思考强度，或状态 / “N 个模型”）；移上去或按 →，在旁边展开：
+  //   模型列表 → 思考强度（分段，Agent 支持时）→ 账号（opts.accounts 为 true 且有多个时）。
+  // 打开时自动展开当前 Agent 那一级，思考强度一眼就能看到。再点一次按钮、Esc、点外面都会收起。
+  // opts：{ agent, model, effort, account, list（可选的 Agent key）, hint（底部说明）, accounts, onPick({agent, model, effort}), onEffort(e), onAccount(a) }
+  let picker = null;
+  const closePicker = () => {
+    if (!picker) return null;
+    const p = picker; picker = null;
+    p.root.remove(); p.sub?.remove();
+    p.anchor.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('pointerdown', p.off, true);
+    return p.anchor;
+  };
+  const place = (el, r, below = true) => {
+    const h = el.offsetHeight, w = el.offsetWidth;
+    // 按钮在屏幕下半部分（例如对话输入框）时往上开，否则往下开；放不下再换方向
+    const up = r.top > innerHeight / 2 ? r.top - h - 4 >= 8 : !(below && r.bottom + 4 + h <= innerHeight - 8);
+    const top = up ? Math.max(8, r.top - h - 4) : r.bottom + 4;
+    el.style.top = top + 'px';
+    el.style.left = Math.max(8, Math.min(r.left, innerWidth - w - 8)) + 'px';
+  };
+  window.aicAgentPicker = (anchor, opts) => {
+    if (picker && picker.anchor === anchor) { closePicker(); anchor.focus(); return; }
+    closePicker(); $$('.menu').forEach((m) => m.remove());
+    const list = opts.list || Object.keys(agents);
+    const sel = { agent: opts.agent, model: opts.model, effort: opts.effort, account: opts.account };
+    // 每个 Agent 的“待选”思考强度：当前 Agent 用当前值，其他 Agent 默认“中”
+    const eff = Object.fromEntries(list.map((k) => [k, efforts[k] ? (k === sel.agent && sel.effort ? sel.effort : (efforts[k].includes('中') ? '中' : efforts[k][0])) : null]));
+    const root = document.createElement('div');
+    root.className = 'menu ap-root'; root.setAttribute('role', 'menu'); root.setAttribute('aria-label', '选择 Agent');
+    const metaOf = (k) => {
+      if (k === sel.agent) return `<span class="meta">${esc(sel.model)}${sel.effort ? ' · 思考 ' + esc(sel.effort) : ''} ✓</span>`;
+      const st = status[k];
+      if (st && st !== '空闲') return `<span class="meta attn">${esc(st)}</span>`;
+      return `<span class="meta">${agents[k][1].length} 个模型</span>`;
+    };
+    const paintRoot = () => {
+      root.innerHTML = list.map((k) => `<button type="button" role="menuitem" class="mi-has" data-k="${k}" aria-haspopup="menu" aria-expanded="false"><span class="ag ${k}" aria-hidden="true">${letter[k] || agents[k][0][0]}</span><span>${esc(agents[k][0])}</span>${metaOf(k)}${ic('right')}</button>`).join('')
+        + (opts.hint ? `<div class="ap-hint">${opts.hint}</div>` : '');
+    };
+    paintRoot();
+    document.body.appendChild(root);
+    place(root, anchor.getBoundingClientRect());
+    anchor.setAttribute('aria-expanded', 'true');
+    picker = { anchor, root, sub: null, k: null };
+
+    const items = () => $$('.mi-has', root);
+    const openSub = (k, focus) => {
+      const item = $(`.mi-has[data-k="${k}"]`, root);
+      if (picker.k === k && picker.sub) { if (focus) $('button', picker.sub)?.focus(); return; }
+      picker.sub?.remove();
+      items().forEach((x) => x.setAttribute('aria-expanded', String(x === item)));
+      const sub = document.createElement('div');
+      sub.className = 'menu sub ap-sub'; sub.setAttribute('role', 'menu'); sub.setAttribute('aria-label', `${agents[k][0]} 的模型和思考强度`);
+      const ef = efforts[k];
+      const accs = opts.accounts && k === sel.agent && accounts[k].length > 1 ? accounts[k] : null;
+      sub.innerHTML = `<div class="ap-label">模型</div>
+        ${agents[k][1].map((m) => { const v = window.aicVision?.(k, m); return `<button type="button" role="menuitemradio" aria-checked="${k === sel.agent && m === sel.model}" class="${k === sel.agent && m === sel.model ? 'on' : ''}" data-m="${esc(m)}">${esc(m)}${v === false ? '<span class="ap-tag" title="这个模型看不了图片">不能看图</span>' : ''}</button>`; }).join('')}
+        <div class="ap-label">思考强度</div>
+        ${ef ? `<div class="ap-seg" role="radiogroup" aria-label="${agents[k][0]} 的思考强度">${ef.map((e) => `<button type="button" role="radio" aria-checked="${e === eff[k]}" data-e="${e}">${e}</button>`).join('')}</div>`
+          : `<p class="ap-note">由模型自己决定，这里不能调</p>`}
+        ${accs ? `<div class="ap-label">账号</div>${accs.map((a) => `<button type="button" role="menuitemradio" aria-checked="${a === sel.account}" class="${a === sel.account ? 'on' : ''}" data-a="${esc(a)}">${esc(a)}</button>`).join('')}` : ''}`;
+      document.body.appendChild(sub);
+      const r = item.getBoundingClientRect(), w = sub.offsetWidth, h = sub.offsetHeight;
+      sub.style.left = (r.right + 4 + w <= innerWidth - 8 ? r.right + 4 : Math.max(8, r.left - w - 4)) + 'px';
+      sub.style.top = Math.max(8, Math.min(r.top - 4, innerHeight - h - 8)) + 'px';
+      picker.sub = sub; picker.k = k;
+      sub.addEventListener('click', (e) => {
+        const b = e.target.closest('button'); if (!b) return;
+        if (b.dataset.m) { const pick = { agent: k, model: b.dataset.m, effort: eff[k] }; closePicker(); anchor.focus(); opts.onPick?.(pick); }
+        else if (b.dataset.e) {
+          eff[k] = b.dataset.e;
+          $$('.ap-seg button', sub).forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+          // 当前 Agent 的思考强度立即生效（不关菜单）；其他 Agent 的要选了模型才算数
+          if (k === sel.agent) { sel.effort = eff[k]; opts.onEffort?.(eff[k]); const it = $(`.mi-has[data-k="${k}"] .meta`, root); if (it) it.outerHTML = metaOf(k); }
+        } else if (b.dataset.a) { closePicker(); anchor.focus(); opts.onAccount?.(b.dataset.a); }
+      });
+      sub.addEventListener('keydown', (e) => {
+        const bs = $$('button', sub), i = bs.indexOf(document.activeElement);
+        if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePicker(); anchor.focus(); }
+        else if (e.key === 'ArrowLeft') { e.preventDefault(); item.focus(); }
+        else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); bs[(i + (e.key === 'ArrowDown' ? 1 : bs.length - 1)) % bs.length]?.focus(); }
+      });
+      if (focus) $('button', sub)?.focus();
+    };
+    root.addEventListener('mouseover', (e) => { const it = e.target.closest('.mi-has'); if (it) openSub(it.dataset.k, false); });
+    root.addEventListener('click', (e) => { const it = e.target.closest('.mi-has'); if (it) openSub(it.dataset.k, true); });
+    root.addEventListener('keydown', (e) => {
+      const it = e.target.closest('.mi-has'); if (!it) return;
+      const all = items(), i = all.indexOf(it);
+      if (e.key === 'ArrowRight') { e.preventDefault(); openSub(it.dataset.k, true); }
+      else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); const n = all[(i + (e.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length]; n.focus(); openSub(n.dataset.k, false); }
+      else if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closePicker(); anchor.focus(); }
+    });
+    picker.off = (e) => { if (!root.contains(e.target) && !picker?.sub?.contains(e.target) && !anchor.contains(e.target)) closePicker(); };
+    document.addEventListener('pointerdown', picker.off, true);
+    // 默认展开当前 Agent 那一级，焦点放在它上面
+    const curItem = $(`.mi-has[data-k="${sel.agent}"]`, root) || items()[0];
+    curItem?.focus();
+    if (curItem) openSub(curItem.dataset.k, false);
+  };
+  window.aicAgentPickerClose = closePicker;
   const lastAgent = $$('.msg:not(.user)', inner || document).pop();
   const startKey = (lastAgent && Object.keys(letter).find((k) => $('.ag', lastAgent).classList.contains(k))) || 'claude';
   const cur = window.aicCur = page === 'workbench'
@@ -774,12 +878,13 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
     }
     const btns = $$('button', sw);
     const render = () => {
-      btns[0].innerHTML = `<span class="ag ${cur.agent}" aria-hidden="true" style="width:16px;height:16px;font-size:9px">${letter[cur.agent]}</span>${agents[cur.agent][0]}${ic('down')}`;
-      btns[0].setAttribute('aria-label', '切换 Agent，当前 ' + agents[cur.agent][0]);
-      btns[1].innerHTML = `<span class="muted">${cur.account}</span>${ic('down')}`;
-      btns[1].setAttribute('aria-label', '切换账号，当前 ' + cur.account);
-      btns[2].innerHTML = `${cur.model}${cur.effort ? `<span class="muted">· 思考 ${cur.effort}</span>` : ''}${ic('down')}`;
-      btns[2].setAttribute('aria-label', `切换模型，当前 ${cur.model}${cur.effort ? '，思考强度' + cur.effort : ''}`);
+      // 和新建任务一样只用一个按钮：徽标 Agent 模型 · 思考 X ▾；账号在展开后的二级菜单里（只有多个账号时）
+      btns[0].innerHTML = `<span class="ag ${cur.agent}" aria-hidden="true" style="width:16px;height:16px;font-size:9px">${letter[cur.agent]}</span>${agents[cur.agent][0]}<span class="muted">${esc(cur.model)}${cur.effort ? ' · 思考 ' + esc(cur.effort) : ''}</span>${ic('down')}`;
+      btns[0].setAttribute('aria-label', `切换 Agent、模型、思考强度和账号，当前 ${agents[cur.agent][0]} · ${cur.model}${cur.effort ? ' · 思考强度' + cur.effort : ''} · ${cur.account}`);
+      btns[0].title = `账号：${cur.account}`;
+      btns[1].hidden = true; btns[2].hidden = true;
+      // 换了模型：输入框里的图片提示要跟着更新（attach.js）
+      document.dispatchEvent(new CustomEvent('aic-model-change'));
       const opt = (kind, val, label, meta, sel) => `<div class="opt" role="option" tabindex="0" data-kind="${kind}" data-val="${val}" aria-selected="${sel}">${label}<span class="meta"${meta === '登录已过期' ? ' style="color:var(--attn)"' : ''}>${meta}</span></div>`;
       const ef = efforts[cur.agent];
       // Agent 一级；鼠标移到某个 Agent 上（或按 →）展开它的模型，直接选“Agent · 模型”（二级选择，Agent 多了也好找）
@@ -824,6 +929,11 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
       });
       return true;
     };
+    // 给其他脚本用（例如附件提示里的“换成能看图的模型”）：和在切换器里选一样
+    window.aicSwitchTo = (agent, model) => {
+      if (agent === cur.agent) { if (model !== cur.model) choose({ dataset: { kind: 'model', val: model } }); }
+      else choose({ dataset: { kind: 'agent', val: agent, model } });
+    };
     // 切回原会话：走原生恢复，可选恢复工作区到交接时的检查点
     window.aicSwitchBack = (h) => modal({
       title: `切回 ${agents[h.back.agent][0]}？`,
@@ -857,8 +967,7 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
           document.querySelectorAll('.toast[data-key="effort"]').forEach((t) => t.remove());
           toast(`思考强度：${val}，从下一条消息开始生效。越高越仔细，也更慢、更耗额度`);
           [...document.querySelectorAll('.toasts .toast')].pop()?.setAttribute('data-key', 'effort');
-          // 等这次点击事件处理完再重绘，否则被点的按钮先脱离页面，弹出层会被当成“点了外面”而关闭
-          setTimeout(() => { render(); $(`.seg button[data-val="${val}"]`, pop)?.focus(); });
+          render();
         }
         return;
       }
@@ -887,9 +996,21 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
         $('.compose-box textarea')?.focus();
       }
     };
-    pop.addEventListener('click', (e) => { const o = e.target.closest('.opt, .seg button'); if (o) choose(o); });
-    pop.addEventListener('keydown', (e) => { const o = e.target.closest('.opt'); if (o && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); choose(o); } });
-    btns.forEach((b) => b.addEventListener('click', () => setTimeout(() => { if (!pop.hidden) $('.opt[aria-selected="true"]', pop)?.focus(); })));
+    // 2026-11-07 起改用和新建任务相同的选择器（aicAgentPicker）：一个按钮，Agent → 模型 · 思考强度 · 账号
+    // 原来的弹出层留在页面里但不再打开（其他脚本可能查找 #pop-switch）
+    btns.forEach((b) => { b.removeAttribute('data-popover'); b.dataset.wired = '1'; b.setAttribute('aria-haspopup', 'menu'); });
+    const fake = (kind, val, model) => ({ dataset: { kind, val, ...(model ? { model } : {}) } });
+    const openPicker = (b) => window.aicAgentPicker(b, {
+      agent: cur.agent, model: cur.model, effort: cur.effort, account: cur.account, accounts: true,
+      hint: '换模型、账号、思考强度都保留完整上下文。换 Agent 只是选定下一条消息交给谁，发送时才交接。',
+      onPick: (p) => {
+        if (p.agent !== cur.agent) { choose(fake('agent', p.agent, p.model)); if (cur.agent === p.agent && p.effort) { cur.effort = p.effort; render(); if (pending) pendingNote(); } }
+        else if (p.model !== cur.model) choose(fake('model', p.model));
+      },
+      onEffort: (e) => choose(fake('effort', e)),
+      onAccount: (a) => choose(fake('account', a)),
+    });
+    btns.forEach((b) => b.addEventListener('click', (e) => { e.stopPropagation(); openPicker(b); }));
   });
 
   // ---------- 输入框：发消息、附件、权限 ----------
@@ -898,10 +1019,16 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
     const sendBtn = $('.compose-bar .btn.primary', box);
     const send = () => {
       // 对话注释（sidechat.js 的 aicAnnos）：附在消息后面一起发出，发出后清空
+      // 附件（attach.js）：模型看不了图片时 take() 会拦下发送
+      const files = att ? att.take() : [];
+      if (files === null) return;
       const annos = window.aicAnnos?.take() ?? '';
       const text = [ta.value.trim(), annos].filter(Boolean).join('\n\n');
-      if (!text) { ta.focus(); return; }
-      add(userMsg(text));
+      if (!text && !files.length) { ta.focus(); return; }
+      inner.insertAdjacentHTML('beforeend', userMsg(text || '（只发了附件）'));
+      const msg = inner.lastElementChild;
+      if (files.length) $('.text', msg).insertAdjacentHTML('beforeend', window.aicAttachHtml(files));
+      if (stream) stream.scrollTop = stream.scrollHeight;
       ta.value = '';
       // 发消息算一次活动：侧栏里这个任务排到所在项目/分组的最前面
       const h1 = $('.main-head h1')?.textContent;
@@ -915,7 +1042,14 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
     wire(sendBtn)?.addEventListener('click', send);
     ta?.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
     const attach = $('[aria-label="添加附件"]', box);
-    wire(attach)?.addEventListener('click', () => toast('正式版会打开文件选择框，也可以直接把文件拖进输入框。', 'demo'));
+    wire(attach);
+    attach?.setAttribute('title', '添加附件（也可以 Ctrl+V 粘贴图片，或把文件拖进来）');
+    // 选“换成能看图的模型”：同一个 Agent 走会话内切换；别的 Agent 和切换器一样，发送时才交接
+    const att = ta && window.aicAttach?.(box, {
+      textarea: ta, pickBtn: attach,
+      target: () => ({ agent: cur.agent, model: cur.model }),
+      switchTo: (agent, model) => window.aicSwitchTo?.(agent, model),
+    });
     const perm = $('.perm-chip', box);
     wire(perm)?.addEventListener('click', () => {
       // 每个权限级别一个图标：只读=眼睛，需审批=盾牌，工作区内自动=带勾的盾牌，全自动=打开的锁（琥珀色提醒）

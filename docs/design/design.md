@@ -1134,6 +1134,7 @@ audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, action TEXT, de
 - 交接：分隔条"已从 Claude Code（Opus 5.5）交接到 Codex"，可展开交接包，查看各部分 token 用量和被裁剪的内容。
 - 切换方式提示：每次切换后显示实际走的级别，例如"会话内切换（无损）""恢复会话（无损）""交接（有损）"。
 - 资产卡片：Agent 修改了资产文件时，对话流里显示缩略图卡片，点击打开预览。
+- 附件与图片（2026-11-07，ui-design.md 6.16）：输入框支持 Ctrl+V 粘贴图片、拖入文件、点“+”选择，图片以 ACP 的 image 内容块随消息发送，其他文件作为资源链接。发送前按 `promptCapabilities.image` 和模型信息检查能不能看图：看不了时在输入框里警告并拦下发送，给出换模型或去掉图片；没报告的按“未确认”提示，用户可以仍然发送。不悄悄丢弃图片。
 
 ### 15.5 上下文用量与 token 统计（2026-11-07）
 

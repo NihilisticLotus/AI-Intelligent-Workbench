@@ -12,6 +12,7 @@
 
   // 新建任务里可选的 Agent（ZCode 还没接通，不列）
   const agents = Object.entries(window.aicAgents || {}).filter(([k]) => k !== 'zcode');
+  const defEffort = (k) => { const e = window.aicEfforts?.[k]; return e ? (e.includes('高') && k === 'claude' ? '高' : e.includes('中') ? '中' : e[0]) : null; };
   const BADGE = { claude: 'C', codex: 'X', codebuddy: 'B', workbuddy: 'W', zcode: 'Z' };
   const branches = ['main', 'develop', 'release/1.2'];
   const perms = [['只读', '只看不改'], ['需审批', '改文件、运行命令前问你（推荐）'], ['工作区内自动', '工作副本里自动执行，越界才问'], ['完全访问', '全部自动执行，不再询问']];
@@ -35,7 +36,7 @@
     prevFocus?.focus?.();
   };
   const onKey = (e) => {
-    if (e.key !== 'Escape' || !page || document.querySelector('.menu')) return;
+    if (e.key !== 'Escape' || !page || document.querySelector('.menu')) return; // 菜单开着时 Esc 只关菜单
     e.preventDefault(); close();
   };
 
@@ -48,6 +49,7 @@
       branch: 'main', group: preset.group || '', perm: '需审批', ag: 'claude', model: null, idle: false, adopted: false,
     };
     st.model = (window.aicAgents[st.ag] || [, ['']])[1][0];
+    st.effort = defEffort(st.ag);
 
     main.insertAdjacentHTML('beforeend', `<section class="nt-page" aria-labelledby="nt-h">
       <div class="nt-top"><button type="button" class="btn ghost sm" data-wired="1" data-nt="back">${ic('right')}<span>返回</span></button><span class="grow"></span><span class="sub">Esc 返回 · Ctrl+Enter 派发</span></div>
@@ -78,6 +80,13 @@
     page = main.lastElementChild;
     main.dataset.view = 'new'; if (app) app.dataset.nt = '1';
     const ta = $('#nt-d', page), rec = $('.nt-rec', page);
+    // 附件：Ctrl+V 粘贴图片、拖入、点“+”；模型看不了图片时立即警告（attach.js）
+    const att = window.aicAttach?.($('.nt-box', page), {
+      textarea: ta, pickBtn: $('[data-nt="attach"]', page),
+      target: () => ({ agent: st.ag, model: st.model }),
+      switchTo: (agent, model) => { if (agent !== st.ag) setAgent(agent); st.model = model; paint(); recommend(); },
+      onChange: () => paint(),
+    });
 
     const paint = () => {
       const [agName] = window.aicAgents[st.ag];
@@ -91,10 +100,11 @@
       $('[data-nt="perm"]', page).innerHTML = `${ic(st.perm === '完全访问' ? 'unlock' : 'shield')}<span>${st.perm}</span>${ic('down')}`;
       $('[data-nt="perm"]', page).classList.toggle('attn', st.perm === '完全访问');
       $('[data-nt="perm"]', page).setAttribute('aria-label', `权限：${st.perm}`);
-      $('[data-nt="agent"]', page).innerHTML = `<span class="ag ${st.ag}" aria-hidden="true">${BADGE[st.ag] || agName[0]}</span><span>${esc(agName)}</span><span class="sub">${esc(st.model)}</span>${ic('down')}`;
-      $('[data-nt="agent"]', page).setAttribute('aria-label', `Agent 和模型：${agName} · ${st.model}`);
+      $('[data-nt="agent"]', page).innerHTML = `<span class="ag ${st.ag}" aria-hidden="true">${BADGE[st.ag] || agName[0]}</span><span>${esc(agName)}</span><span class="sub">${esc(st.model)}${st.effort ? ' · 思考 ' + esc(st.effort) : ''}</span>${ic('down')}`;
+      $('[data-nt="agent"]', page).setAttribute('aria-label', `Agent、模型和思考强度：${agName} · ${st.model}${st.effort ? ' · 思考 ' + st.effort : ''}`);
       $('.nt-idle', page).hidden = !st.idle;
-      $('.nt-send', page).disabled = !ta.value.trim();
+      $('.nt-send', page).disabled = !ta.value.trim() && !att?.count();
+      att?.refresh();
     };
 
     // 推荐 Agent（规则同原对话框）
@@ -119,76 +129,31 @@
     const send = () => {
       const text = ta.value.trim();
       if (!text) { ta.focus(); toast('先写一句要做什么', 'attn'); return; }
+      const files = att ? att.take() : [];
+      if (files === null) return; // 模型看不了图片，已在输入框里提示
       const t = { proj: st.proj, ag: st.ag, title: text, group: st.group || undefined };
       SB.addTask(t);
-      toast(`已派发到「${esc(st.proj)}」${st.group ? `，分组“${esc(SB.groupName(st.group))}”` : ''}：${esc(text)}<br>${st.idle ? '会在电脑空闲时开始。' : `${window.aicAgents[st.ag][0]} 有空位后自动开始。`}`);
+      toast(`已派发到「${esc(st.proj)}」${st.group ? `，分组“${esc(SB.groupName(st.group))}”` : ''}：${esc(text)}${files.length ? `（附件 ${files.length} 个）` : ''}<br>${st.idle ? '会在电脑空闲时开始。' : `${window.aicAgents[st.ag][0]} 有空位后自动开始。`}`);
       close();
     };
 
-    // Agent · 模型：二级菜单。第一级只列 Agent（带当前模型和模型数），鼠标移上去或按 → / Enter 在右边展开它的模型
-    const agentMenu = (b) => {
-      const open = document.querySelector('.menu');
-      if (open && open._anchor === b) { menu(b, []); return; } // 再点一次收起（menu 内部处理）
-      menu(b, agents.map(([k, [n]]) => [n, () => {}, k === st.ag ? 'on' : '']));
-      const m = document.querySelector('.menu'); if (!m) return;
-      m.setAttribute('aria-label', '选择 Agent');
-      let sub = null;
-      const closeSub = () => { sub?.remove(); sub = null; m.querySelectorAll('.mi-has').forEach((x) => x.setAttribute('aria-expanded', 'false')); };
-      const openSub = (item, k, focus) => {
-        if (sub?.dataset.k === k) { if (focus) sub.querySelector('button')?.focus(); return; }
-        closeSub();
-        item.setAttribute('aria-expanded', 'true');
-        sub = document.createElement('div');
-        sub.className = 'menu sub'; sub.dataset.k = k;
-        sub.setAttribute('role', 'menu'); sub.setAttribute('aria-label', `${window.aicAgents[k][0]} 的模型`);
-        window.aicAgents[k][1].forEach((md) => {
-          const o = document.createElement('button');
-          o.setAttribute('role', 'menuitem'); o.textContent = md;
-          if (k === st.ag && md === st.model) o.className = 'on';
-          o.addEventListener('click', () => { st.ag = k; st.model = md; closeSub(); m.remove(); b.setAttribute('aria-expanded', 'false'); paint(); recommend(); b.focus(); });
-          o.addEventListener('keydown', (e) => { if (e.key === 'ArrowLeft' || e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); closeSub(); item.focus(); } });
-          sub.appendChild(o);
-        });
-        document.body.appendChild(sub);
-        const r = item.getBoundingClientRect();
-        const left = r.right + 4 + sub.offsetWidth > innerWidth - 8 ? r.left - sub.offsetWidth - 4 : r.right + 4;
-        sub.style.left = left + 'px';
-        sub.style.top = Math.min(r.top - 4, innerHeight - sub.offsetHeight - 8) + 'px';
-        if (focus) sub.querySelector('button')?.focus();
-      };
-      // 第一级每行：徽标、名称、当前模型或模型数、右箭头
-      [...m.querySelectorAll('button')].forEach((item, i) => {
-        const [k, [n, models]] = agents[i];
-        item.classList.add('mi-has'); item.classList.remove('on');
-        item.setAttribute('aria-haspopup', 'menu'); item.setAttribute('aria-expanded', 'false');
-        item.innerHTML = `<span class="ag ${k}" aria-hidden="true">${BADGE[k] || n[0]}</span><span>${esc(n)}</span><span class="meta">${k === st.ag ? esc(st.model) + ' ✓' : models.length + ' 个模型'}</span>${ic('right')}`;
-        const fresh = item.cloneNode(true); item.replaceWith(fresh); // 去掉 menu 默认的“点了就关”
-        fresh.addEventListener('mouseenter', () => openSub(fresh, k, false));
-        fresh.addEventListener('click', (e) => { e.stopPropagation(); openSub(fresh, k, true); });
-        fresh.addEventListener('keydown', (e) => {
-          if (e.key === 'ArrowRight') { e.preventDefault(); openSub(fresh, k, true); }
-          const all = [...m.querySelectorAll('.mi-has')], j = all.indexOf(fresh);
-          if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); closeSub(); all[(j + (e.key === 'ArrowDown' ? 1 : all.length - 1)) % all.length].focus(); }
-        });
-      });
-      m.querySelector('.mi-has')?.focus();
-      // 主菜单关掉时二级菜单一起关
-      new MutationObserver(() => { if (!m.isConnected) closeSub(); }).observe(document.body, { childList: true });
-      document.addEventListener('click', function off(e) {
-        if (!m.isConnected) { closeSub(); document.removeEventListener('click', off); return; }
-        if (sub && !sub.contains(e.target) && !m.contains(e.target) && !b.contains(e.target)) { closeSub(); m.remove(); b.setAttribute('aria-expanded', 'false'); document.removeEventListener('click', off); }
-      });
-    };
-
+    // Agent · 模型 · 思考强度：和对话输入框共用 interact.js 的 aicAgentPicker
+    const agentMenu = (b) => window.aicAgentPicker(b, {
+      agent: st.ag, model: st.model, effort: st.effort, list: agents.map(([k]) => k),
+      onPick: (p) => { st.ag = p.agent; st.model = p.model; st.effort = p.effort; paint(); recommend(); },
+      onEffort: (e) => { st.effort = e; paint(); },
+    });
+    // 换 Agent（推荐、快捷入口）时思考强度回到这个 Agent 的默认值
+    const setAgent = (k) => { st.ag = k; st.model = window.aicAgents[k][1][0]; st.effort = defEffort(k); };
     page.addEventListener('click', (e) => {
       const ad = e.target.closest('[data-adopt]');
-      if (ad) { st.ag = ad.dataset.adopt; st.model = window.aicAgents[st.ag][1][0]; paint(); recommend(); toast(`已采用推荐：${window.aicAgents[st.ag][0]}`); return; }
+      if (ad) { setAgent(ad.dataset.adopt); paint(); recommend(); toast(`已采用推荐：${window.aicAgents[st.ag][0]}`); return; }
       const q = e.target.closest('[data-q]');
       if (q) {
         const it = quick.find((x) => x.k === q.dataset.q);
         if (it.idle) { st.idle = true; paint(); toast('这个任务会在电脑空闲时运行（没人用、没有其他任务在跑）'); ta.focus(); return; }
         ta.value = it.t + (it.tail ? '\n' + it.tail : '');
-        if (it.ag) { st.ag = it.ag; st.model = window.aicAgents[it.ag][1][0]; }
+        if (it.ag) setAgent(it.ag);
         ta.dispatchEvent(new Event('input'));
         ta.focus(); ta.setSelectionRange(it.t.length, it.t.length); // 光标停在要补充的地方
         return;
@@ -198,7 +163,6 @@
       if (d === 'back') close();
       else if (d === 'send') send();
       else if (d === 'idle-off') { st.idle = false; paint(); }
-      else if (d === 'attach') toast('选择文件后会作为附件随任务发送（原型）');
       else if (d === 'proj') menu(b, SB.projects.map((p) => [p.name, () => { st.proj = p.name; paint(); recommend(); }, p.name === st.proj ? 'on' : '']));
       else if (d === 'branch') menu(b, branches.map((n) => [n, () => { st.branch = n; paint(); }, n === st.branch ? 'on' : '']));
       else if (d === 'group') menu(b, [['不分组（未分类）', () => { st.group = ''; paint(); }, st.group ? '' : 'on'], ...SB.groups.map((g) => [g.name, () => { st.group = g.id; paint(); }, g.id === st.group ? 'on' : ''])]);

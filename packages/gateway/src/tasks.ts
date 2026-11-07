@@ -204,6 +204,10 @@ export class TaskService {
   private async adapterFor(kind: AgentKind, profileId?: string | null): Promise<AgentAdapter> {
     const a = this.agents.get(kind);
     if (!a) throw Errors.agentUnavailable('这个 Agent 暂不可用', '这个 Agent 还没有接入');
+    // Agent 页关掉的 Agent 不接新任务（运行中的会话照常做完，design.md 6.7）
+    if (this.agentSvc && !this.agentSvc.enabled(kind)) {
+      throw Errors.agentUnavailable(`${a.displayName} 已关闭`, '在 Agent 页打开它后才能使用', [{ label: '打开 Agent 页', action: 'open_agents', args: { kind } }]);
+    }
     // 1.2：用缓存的检测结果（CodeBuddy 的检测要启动一次引擎，不能每次都做）
     const d = this.agentSvc ? await this.agentSvc.ensureDetected(kind) : await a.detect();
     if (!d.installed) throw Errors.agentUnavailable(`${a.displayName} 没有安装`, d.message ?? undefined, [{ label: '打开 Agent 页', action: 'open_agents', args: { kind } }]);

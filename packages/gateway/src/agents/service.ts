@@ -17,7 +17,9 @@ import type { AgentRegistry } from './registry';
 const DEFAULT_LIMIT = 2;
 const STALE_MS = 24 * 3600_000;
 
-interface AgentSettingsRow { concurrencyLimit?: number; engine?: 'bundled' | 'local'; defaultModel?: string | null; defaultEffort?: string | null }
+interface AgentSettingsRow { concurrencyLimit?: number; engine?: 'bundled' | 'local'; defaultModel?: string | null; defaultEffort?: string | null; enabled?: boolean }
+/** 没设置过开关时的默认值（design.md 6.7）：Claude Code、Codex、演示 Agent 打开，其他关闭 */
+const DEFAULT_ENABLED: Partial<Record<AgentKind, boolean>> = { fake: true, claude: true, codex: true };
 interface Catalog { models: ModelInfo[]; efforts: string[] | null; modes: { id: string; name: string }[] }
 type CapsRow = { agent: string; profile_id: string; adapter_version: string | null; engine_version: string | null; caps_json: string | null; catalog_json: string | null; probed_at: number };
 
@@ -64,6 +66,8 @@ export class AgentService {
     this.db.run("INSERT INTO meta (key, value) VALUES ('agent_settings', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value", JSON.stringify(all));
   }
   concurrencyLimit(kind: AgentKind) { return this.settings(kind).concurrencyLimit ?? DEFAULT_LIMIT; }
+  /** 用户是否启用了这个 Agent；关闭的不检测、不探测、不接新任务 */
+  enabled(kind: AgentKind): boolean { return this.settings(kind).enabled ?? DEFAULT_ENABLED[kind] ?? false; }
 
   // ---------- 检测 ----------
 
@@ -109,7 +113,7 @@ export class AgentService {
 
   /** Gateway 启动时：检测全部 Agent，并为支持自动探测的 Agent（Claude）补齐能力缓存 */
   async startup() {
-    await Promise.all(this.registry.all().map(async (a) => {
+    await Promise.all(this.registry.all().filter((a) => this.enabled(a.id)).map(async (a) => {
       await this.detect(a.id).catch(() => {});
       this.pushStatus(a.id);
       void this.autoProbe(a.id);
@@ -117,7 +121,7 @@ export class AgentService {
   }
 
   async redetect(): Promise<AgentInfo[]> {
-    await Promise.all(this.registry.all().map(async (a) => {
+    await Promise.all(this.registry.all().filter((a) => this.enabled(a.id)).map(async (a) => {
       if (a.real) this.db.run('DELETE FROM agent_caps WHERE agent = ?', a.id);
       await this.detect(a.id, true).catch(() => {});
       this.pushStatus(a.id);
@@ -140,6 +144,7 @@ export class AgentService {
    * userInitiated：用户点了 [重新检测]，不看 autoProbe，但只探测已登录的 Agent（session/new 也不花钱）。
    */
   autoProbe(kind: AgentKind, userInitiated = false): Promise<void> {
+    if (!this.enabled(kind)) return Promise.resolve();
     const a = this.registry.get(kind);
     const d = this.detected.get(kind);
     if (!a?.real || !a.probe || !d?.installed) return Promise.resolve();
@@ -250,6 +255,7 @@ export class AgentService {
   // ---------- AgentInfo ----------
 
   info(a: AgentAdapter): AgentInfo {
+    if (!this.enabled(a.id)) return this.disabledInfo(a);
     const d = this.detected.get(a.id);
     const caps = a.real ? this.cachedCaps(a.id) : null;
     const cat = this.catalog(a.id, null);
@@ -276,8 +282,27 @@ export class AgentService {
       defaultEffort: this.settings(a.id).defaultEffort ?? null,
       ...(a.workspaceConfig ? { workspaceConfig: a.workspaceConfig } : {}),
       ...(a.real ? { profiles: this.profiles.summary(a.id) } : {}),
+      enabled: true,
+      ...(d?.unsupported ? { unsupported: true } : {}),
     };
     return info;
+  }
+
+  /** 关闭的 Agent：只给名称、是否装了（之前检测过才知道）和版本，不检测登录、不带模型 */
+  private disabledInfo(a: AgentAdapter): AgentInfo {
+    const d = this.detected.get(a.id);
+    return {
+      kind: a.id, displayName: a.displayName, status: 'disabled',
+      version: d?.engineVersion ?? d?.version ?? null, verified: d?.verified ?? true,
+      models: [], efforts: null,
+      message: `${a.displayName} 已关闭。在 Agent 页打开后才会检测和使用`,
+      engineLocation: d?.engineLocation ?? null,
+      runningSessions: this.running.get(a.id) ?? 0,
+      concurrencyLimit: this.concurrencyLimit(a.id),
+      ...(d?.checkedAt ? { checkedAt: d.checkedAt } : {}),
+      permissionLevels: a.permissionLevels ?? ['readonly', 'ask', 'workspace', 'full'],
+      enabled: false,
+    };
   }
 
   private cachedCaps(kind: AgentKind): AgentCaps | null {
@@ -300,7 +325,7 @@ export class AgentService {
 
   async list(): Promise<AgentInfo[]> {
     const all = this.registry.all();
-    await Promise.all(all.map((a) => this.ensureDetected(a.id).catch(() => {})));
+    await Promise.all(all.filter((a) => this.enabled(a.id)).map((a) => this.ensureDetected(a.id).catch(() => {})));
     for (const a of all) if (a.real) this.profiles.ensureLocal(a.id);
     return all.map((a) => this.info(a));
   }
@@ -308,7 +333,7 @@ export class AgentService {
   async one(kind: AgentKind): Promise<AgentInfo> {
     const a = this.registry.get(kind);
     if (!a) throw Errors.notFound('没有这个 Agent');
-    await this.ensureDetected(kind).catch(() => {});
+    if (this.enabled(kind)) await this.ensureDetected(kind).catch(() => {});
     if (a.real) this.profiles.ensureLocal(kind);
     return this.info(a);
   }
@@ -344,7 +369,14 @@ export class AgentService {
     }
     const engineChanged = body.engine !== undefined && body.engine !== (s.engine ?? 'bundled');
     if (body.engine !== undefined) s.engine = body.engine;
+    const turnedOn = body.enabled === true && !this.enabled(kind);
+    if (body.enabled !== undefined) s.enabled = body.enabled;
     this.saveSettings(kind, s);
+    // 刚打开：立即检测（强制，不用旧结果）；能自动探测的顺带探测
+    if (turnedOn) {
+      await this.detect(kind, true).catch(() => {});
+      void this.autoProbe(kind);
+    }
     if (engineChanged) {
       a.configure?.({ engine: body.engine! });
       this.db.run('DELETE FROM agent_caps WHERE agent = ?', kind);
@@ -485,6 +517,7 @@ export class AgentService {
   async test(kind: AgentKind, body: { profileId?: string | undefined; sendMessage?: boolean | undefined }): Promise<AgentTestResult> {
     const a = this.registry.get(kind);
     if (!a) throw Errors.notFound('没有这个 Agent');
+    if (!this.enabled(kind)) throw Errors.agentUnavailable(`${a.displayName} 已关闭`, '在 Agent 页打开它后再测试连接');
     if (!a.real || !a.probe) {
       return { ok: true, steps: [{ ts: now(), label: '演示 Agent 不需要测试连接', ok: true, ms: 0 }] };
     }

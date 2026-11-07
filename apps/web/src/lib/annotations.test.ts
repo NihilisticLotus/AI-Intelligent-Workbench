@@ -27,3 +27,14 @@ describe('对话注释', () => {
     expect(clipSelection('a'.repeat(ANNOTATION_TEXT_MAX + 10)).length).toBe(ANNOTATION_TEXT_MAX + 1);
   });
 });
+
+describe('恢复注释位置', () => {
+  it('多处相同的原文取离原位置最近的一处', async () => {
+    const { nearestIndex } = await import('./annotations');
+    const all = 'abc 改这里 xyz 改这里 end';
+    expect(nearestIndex(all, '改这里', 0)).toBe(4);
+    expect(nearestIndex(all, '改这里', 12)).toBe(12);
+    expect(nearestIndex(all, '没有', 0)).toBe(-1);
+    expect(nearestIndex(all, '', 0)).toBe(-1);
+  });
+});

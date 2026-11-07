@@ -7,8 +7,7 @@ import { navigate, toast } from '../state/ui';
 import { permInfo, permOrder } from '../lib/format';
 import {
   DIRECT_EDIT_WARNING, PERM_LOCKED_REASON, agentReadiness, agentStatusText, agentStatusView, emptyModelsText, isRealAgent,
-  permAvailable, profileKindText, taskDefaults, workspaceConfigNote,
-} from '../lib/agents';
+  permAvailable, profileKindText, taskDefaults, workspaceConfigNote, isEnabled } from '../lib/agents';
 import { Dialog, ErrorNotice, asApiError, confirmDialog } from './ui';
 import { Icon } from './Icon';
 /** 默认选中的模型和思考强度（见 lib/agents.ts 的 taskDefaults：真实 Agent 优先用 Agent 设置里的默认值） */
@@ -23,7 +22,9 @@ export function NewTaskDialog({ close, preset, onAddProject }: {
 }) {
   const projects = useApp((s) => s.projects);
   const groups = useApp((s) => s.groups);
-  const agents = useApp((s) => s.agents);
+  // 关闭的 Agent 不出现在新建任务里（design.md 6.7）
+  const allAgents = useApp((s) => s.agents);
+  const agents = useMemo(() => allAgents.filter(isEnabled), [allAgents]);
   const profilesOn = useApp((s) => !!s.hello?.features[FeatureKey.Profiles]);
   const usable = useMemo(() => agents.filter((a) => a.status === 'ready'), [agents]);
   const [projectId, setProjectId] = useState(preset.projectId ?? projects[0]?.id ?? '');

@@ -26,6 +26,8 @@ export function systemRoutes(s: Services) {
         [FeatureKey.Handoff]: false,
         [FeatureKey.Lan]: false,
         [FeatureKey.SideChat]: false,
+        [FeatureKey.AgentToggle]: true,
+        [FeatureKey.Drafts]: true,
         [FeatureKey.PageAssets]: false,
         [FeatureKey.PageGenerate]: false,
         [FeatureKey.PageAutomations]: false,

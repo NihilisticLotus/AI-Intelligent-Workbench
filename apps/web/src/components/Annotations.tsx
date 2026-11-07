@@ -3,16 +3,21 @@
 // 2. 选中处上方出现评论框“添加可选评论…”，输入框上方出现“N 条注释”
 // 3. 原文旁边显示编号圆点：悬停看评论，点击可以修改、删除
 // 4. 发送消息时注释附在后面一起发出（lib/annotations.ts），发送后清空
+// 5. 没发出去的注释和输入框文字一起存成任务草稿（Composer 负责读写 /tasks/:id/draft），刷新、切换任务、换设备都在
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FeatureKey } from '@aic/protocol';
 import { useApp } from '../state/app';
 import { createStore, useStore } from '../state/store';
-import { clipSelection, type AnnotationData } from '../lib/annotations';
+import { clipSelection, locate, offsetIn, type AnnotationData } from '../lib/annotations';
+import type { DraftAnnotation } from '@aic/protocol';
 import { Icon } from './Icon';
 
 export interface Annotation extends AnnotationData {
-  /** 原文在页面里的位置；切换任务后页面重建，位置失效时只是不显示圆点，注释照常发送 */
+  /** 原文在页面里的位置；页面重建后按 raw / pos 重新定位，找不到时只是不显示圆点，注释照常发送 */
   range: Range | null;
+  /** 选中时的完整原文和它在对话文字里的偏移（草稿里保存，用来恢复位置） */
+  raw: string;
+  pos: number;
 }
 
 const annotationStore = createStore<Record<string, Annotation[]>>({});
@@ -20,8 +25,23 @@ const annotationStore = createStore<Record<string, Annotation[]>>({});
 const editorStore = createStore<{ taskId: string; id: string; isNew: boolean } | null>(null);
 
 let seq = 0;
-const setList = (taskId: string, f: (l: Annotation[]) => Annotation[]) =>
+/** 注释改动的监听（Composer 用来保存草稿）；restore 时不触发 */
+const listeners = new Set<(taskId: string) => void>();
+export function onAnnotationsChanged(fn: (taskId: string) => void) { listeners.add(fn); return () => { listeners.delete(fn); }; }
+const setList = (taskId: string, f: (l: Annotation[]) => Annotation[]) => {
   annotationStore.set((m) => ({ ...m, [taskId]: f(m[taskId] ?? []) }));
+  for (const l of listeners) l(taskId);
+};
+/** 草稿里读回来的注释：位置等对话渲染后再定位 */
+export function restoreAnnotations(taskId: string, list: readonly DraftAnnotation[]) {
+  const cur = annotationStore.get()[taskId];
+  if (cur?.length) return; // 本页已经有（例如刚切回来），以本页为准
+  annotationStore.set((m) => ({ ...m, [taskId]: list.map((a) => ({ id: a.id, text: a.text, comment: a.comment, raw: a.raw ?? a.text, pos: a.pos ?? -1, range: null })) }));
+  for (const a of list) { const n = Number(a.id.replace(/^D+/, '')); if (n > seq) seq = n; }
+}
+export function draftAnnotations(taskId: string): DraftAnnotation[] {
+  return getAnnotations(taskId).map(({ id, text, comment, raw, pos }) => ({ id, text, comment, raw, pos }));
+}
 
 export function useAnnotations(taskId: string): Annotation[] {
   return useStore(annotationStore, (m) => m[taskId]) ?? EMPTY;
@@ -72,6 +92,9 @@ export function AnnotationLayer({ container, taskId }: { container: React.RefObj
   }, [container]);
 
   const box = container.current?.getBoundingClientRect() ?? null;
+  // 页面重建过（刷新、切换任务、对话重新渲染）：按原文重新定位，不改动 store（位置只是界面状态）
+  const root = container.current;
+  if (root) for (const a of list) if (!alive(a.range) && a.raw) a.range = locate(root, a.raw, a.pos);
   const editing = editor ? list.find((a) => a.id === editor.id) ?? null : null;
   useHighlight(editing?.range ?? null);
 
@@ -184,7 +207,9 @@ function SelectionMenu({ container, taskId }: { container: React.RefObject<HTMLD
   if (!sel) return null;
   const add = () => {
     const id = `an${++seq}`;
-    setList(taskId, (l) => [...l, { id, text: clipSelection(sel.text), comment: '', range: sel.range }]);
+    const raw = sel.range.toString();
+    const pos = container.current ? offsetIn(container.current, sel.range) : -1;
+    setList(taskId, (l) => [...l, { id, text: clipSelection(sel.text), comment: '', range: sel.range, raw: raw.length > 4000 ? '' : raw, pos }]);
     window.getSelection()?.removeAllRanges();
     setSel(null);
     openEditor(taskId, id, true);

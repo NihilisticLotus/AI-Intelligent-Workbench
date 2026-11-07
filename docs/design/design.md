@@ -243,6 +243,7 @@ interface AgentCaps {
 - 桥接进程对上说 ACP，对下启动 `zcode app-server`，做两套协议之间的消息转换。
 - 第一步先抓取 app-server 的实际消息格式（开发阶段完成），再定映射表。
 - 如果 app-server 协议变化太频繁，降级用 `zcode -p <任务> --json --resume <会话>`，代价是失去流式输出和中途审批。
+- 2026-11-07：开源项目 zcode-acp 已实现这套桥接（对照 0.17.1 审计过），调研结论是可以用，但默认全自动、带安装脚本，要加防护后接入，代替自己写（docs/research/zcode-acp.md、ISSUE-0020）。
 
 ### 6.6 Agent 或模型更新后怎么同步
 

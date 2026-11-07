@@ -18,7 +18,7 @@ import { ApiRequestError } from '../api/http';
 import { platform } from '../platform';
 import { clock } from '../lib/format';
 import {
-  LOGIN_TERMINAL, agentStatusView, capsSummary, emptyModelsText, engineSourceText, formatTestLog, isLocalLogin, isRealAgent,
+  LOGIN_TERMINAL, agentStatusView, capsSummary, emptyModelsText, engineSourceText, formatTestLog, isEnabled, isLocalLogin, isRealAgent,
   loginAnnounceText, loginMethods, loginStep, profileDesc, profileKindText, safeAuthUrl, taskDefaults, workspaceConfigNote,
 } from '../lib/agents';
 import { AgentBadge, ErrorNotice, StatusMark, asApiError, confirmDialog, openDialog, openMenu, toastErrorOf } from '../components/ui';
@@ -30,7 +30,12 @@ import { ProfileDialog } from './ProfileDialog';
 type MyLogins = Partial<Record<AgentKind, { loginId: string; methodId: string; profileId: string | null }>>;
 
 export function AgentsPage() {
-  const agents = useApp((s) => s.agents);
+  const allAgents = useApp((s) => s.agents);
+  const toggleOn = useApp((s) => !!s.hello?.features[FeatureKey.AgentToggle]);
+  // 上方卡片只放已启用的；关闭的列在下面“其他 Agent”（design.md 6.7）
+  const agents = useMemo(() => allAgents.filter(isEnabled), [allAgents]);
+  const offAgents = useMemo(() => allAgents.filter((a) => !isEnabled(a)), [allAgents]);
+  const [toggling, setToggling] = useState<AgentKind | null>(null);
   const route = useStore(routeStore, (r) => r);
   const routeAgent = route.page === 'agents' ? route.agent : undefined;
   const routeProfile = route.page === 'agents' ? route.profileId : undefined;
@@ -94,6 +99,27 @@ export function AgentsPage() {
     }
   };
 
+  /** 打开 / 关闭一个 Agent。打开后 Gateway 立即检测；需要桥接的（ZCode）再自动测试一次连接 */
+  const toggle = async (a: AgentInfo, on: boolean) => {
+    if (toggling) return;
+    if (!on && (a.runningSessions ?? 0) > 0) {
+      const ok = await confirmDialog({
+        title: `关闭 ${a.displayName}？`, ok: '关闭', danger: true,
+        body: <p style={{ margin: 0 }}>有 {a.runningSessions} 个会话正在运行。关闭后不再接新任务，运行中的会话会照常做完；已有任务的记录都保留，随时可以再打开。</p>,
+      });
+      if (!ok) return;
+    }
+    setToggling(a.kind);
+    try {
+      await patchAgent(a.kind, { enabled: on });
+      if (on) {
+        toast(`已打开 ${a.displayName}，检测完成`);
+        select(a.kind, true);
+        if (a.kind === 'zcode') void runTest({ ...a, enabled: true });
+      } else toast(`已关闭 ${a.displayName}：不再检测，新建任务和切换器里不显示。已有任务的记录保留`);
+    } catch (e) { toastErrorOf(e, { kind: a.kind }); } finally { setToggling(null); }
+  };
+
   // 错误按钮“测试连接”：打开本页并开始测试
   const testReq = useStore(agentTestRequestStore, (s) => s);
   useEffect(() => {
@@ -118,9 +144,11 @@ export function AgentsPage() {
         <div className="page agents-page">
           <p className="page-lead">
             {lastChecked ? `上次检测：${clock(lastChecked)}。` : ''}
-            登录、账号、测试连接都在这里点按钮完成，不需要打开命令行。
+            登录、账号、测试连接都在这里点按钮完成，不需要打开命令行。{toggleOn ? '只有打开的 Agent 会检测、出现在新建任务和切换器里。' : ''}
           </p>
-          {!agents.length ? <div className="empty"><h3>还没有检测到 Agent</h3><p>点右上角的“重新检测”。</p></div> : null}
+          {toggleOn ? <h2 className="sec-h">已启用 <span className="muted">{agents.length} 个</span></h2> : null}
+          {!allAgents.length ? <div className="empty"><h3>还没有检测到 Agent</h3><p>点右上角的“重新检测”。</p></div>
+            : !agents.length ? <div className="cards-empty">还没有启用任何 Agent。在下面打开一个就能开始用。</div> : null}
           <div className="cards">
             {agents.map((a) => (
               <AgentCard key={a.kind} a={a} current={a.kind === selected?.kind} busy={busy} test={tests[a.kind]}
@@ -131,9 +159,26 @@ export function AgentsPage() {
                   if (ms.length === 1) void login(a, ms[0]!.id, null);
                 }}
                 onTest={() => { select(a.kind, true); void runTest(a); }}
-                onRedetect={redetect} />
+                onRedetect={redetect}
+                toggle={toggleOn ? <EnableSwitch a={a} busy={toggling === a.kind} onChange={(v) => void toggle(a, v)} /> : null} />
             ))}
           </div>
+          {toggleOn && offAgents.length ? (
+            <>
+              <h2 className="sec-h">其他 Agent <span className="muted">默认关闭，需要时打开</span></h2>
+              <ul className="off-list" aria-label="已关闭的 Agent">
+                {offAgents.map((a) => (
+                  <li key={a.kind} className="off-row">
+                    <AgentBadge kind={a.kind} />
+                    <span className="name">{a.displayName}</span>
+                    <span className="sub">{[a.engineLocation, a.version].filter(Boolean).join(' · ') || '打开后检测'}</span>
+                    <span className="lbl">{toggling === a.kind ? '正在打开…' : '已关闭'}</span>
+                    <EnableSwitch a={a} busy={toggling === a.kind} onChange={(v) => void toggle(a, v)} />
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
           {selected ? (
             <section className="agent-detail" ref={detailRef} aria-label={`${selected.displayName} 详情`} tabIndex={-1}>
               <AgentDetail key={selected.kind} a={selected} focusProfileId={routeProfile ?? null}
@@ -147,14 +192,24 @@ export function AgentsPage() {
   );
 }
 
+/** 启用开关：role="switch"，aria-label 写清楚点了会怎样 */
+function EnableSwitch({ a, busy, onChange }: { a: AgentInfo; busy: boolean; onChange: (on: boolean) => void }) {
+  const on = isEnabled(a);
+  return (
+    <button type="button" className="switch" role="switch" aria-checked={on} aria-busy={busy} disabled={busy}
+      aria-label={`${on ? '关闭' : '打开'} ${a.displayName}`} title={on ? '已启用，点击关闭' : '已关闭，点击打开'}
+      onClick={(e) => { e.stopPropagation(); onChange(!on); }} />
+  );
+}
+
 interface TestState { running: boolean; profileId: string | null; sendMessage: boolean; result: AgentTestResult | null; error: ApiError | null }
 
 // ---------------------------------------------------------------------
 // 状态卡片
 // ---------------------------------------------------------------------
-function AgentCard({ a, current, busy, test, onSelect, onLogin, onTest, onRedetect }: {
+function AgentCard({ a, current, busy, test, onSelect, onLogin, onTest, onRedetect, toggle }: {
   a: AgentInfo; current: boolean; busy: boolean; test: TestState | undefined;
-  onSelect: () => void; onLogin: () => void; onTest: () => void; onRedetect: () => void;
+  onSelect: () => void; onLogin: () => void; onTest: () => void; onRedetect: () => void; toggle: React.ReactNode;
 }) {
   const st = agentStatusView(a);
   const real = isRealAgent(a.kind);
@@ -170,6 +225,7 @@ function AgentCard({ a, current, busy, test, onSelect, onLogin, onTest, onRedete
         <AgentBadge kind={a.kind} size="lg" />
         <span><span className="name">{a.displayName}</span><br /><span className="src">{!real ? '内置，用来体验工作台' : engine ?? '本机安装'}</span></span>
         <span style={{ marginLeft: 'auto' }}><StatusMark shape={st.shape} text={st.text} /></span>
+        {toggle}
       </span>
       {a.message ? (
         <div className={'alert ' + (a.status === 'error' ? 'err' : a.status === 'ready' ? 'info' : 'attn')} style={{ padding: '8px 10px' }}>

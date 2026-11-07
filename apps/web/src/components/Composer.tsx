@@ -7,7 +7,7 @@ import { createStore, useStore } from '../state/store';
 import type { SessionCfg } from '../state/core';
 import { permInfo, permOrder } from '../lib/format';
 import {
-  PERM_LOCKED_REASON, agentReadiness, emptyModelsText, modelSwitchKind, permAvailable, pickEfforts, pickModels,
+  PERM_LOCKED_REASON, agentReadiness, isEnabled, emptyModelsText, modelSwitchKind, permAvailable, pickEfforts, pickModels,
   profileKindText, profileSwitchKind, profileSwitchText, switchKindText, switchNeedsTurnEnd, withDefaultActions,
 } from '../lib/agents';
 import { AgentBadge, ErrorNotice, asApiError, choiceDialog, confirmDialog, openMenu, toastErrorOf, useAgentName } from './ui';
@@ -15,26 +15,43 @@ import { Icon } from './Icon';
 import { useDismiss } from './hooks';
 import { requestFocusApproval, switcherRequestStore, type SwitcherSection } from './focus';
 import { TaskError } from './Chat';
-import { AnnotationChip, clearAnnotations, useAnnotations } from './Annotations';
+import { AnnotationChip, clearAnnotations, draftAnnotations, onAnnotationsChanged, restoreAnnotations, useAnnotations } from './Annotations';
+import { clearDraft, loadDraft, localDraft, saveDraft } from '../state/drafts';
 import { composeWithAnnotations } from '../lib/annotations';
-
-/** 每个任务的草稿：切换任务时保留没发出去的内容（父组件按任务 id 重新挂载本组件） */
-const drafts = new Map<string, string>();
 
 const busyStatuses = new Set<Task['status']>(['running', 'waiting', 'queued']);
 
 export function Composer({ task, pending, config, blocking }: { task: Task; pending: Approval[]; config: SessionCfg; blocking?: ApiError | null }) {
   const conn = useApp((s) => s.conn);
   const online = conn === 'online' || conn === 'replaying';
-  const [text, setText] = useState(() => drafts.get(task.id) ?? '');
+  // 草稿（文字 + 注释）按任务保存在 Gateway：先用本页内存里的，再用服务端读回来的补上（state/drafts.ts）
+  const [text, setText] = useState(() => localDraft(task.id)?.text ?? '');
   const [sending, setSending] = useState(false);
   const [sendErr, setSendErr] = useState<ApiError | null>(null);
   const ta = useRef<HTMLTextAreaElement>(null);
-
-  useEffect(() => { drafts.set(task.id, text); }, [task.id, text]);
+  const ready = useRef(false);
 
   // 对话里选中文字添加的注释：发送时附在消息后面（Annotations.tsx）
   const annos = useAnnotations(task.id);
+
+  useEffect(() => {
+    let alive = true;
+    ready.current = !!localDraft(task.id);
+    void loadDraft(task.id).then((d) => {
+      if (!alive) return;
+      if (d && !localDraft(task.id)) {
+        if (d.text) setText((t) => t || d.text);
+        if (d.annotations.length) restoreAnnotations(task.id, d.annotations);
+      }
+      ready.current = true;
+    });
+    // 注释改了（添加、评论、删除）也保存
+    const off = onAnnotationsChanged((id) => { if (id === task.id && ready.current) saveDraft(id, { text: ta.current?.value ?? '', annotations: draftAnnotations(id) }); });
+    return () => { alive = false; off(); };
+  }, [task.id]);
+  useEffect(() => {
+    if (ready.current) saveDraft(task.id, { text, annotations: draftAnnotations(task.id) });
+  }, [task.id, text]);
 
   const working = busyStatuses.has(task.status);
   const canSend = online && !working && !sending && (text.trim().length > 0 || annos.length > 0);
@@ -47,8 +64,8 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
     try {
       await sendPrompt(task.id, body);
       setText('');
-      drafts.delete(task.id);
       clearAnnotations(task.id);
+      clearDraft(task.id);
     } catch (e) {
       setSendErr(withDefaultActions(asApiError(e), { taskId: task.id, kind: task.agent })); // 发送失败时保留输入内容，错误连同按钮显示在输入框上方
     } finally {
@@ -146,7 +163,9 @@ function cancelPendingSwitch(taskId: string) {
 }
 
 function Switcher({ task, config, online }: { task: Task; config: SessionCfg; online: boolean }) {
-  const agents = useApp((s) => s.agents);
+  // 切换器的 Agent 列表只放已启用的；当前任务的 Agent 即使被关掉也照常显示（design.md 6.7）
+  const allAgents = useApp((s) => s.agents);
+  const agents = useMemo(() => allAgents.filter((a) => isEnabled(a) || a.kind === task.agent), [allAgents, task.agent]);
   const profilesOn = useApp((s) => !!s.hello?.features[FeatureKey.Profiles]);
   const info = agents.find((a) => a.kind === task.agent);
   const agentName = useAgentName(task.agent);

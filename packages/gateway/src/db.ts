@@ -97,6 +97,13 @@ const MIGRATIONS: string[] = [
   );
   ALTER TABLE tasks ADD COLUMN profile_id TEXT;
   `,
+  // v4（2026-11-07）：任务草稿（输入框里没发出去的文字和注释），按任务保存，换设备也在
+  `
+  CREATE TABLE task_drafts (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    text TEXT NOT NULL, annotations_json TEXT NOT NULL, updated_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

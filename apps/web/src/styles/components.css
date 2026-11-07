@@ -181,3 +181,15 @@
 .anno-item .lbl { color: var(--fg-3); font-weight: 600; margin-top: 2px; }
 .anno-item .quote { color: var(--fg-1); white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
 .anno-item .acts { display: flex; gap: 2px; align-items: flex-start; }
+
+/* Agent 页：已启用 / 其他 Agent（design.md 6.7） */
+.agents-page .sec-h { font-size: var(--fs-13); font-weight: 600; margin: var(--sp-5) 0 var(--sp-2); display: flex; gap: var(--sp-2); align-items: baseline; }
+.agents-page .sec-h:first-of-type { margin-top: 0; }
+.agents-page .sec-h .muted { font-weight: 400; font-size: var(--fs-12); color: var(--fg-3); }
+.agent-card .top .switch { margin-left: var(--sp-2); }
+.off-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.off-row { display: flex; align-items: center; gap: var(--sp-3); padding: 10px 14px; border-radius: var(--r-card); background: var(--bg-2); font-size: var(--fs-13); }
+.off-row .name { font-weight: 600; }
+.off-row .sub { color: var(--fg-3); font-size: var(--fs-12); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.off-row .lbl { color: var(--fg-3); font-size: var(--fs-12); }
+.cards-empty { padding: var(--sp-4); border-radius: var(--r-card); border: 1px dashed var(--line-strong); color: var(--fg-3); font-size: var(--fs-13); }

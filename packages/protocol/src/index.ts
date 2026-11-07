@@ -192,6 +192,13 @@ export const AgentInfo = z.object({
    * ignored 不加载；trusted_only 只在用户在 Agent 里信任过的项目加载；loaded 会加载
    */
   workspaceConfig: z.enum(['ignored', 'trusted_only', 'loaded']).optional(),
+  /**
+   * 2026-11-07 新增：用户是否启用了这个 Agent（Agent 页的开关，design.md 6.7）。
+   * false 时 Gateway 不检测、不探测、不接新任务，status 为 disabled；没有这个字段的老 Gateway 当作 true
+   */
+  enabled: z.boolean().optional(),
+  /** 2026-11-07 新增：装了但这个版本还不能在工作台里用（WorkBuddy 精简引擎、ZCode 等桥接）；status 仍为 error，message 写明原因 */
+  unsupported: z.boolean().optional(),
 });
 export type AgentInfo = z.infer<typeof AgentInfo>;
 
@@ -366,6 +373,9 @@ export const FeatureKey = {
   PageCapabilities: 'pages.capabilities',
   // 1.2 新增
   Profiles: 'agents.profiles',       // 账号配置（订阅登录 / API Key / 自定义地址）
+  // 2026-11-07 新增
+  AgentToggle: 'agents.toggle',      // Agent 启用开关（PATCH /agents/:kind { enabled }）
+  Drafts: 'tasks.draft',             // 任务草稿按任务保存（GET / PUT /tasks/:id/draft）
 } as const;
 
 // ---------- 设备与配对 ----------
@@ -537,8 +547,31 @@ export const PatchAgentBody = z.object({
   /** 新任务默认用的模型、思考强度；null 恢复为 Agent 自己的默认值 */
   defaultModel: z.string().min(1).max(200).nullable().optional(),
   defaultEffort: z.string().min(1).max(50).nullable().optional(),
+  /** 2026-11-07 新增：启用 / 关闭这个 Agent */
+  enabled: z.boolean().optional(),
 });
 export type PatchAgentBody = z.infer<typeof PatchAgentBody>;
+
+// ---------- 任务草稿（输入框里没发出去的文字和注释，按任务保存，换设备也在；design.md 15.2） ----------
+export const DraftAnnotation = z.object({
+  id: z.string().min(1).max(40),
+  /** 选中的原文（显示用，可能截断） */
+  text: z.string().max(4001),
+  /** 原文在对话文字里的完整内容和大致位置，恢复时按它重新定位；找不到就只保留注释 */
+  raw: z.string().max(4001).optional(),
+  pos: z.number().int().min(-1).optional(),
+  comment: z.string().max(2000),
+});
+export type DraftAnnotation = z.infer<typeof DraftAnnotation>;
+export const TaskDraft = z.object({
+  text: z.string().max(100_000),
+  annotations: z.array(DraftAnnotation).max(50),
+  updatedAt: Ts.nullable(),
+});
+export type TaskDraft = z.infer<typeof TaskDraft>;
+/** PUT /tasks/:id/draft：文字为空且没有注释时等于删除草稿 */
+export const PutTaskDraftBody = TaskDraft.omit({ updatedAt: true });
+export type PutTaskDraftBody = z.infer<typeof PutTaskDraftBody>;
 export const RedetectResult = z.object({ items: z.array(AgentInfo) });
 
 /** 只表示“成功”的响应（取消登录、提交授权码等） */

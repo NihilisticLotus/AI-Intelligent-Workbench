@@ -4,8 +4,8 @@
 // 桌面和手机应用是 Authorization: Bearer。
 import {
   AgentInfo, AgentLoginResult, AgentProfile, AgentTestResult, API_BASE, ApiError, Approval, DeleteProfileResult, Device, ErrorCode, EventEnvelope,
-  FsBrowseResult, Group, Hello, OkResult, Page, PairingCompleteResult, PairingStartResult, Project, RedetectResult, Task,
-  type AgentKind, type AgentLoginBody, type CreateProfileBody, type DeviceKind, type PatchAgentBody, type PatchProfileBody,
+  FsBrowseResult, Group, Hello, OkResult, Page, PairingCompleteResult, PairingStartResult, Project, RedetectResult, Task, TaskDraft,
+  type AgentKind, type AgentLoginBody, type CreateProfileBody, type DeviceKind, type PatchAgentBody, type PatchProfileBody, type PutTaskDraftBody,
 } from '@aic/protocol';
 import { z } from 'zod';
 
@@ -197,6 +197,9 @@ export class HttpClient {
   agents() { return this.request('GET', '/agents', { parse: listOf(AgentInfo) }).then((r) => r.items); }
 
   // ---------- 1.2：真实 Agent、登录、账号（phase-1.md 6.6.2） ----------
+  /** 任务草稿（输入框里没发出去的文字和注释） */
+  getDraft(taskId: string) { return this.request('GET', `/tasks/${encodeURIComponent(taskId)}/draft`, { parse: TaskDraft }); }
+  putDraft(taskId: string, body: PutTaskDraftBody) { return this.request('PUT', `/tasks/${encodeURIComponent(taskId)}/draft`, { body, parse: TaskDraft }); }
   /** 重新检测全部 Agent（版本、登录、能力缓存失效） */
   redetectAgents() { return this.request('POST', '/agents/redetect', { body: {}, parse: RedetectResult }).then((r) => r.items); }
   /** 返回值以服务端为准：给了 AgentInfo 就用，否则返回 null，由调用方重新拉 /agents */

@@ -14,15 +14,20 @@ export const isRealAgent = (kind: AgentKind | string): boolean => kind !== 'fake
 // 状态
 // ---------------------------------------------------------------------
 export function agentStatusText(s: string): string {
-  return ({ ready: '就绪', needs_login: '需要登录', not_installed: '未安装', error: '出错', disabled: '已停用' } as Record<string, string>)[s] ?? s;
+  return ({ ready: '就绪', needs_login: '需要登录', not_installed: '未安装', error: '出错', disabled: '已关闭' } as Record<string, string>)[s] ?? s;
 }
 
 /** 卡片上的状态：就绪但版本没验证过时显示“未验证版本”（琥珀菱形，照常可用） */
 export function agentStatusView(a: AgentInfo): { text: string; shape: StatusShape } {
   if (a.status === 'ready' && !a.verified && (a.version || a.adapterVersion || a.engineVersion)) return { text: '未验证版本', shape: 'wait' };
+  // 装了但还不能用（WorkBuddy 精简引擎、ZCode 等桥接）：不是故障，显示“暂不支持”
+  if (a.unsupported) return { text: '暂不支持', shape: 'err' };
   const shape: Record<AgentInfo['status'], StatusShape> = { ready: 'ok', needs_login: 'wait', not_installed: 'idle', error: 'err', disabled: 'idle' };
   return { text: agentStatusText(a.status), shape: shape[a.status] };
 }
+
+/** 用户是否启用了这个 Agent（Agent 页的开关）；老 Gateway 没有这个字段时都算启用 */
+export const isEnabled = (a: Pick<AgentInfo, 'enabled'>): boolean => a.enabled !== false;
 
 /** 能不能派发任务；不能时给出原因（新建任务对话框、切换器显示） */
 export function agentReadiness(a: AgentInfo | undefined): { ready: boolean; reason: string | null } {
@@ -31,8 +36,8 @@ export function agentReadiness(a: AgentInfo | undefined): { ready: boolean; reas
   const base = {
     needs_login: `${a.displayName} 还没有登录`,
     not_installed: `这台电脑上没有找到 ${a.displayName}`,
-    error: `${a.displayName} 检测出错`,
-    disabled: `${a.displayName} 已停用`,
+    error: a.unsupported ? `${a.displayName} 暂时不能在工作台里使用` : `${a.displayName} 检测出错`,
+    disabled: `${a.displayName} 已关闭`,
     ready: '',
   }[a.status];
   return { ready: false, reason: joinReason(base, a.message) };

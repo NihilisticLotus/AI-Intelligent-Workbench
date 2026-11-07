@@ -163,7 +163,7 @@ export const ProfileSummary = z.object({
   loggedIn: z.boolean().nullable(),
   /**
    * 1.2 审查后新增：会话存在哪（不透明的键，客户端只比较是否相等）。
-   * 和任务当前账号的值相同 → 换账号后能恢复原来的会话；不同 → 需要交接（第 1.4 步），Gateway 会拒绝
+   * 和任务当前账号的值相同 → 换账号后能恢复原来的会话；不同 → 需要交接（之后的版本），Gateway 会拒绝
    */
   sessionStore: z.string().optional(),
 });
@@ -593,11 +593,12 @@ export const TaskDraft = z.object({
   text: z.string().max(100_000),
   annotations: z.array(DraftAnnotation).max(50),
   attachments: z.array(Id).max(10).optional(),
+  expiredAttachments: z.boolean().optional(),
   updatedAt: Ts.nullable(),
 });
 export type TaskDraft = z.infer<typeof TaskDraft>;
 /** PUT /tasks/:id/draft：文字为空且没有注释时等于删除草稿 */
-export const PutTaskDraftBody = TaskDraft.omit({ updatedAt: true });
+export const PutTaskDraftBody = TaskDraft.omit({ updatedAt: true, expiredAttachments: true });
 export type PutTaskDraftBody = z.infer<typeof PutTaskDraftBody>;
 export const RedetectResult = z.object({ items: z.array(AgentInfo) });
 

@@ -5,7 +5,7 @@ import { FeatureKey, type DraftAnnotation, type TaskDraft } from '@aic/protocol'
 import { api, appStore } from './app';
 
 const SAVE_DELAY = 800;
-const local = new Map<string, { text: string; annotations: DraftAnnotation[] }>();
+const local = new Map<string, { text: string; annotations: DraftAnnotation[]; attachments?: string[] }>();
 const timers = new Map<string, ReturnType<typeof setTimeout>>();
 const loaded = new Map<string, Promise<TaskDraft | null>>();
 
@@ -36,7 +36,7 @@ async function flush(taskId: string) {
 }
 
 /** 记下最新草稿，稍后保存 */
-export function saveDraft(taskId: string, d: { text: string; annotations: DraftAnnotation[] }) {
+export function saveDraft(taskId: string, d: { text: string; annotations: DraftAnnotation[]; attachments?: string[] }) {
   local.set(taskId, d);
   const t = timers.get(taskId);
   if (t) clearTimeout(t);

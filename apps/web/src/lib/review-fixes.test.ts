@@ -44,7 +44,7 @@ describe('第 18 条：换账号按会话存放位置标注', () => {
     expect(profileSwitchKind({ sessionStore: 'shared' }, { sessionStore: 'profile:pf_2' })).toBe('handoff');
     expect(profileSwitchKind(null, { sessionStore: 'shared' })).toBe('resume');
     expect(profileSwitchKind({}, {})).toBe('resume');
-    expect(profileSwitchText.handoff).toContain('1.4');
+    expect(profileSwitchText.handoff).toContain('需要交接');
     expect(profileSwitchText.resume).not.toContain('无损');
   });
 });

@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { GATEWAY_LOG, gatewayLog, installCrashHandlers } from '../src/crash-log';
+import { GATEWAY_LOG, gatewayLog, installCrashHandlers, lifecycle, readLastExit } from '../src/crash-log';
 
 describe('兜底错误处理（ISSUE-0015）', () => {
   const cleanups: (() => void)[] = [];
@@ -43,5 +43,9 @@ describe('兜底错误处理（ISSUE-0015）', () => {
     const { dir, log } = setup();
     gatewayLog(dir, 'ERROR', '请求失败 Authorization: Bearer sk-ant-abcdefghijklmnopqrstuvwxyz0123');
     expect(log()).not.toContain('sk-ant-abcdefghijklmnopqrstuvwxyz0123');
+  });
+  it('致命错误即使完成收尾也不算正常退出', () => {
+    const {dir}=setup();lifecycle(dir,'start',Date.now(),'启动');lifecycle(dir,'exit',Date.now(),'未捕获异常',1);
+    expect(readLastExit(dir)).toMatchObject({clean:false,reason:'未捕获异常'});
   });
 });

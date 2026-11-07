@@ -99,7 +99,7 @@ export interface Gateway {
    * 关闭。deadlineMs：给“正常收尾”（停止回合、关闭会话）的时间上限，到点后先同步结束所有 Agent 进程树，
    * 再写库收尾。关闭控制台窗口（SIGHUP）时系统约 10 秒后强制结束 Node，必须先保证进程树被结束。
    */
-  close(opts?: { deadlineMs?: number; reason?: string }): Promise<void>;
+  close(opts?: { deadlineMs?: number; reason?: string; code?: number }): Promise<void>;
 }
 
 export const DEV_CODE_FILE = 'dev-pairing-code.txt';
@@ -255,7 +255,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   let closed = false;
   return {
     port, url, services,
-    async close(opts: { deadlineMs?: number; reason?: string } = {}) {
+    async close(opts: { deadlineMs?: number; reason?: string; code?: number } = {}) {
       if (closed) return;
       closed = true;
       clearInterval(cleanupTimer);
@@ -275,7 +275,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
       await new Promise<void>((r) => { server.close(() => r()); server.closeAllConnections?.(); });
       db.close();
       if (dev) rmSync(devCodeFile, { force: true });
-      lifecycle(dataDir, 'exit', startedAt, opts.reason ?? '正常退出', 0);
+      lifecycle(dataDir, 'exit', startedAt, opts.reason ?? '正常退出', opts.code ?? 0);
       lock.release();
     },
   };
@@ -314,7 +314,7 @@ async function main() {
     onFatal: () => {
       const done = () => process.exit(1);
       const t = setTimeout(done, 3000); t.unref?.();
-      if (gwRef) void gwRef.close({ deadlineMs: 2500 }).catch(() => {}).finally(done); else done();
+      if (gwRef) void gwRef.close({ deadlineMs: 2500, reason: '未捕获异常', code: 1 }).catch(() => {}).finally(done); else done();
     },
   });
   gatewayLog(dataDir, 'INFO', `启动 v${VERSION}，Node ${process.version}，pid ${process.pid}`);

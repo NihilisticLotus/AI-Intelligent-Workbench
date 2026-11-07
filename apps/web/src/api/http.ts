@@ -3,7 +3,7 @@
 // 凭据由 getAuthHeaders 提供（见 credentials.ts）：浏览器是 HttpOnly Cookie（credentials: 'include'）+ X-AIC-Key，
 // 桌面和手机应用是 Authorization: Bearer。
 import {
-  AgentInfo, AgentLoginResult, AgentProfile, AgentTestResult, API_BASE, ApiError, Approval, DeleteProfileResult, Device, ErrorCode, EventEnvelope,
+  AttachmentInfo, AgentInfo, AgentLoginResult, AgentProfile, AgentTestResult, API_BASE, ApiError, Approval, DeleteProfileResult, Device, ErrorCode, EventEnvelope,
   FsBrowseResult, Group, Hello, OkResult, Page, PairingCompleteResult, PairingStartResult, Project, RedetectResult, Task, TaskDraft,
   type AgentKind, type AgentLoginBody, type CreateProfileBody, type DeviceKind, type PatchAgentBody, type PatchProfileBody, type PutTaskDraftBody,
 } from '@aic/protocol';
@@ -144,6 +144,26 @@ export class HttpClient {
     }
   }
 
+  attachmentInfo(taskId: string, id: string) { return this.request('GET', `/tasks/${encodeURIComponent(taskId)}/attachments/${encodeURIComponent(id)}/info`, { parse: AttachmentInfo }); }
+  async attachmentBlob(taskId: string, id: string): Promise<Blob> {
+    const res = await this.fetchImpl(this.baseUrl + API_BASE + `/tasks/${encodeURIComponent(taskId)}/attachments/${encodeURIComponent(id)}`, { credentials: 'include', headers: this.opts.getAuthHeaders?.() });
+    if (!res.ok) { const body = ApiError.parse(await res.json()); if (res.status === 401) this.opts.onUnauthorized?.(body); throw new ApiRequestError(body, res.status); }
+    return res.blob();
+  }
+  uploadAttachment(taskId: string, file: File, progress: (n: number) => void, signal?: AbortSignal): Promise<AttachmentInfo> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', this.baseUrl + API_BASE + `/tasks/${encodeURIComponent(taskId)}/attachments`); xhr.withCredentials = true;
+      xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream'); xhr.setRequestHeader('X-AIC-Filename', encodeURIComponent(file.name));
+      for (const [key,value] of Object.entries(this.opts.getAuthHeaders?.() ?? {})) xhr.setRequestHeader(key,value);
+      xhr.upload.onprogress = (ev) => { if(ev.lengthComputable) progress(Math.round(ev.loaded / ev.total * 100)); };
+      const abort = () => xhr.abort(); const cleanup = () => signal?.removeEventListener('abort', abort);
+      xhr.onload = () => { cleanup(); try { const data: unknown = JSON.parse(xhr.responseText); if(xhr.status >= 200 && xhr.status < 300) resolve(AttachmentInfo.parse(data)); else { const error = ApiError.parse(data); if(xhr.status === 401)this.opts.onUnauthorized?.(error); reject(new ApiRequestError(error,xhr.status)); } } catch { reject(new Error('上传响应无法识别')); } };
+      xhr.onerror = () => { cleanup(); reject(new Error('附件上传失败，请检查连接后重试')); }; xhr.onabort = () => { cleanup(); reject(new Error('附件上传已取消')); };
+      if(signal?.aborted) { reject(new Error('附件上传已取消'));return; }signal?.addEventListener('abort',abort,{once:true});xhr.send(file);
+    });
+  }
+
   // ---------- 具体接口 ----------
   hello() { return this.request('GET', '/hello', { parse: Hello }); }
   pairingStart() { return this.request('POST', '/pairing/start', { body: {}, parse: PairingStartResult }); }
@@ -185,7 +205,7 @@ export class HttpClient {
     projectId: string; groupId: string | null; prompt: string; title?: string;
     agent: string; model: string | null; effort: string | null; permission: string;
     /** 1.2：不传或 null 表示用该 Agent 的默认账号 */
-    profileId?: string | null;
+    profileId?: string | null; deferPrompt?: boolean; attachments?: string[];
   }) { return this.request('POST', '/tasks', { body, parse: oneOf(Task) }); }
   patchTask(id: string, body: { title?: string; groupId?: string | null; permission?: string; profileId?: string | null }) {
     return this.request('PATCH', `/tasks/${encodeURIComponent(id)}`, { body, parse: oneOf(Task) });

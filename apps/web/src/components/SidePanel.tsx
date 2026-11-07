@@ -85,12 +85,12 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
               {config.usage.cost ? `，花费 ${config.usage.cost.amount.toFixed(2)} ${config.usage.cost.currency}` : ''}</dd></>
           ) : null}
           <dt>权限</dt><dd>{permInfo[task.permission].label}</dd>
-          <dt>工作区</dt><dd>{isRealAgent(task.agent) ? '直接在项目目录里修改；独立工作副本在第 1.3 步提供' : '独立工作副本在第 1.3 步提供'}</dd>
+          <dt>工作区</dt><dd>{isRealAgent(task.agent) ? '直接在项目目录里修改；独立工作副本将在后续版本提供' : '独立工作副本将在后续版本提供'}</dd>
         </dl>
       </div>
 
       <div className="side-body" id="sp-diff" role="tabpanel" aria-labelledby="st-diff" hidden={tab !== 'diff'}>
-        <div className="empty"><h3>改动面板在第 1.3 步提供</h3><p>那时 Agent 的每处修改都会先进这里，看完 diff 再决定合并、丢弃或回滚。</p></div>
+        <div className="empty"><h3>改动面板在有了独立工作副本后提供</h3><p>那时 Agent 的每处修改都会先进这里，看完 diff 再决定合并、丢弃或回滚。</p></div>
       </div>
     </aside>
   );

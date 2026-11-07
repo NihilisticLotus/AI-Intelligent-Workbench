@@ -10,7 +10,7 @@
 |---|---|---|---|---|
 | 1.1 骨架 | 已完成 | 工程结构、共享协议包、Gateway（HTTP + WebSocket、令牌鉴权、事件库）、假 Agent、网页外壳（侧栏、对话、右侧面板）、双击启动脚本 | 2、3、10、13、14、15、16.4 | 双击启动后浏览器自动打开；和假 Agent 完成一次带工具调用和审批的对话；刷新页面、断网重连后对话完整恢复 |
 | 1.2 接入真实 Agent | 已通过，遗留项并入 1.3 | ACP 客户端；Claude Code、Codex、CodeBuddy 适配器；能力探测；Agent 管理页；账号配置；会话内换模型和思考强度；启用开关；草稿与注释；回复按轮显示 | 6、7.4（H0/H1） | 三个 Agent 都能在网页里登录、选模型、完成对话、换模型不丢上下文（验收见 `docs/acceptance/step-1.2.md`，未验证项见第 7.2 节） |
-| 1.3 稳定、补验与输入框 | 下一步 | 修实时事件和 Gateway 稳定性问题；用真实 Agent 补完 1.2 没验证的项；统一的 Agent · 模型 · 思考强度选择器；附件与图片（粘贴、拖入、选择，模型看不了图时警告） | design 15.2、17；ui 6.5、6.16 | 见 8.1 |
+| 1.3 稳定、补验与输入框 | 实现与演示验收完成，待真实补验 | 修实时事件和 Gateway 稳定性问题；用真实 Agent 补完 1.2 没验证的项；统一的 Agent · 模型 · 思考强度选择器；附件与图片（粘贴、拖入、选择，模型看不了图时警告） | design 15.2、17；ui 6.5、6.16 | 见 8.1 |
 | 1.4 界面改版与用量 | 未开始 | 轻量化样式；新建任务起始页；右侧“详细”（环境、计划、上下文、会话 token 用量、连接、输出）；上下文圆环；每轮用量；对话导航条；账号额度和上下文明细的调研 | design 15.1、15.5；ui 6.11～6.15 | 见 8.2 |
 | 1.5 任务与工作区 | 未开始（原 1.3） | git worktree；非 git 项目的影子快照；改动（diff）面板；合并 / 丢弃 / 回滚；权限规则和“总是允许”；开放“工作区内自动 / 全自动”；看板；“详细 → 输出”改为工作副本的改动 | 8、9、13 | 在 git 项目和非 git 项目各完成一个改代码的任务，并分别合并和回滚 |
 | 1.6 上下文与交接 | 未开始（原 1.4） | 任务账本、`.aic/TASK.md`、自动交接 H2–H4、覆盖校验、`aic_history` 工具、交接分隔条；换 Agent 发送消息时才交接；换账号的交接 | 7；ui 6.5、6.8 | 同一任务从 Claude Code 交接到 Codex，全程不弹窗，交接后继续完成且不重复已做的改动；选了别的 Agent 但没发消息时不交接、可以撤销 |
@@ -695,7 +695,7 @@ ErrorCode 增加：`agent.auth_required`、`agent.quota_exceeded`、`agent.crash
 
 1. 补齐退出记录：`process.on('exit', code)` 记录退出码；关掉控制台窗口的 `SIGHUP` 已经处理（`server.ts:334-336`，3 秒内停止），在它和 SIGINT、SIGTERM 里各记一条 INFO 写明原因（“控制台窗口被关闭”“按了 Ctrl+C”“收到结束信号”）；`SIGBREAK`（Ctrl+Break）按 SIGINT 处理。每条带 pid 和已运行时长。
 2. 启动时检查上一次的结尾：读 `gateway.log` 最后一条，如果是“启动”或“已启动”而没有对应的“退出”，记一条 WARN“上次运行没有正常退出（pid N，最后记录在 …）”。这条信息也放进 `GET /hello` 的可选字段 `lastExit: { clean: boolean, at: number, reason: string | null } | null`，网页设置页“关于”里显示。
-3. 网页判断“服务已停止”：`ws.ts` 连续重连失败超过 3 次（约 3 秒）后，用 `fetch(baseUrl + '/api/v1/hello')` 探测；连不上（网络错误，不是 401）时 `ConnState` 新增 `'down'`（只增），界面：
+3. 网页判断“服务已停止”：`ws.ts` 连续连接失败达到 3 次后（现有 0.5 / 1 秒退避，约 1.5 秒），用 `fetch(baseUrl + '/api/v1/hello')` 探测；连不上（网络错误，不是 401）时 `ConnState` 新增 `'down'`（只增），界面：
    - 输入框上方的提示改为“工作台服务已停止，对话不会丢。双击桌面上的“启动 AI Console”可以重新打开；打开后这里会自动恢复。”；
    - 侧栏状态点变红，文字“服务已停止”；
    - 之后每 5 秒探测一次，恢复后自动重连并补齐事件（沿用 `resyncAfterReconnect`）。
@@ -794,7 +794,7 @@ op('prompt', z.object({ taskId: Id, text: z.string().max(100_000), attachments: 
 ```
 
 - 能不能看图的判断顺序：`ModelInfo.vision`（Agent 报告了模型级信息时）→ `AgentInfo.caps.prompt.image`（ACP initialize 的 `promptCapabilities.image`）→ null（未知）。工具函数 `visionOf(info, modelId): true | false | null` 写在 `packages/protocol`，两边共用。
-  - 现在三家都只有 Agent 级的 `promptCapabilities.image`（补验：Codex、CodeBuddy 都是 true）。模型级信息拿不到，所以 `ModelInfo.vision` 先一律不填；CodeBuddy 的模型里有明显的纯文本模型（例如 deepseek 系列），能否从 CodeBuddy 的私有扩展拿到模型能力，在实现时查 `_codebuddy.ai/*` 并写进验收记录，拿不到就保持 null。
+  - 2026-11-08 实现核查：CodeBuddy 的 `toAcpModelInfo` 在模型 `_meta.supportsImages` 中明确报告图片能力，`_codebuddy.ai/models/refresh` 和会话模型列表共用它；解析明确的布尔值到 `ModelInfo.vision`。没有这个字段的模型保持未知并按上述顺序回退，不按模型名猜测。源码依据和真实验证边界见验收记录。
 - 新增错误码：`attachment.unsupported`（415，Agent 不能看图）、`attachment.too_large`（413）、`attachment.too_many`（400）、`attachment.not_found`（404）、`attachment.bad_type`（415）。
 
 #### 9.9.2 Gateway
@@ -806,6 +806,7 @@ op('prompt', z.object({ taskId: Id, text: z.string().max(100_000), attachments: 
   - 存放：`<数据目录>/attachments/<taskId>/<attId>`，文件名只用 id，原文件名存在库里。新表 `attachments(id, task_id, name, mime, size, kind, width, height, sha256, created_at, used_at)`（迁移 v5，和 9.6 的 `model_failures` 同一个迁移）。
   - 返回 `AttachmentInfo`。
 - `GET /tasks/:id/attachments/:attId`：返回文件内容（`Content-Type` 用库里的 mime，图片之外一律 `Content-Disposition: attachment`，加 `X-Content-Type-Options: nosniff`），给网页显示缩略图和大图用。鉴权同其他接口。
+- 元数据路由 `GET /tasks/:id/attachments/:attId/info` 返回 `AttachmentInfo`，供刷新后恢复草稿；同样校验令牌、Host、Origin 和任务归属。
 - 发送：`prompt` 和 `POST /tasks` 带 `attachments` 时，Gateway 校验每个 id 都属于这个任务、文件存在；有图片且 `visionOf` 为 false 时返回 `attachment.unsupported`（message “X · 模型 看不了图片”，actions `[换模型]`）。为 null 时照常发送（网页那边已经问过用户）。
 - 清理：任务删除时删掉整个目录；上传后 24 小时没有被任何消息引用的附件删除（启动时和每小时检查一次）。
 - `message.user` 事件里带 `attachments`（只有元数据，不带内容）。
@@ -835,7 +836,7 @@ op('prompt', z.object({ taskId: Id, text: z.string().max(100_000), attachments: 
   - null：提示“没有报告能不能看图片，可能收不到”，多一个 [仍然发送]。
   - 换模型后提示随之更新。
 - 对话里你的消息显示附件：图片缩略图（最多 120 × 90，点开看大图），文件显示为一行带图标的文件名；图片地址同样走 `GET` 接口。
-- 每个任务的输入框附件和草稿一起保存？不保存：附件已经上传在服务端，草稿只多存一个附件 id 列表（`TaskDraft` 增加可选 `attachments: Id[]`），刷新后恢复缩略图；24 小时清理规则对草稿里的附件也适用，过期的从草稿里去掉并提示。
+- 每个任务的输入框附件和草稿一起保存？不保存：附件已经上传在服务端，草稿只多存一个附件 id 列表（`TaskDraft` 增加可选 `attachments: Id[]`），刷新后恢复缩略图；24 小时清理规则对草稿里的附件也适用，过期的从草稿里去掉并提示。`GET /draft` 可选返回 `expiredAttachments: true` 告知本次移除了过期引用；该字段只在响应里出现。
 - 纯函数测试（`lib/attachments.ts`）：粘贴事件的文件筛选、截图命名、超限判断、`visionOf` 的提示文案和推荐模型。
 
 ### 9.10 H：零碎修复

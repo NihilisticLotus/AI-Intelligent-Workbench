@@ -12,7 +12,11 @@ import {
 } from '../lib/agents';
 import { AgentBadge, ErrorNotice, asApiError, choiceDialog, confirmDialog, openMenu, toastErrorOf, useAgentName } from './ui';
 import { Icon } from './Icon';
-import { useDismiss } from './hooks';
+import { AgentPicker } from './AgentPicker';
+import { Attachments, useAttachments, useAttachmentInput } from './Attachments';
+import { visionWarning } from '../lib/attachments';
+import { platform } from '../platform';
+import { useNow, useDismiss } from './hooks';
 import { requestFocusApproval, switcherRequestStore, type SwitcherSection } from './focus';
 import { TaskError } from './Chat';
 import { AnnotationChip, clearAnnotations, draftAnnotations, onAnnotationsChanged, restoreAnnotations, useAnnotations } from './Annotations';
@@ -22,6 +26,18 @@ import { composeWithAnnotations } from '../lib/annotations';
 const busyStatuses = new Set<Task['status']>(['running', 'waiting', 'queued']);
 
 export function Composer({ task, pending, config, blocking }: { task: Task; pending: Approval[]; config: SessionCfg; blocking?: ApiError | null }) {
+  const attachments = useAttachments(task.id);
+  const attachmentInput = useAttachmentInput(attachments.add);
+  const info = useApp((s)=>s.agents.find((a)=>a.kind===task.agent));
+  const visionInfo = info ? {...info,models:pickModels(info,config)} : undefined;
+  const imageCount = attachments.items.filter((a)=>a.info?.kind==='image').length;
+  const warning = visionWarning(visionInfo,config.model,imageCount);
+  const [blocked,setBlocked]=useState(false);
+  const attachmentIds=useRef<string[]>([]);attachmentIds.current=attachments.ids;
+  const now=useNow(1000);
+  const logs=useApp((s)=>s.logs[task.id]);
+  const lastUser=logs?.findLast((e)=>e.type==='message.user');
+  const idleNotice=logs?.some((e)=>e.type==='session.notice'&&e.data.id&&e.ts>=(lastUser?.ts??Infinity));
   const conn = useApp((s) => s.conn);
   const online = conn === 'online' || conn === 'replaying';
   // 草稿（文字 + 注释）按任务保存在 Gateway：先用本页内存里的，再用服务端读回来的补上（state/drafts.ts）
@@ -30,39 +46,46 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
   const [sendErr, setSendErr] = useState<ApiError | null>(null);
   const ta = useRef<HTMLTextAreaElement>(null);
   const ready = useRef(false);
+  const [draftReady,setDraftReady]=useState(false);
 
   // 对话里选中文字添加的注释：发送时附在消息后面（Annotations.tsx）
   const annos = useAnnotations(task.id);
 
   useEffect(() => {
     let alive = true;
-    ready.current = !!localDraft(task.id);
-    void loadDraft(task.id).then((d) => {
+    ready.current = false;
+    void loadDraft(task.id).then(async (d) => {
       if (!alive) return;
+      if(d?.expiredAttachments)toast('草稿中的附件已过期，请重新添加','attn');
       if (d && !localDraft(task.id)) {
         if (d.text) setText((t) => t || d.text);
         if (d.annotations.length) restoreAnnotations(task.id, d.annotations);
       }
-      ready.current = true;
+      const saved = localDraft(task.id) ?? d;
+      if(saved?.attachments?.length)await attachments.restore(saved.attachments);
+      if(!alive)return;
+      ready.current = true;setDraftReady(true);
     });
     // 注释改了（添加、评论、删除）也保存
-    const off = onAnnotationsChanged((id) => { if (id === task.id && ready.current) saveDraft(id, { text: ta.current?.value ?? '', annotations: draftAnnotations(id) }); });
+    const off = onAnnotationsChanged((id) => { if (id === task.id && ready.current) saveDraft(id, { text: ta.current?.value ?? '', annotations: draftAnnotations(id), attachments: attachmentIds.current }); });
     return () => { alive = false; off(); };
   }, [task.id]);
   useEffect(() => {
-    if (ready.current) saveDraft(task.id, { text, annotations: draftAnnotations(task.id) });
-  }, [task.id, text]);
+    if (draftReady) saveDraft(task.id, { text, annotations: draftAnnotations(task.id), attachments: attachments.ids });
+  }, [task.id, text, attachments.ids.join(','),draftReady]);
 
   const working = busyStatuses.has(task.status);
-  const canSend = online && !working && !sending && (text.trim().length > 0 || annos.length > 0);
+  const canSend = online && draftReady && !working && !sending && (text.trim().length > 0 || annos.length > 0 || attachments.ids.length>0) && !attachments.uploading && !attachments.failed;
 
-  const send = async () => {
+  const send = async (force = false) => {
     if (!canSend) return;
+    if(imageCount && (warning.vision===false || (warning.vision===null&&!force))){setBlocked(true);toast(warning.text,'attn');setTimeout(()=>document.querySelector<HTMLElement>('.attachment-warning button')?.focus(),0);setTimeout(()=>setBlocked(false),700);return;}
     const body = composeWithAnnotations(text, annos);
     setSending(true);
     setSendErr(null);
     try {
-      await sendPrompt(task.id, body);
+      await sendPrompt(task.id, body, attachments.ids);
+      attachments.clear();
       setText('');
       clearAnnotations(task.id);
       clearDraft(task.id);
@@ -76,6 +99,15 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
   const stop = async () => {
     try { await cancelTask(task.id); toast('已请求停止，Agent 会在当前步骤结束后停下'); } catch (e) { toastErrorOf(e, { taskId: task.id, kind: task.agent }); }
   };
+  const chooseImageModel = async (model:string) => {
+    try {
+      if(switchNeedsTurnEnd(task.status,'model',modelSwitchKind(info?.caps))){
+        const choice=await choiceDialog({title:'Agent 正在执行',body:<p>可以等当前步骤完成后切换，也可以立即中断这一轮。</p>,choices:[{value:'wait',label:'等当前步骤完成',primary:true},{value:'interrupt',label:'立即中断',danger:true}]});
+        if(!choice)return;queueSwitchAfterTurn(task.id,{kind:'model',patch:{model},label:'换模型'});
+        if(choice==='interrupt')await cancelTask(task.id);
+      }else await switchConfig(task.id,{model});
+    }catch(e){cancelPendingSwitch(task.id);setSendErr(asApiError(e));}
+  };
 
   const placeholder = !online ? '正在重新连接，恢复后可以继续发送'
     : task.status === 'waiting' ? '有审批等你处理，处理后 Agent 会继续'
@@ -88,7 +120,7 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
     <div className="composer">
       <div className="composer-inner">
         {!online ? (
-          <div className="offline-note" role="status"><Icon name="refresh" />和服务的连接断开了，正在重新连接…恢复后会自动补齐对话。</div>
+          <div className="offline-note" role="status"><Icon name="refresh" />{conn==='down'?'工作台服务已停止，对话不会丢。双击桌面上的“启动 AI Console”可以重新打开；打开后这里会自动恢复。':'和服务的连接断开了，正在重新连接…恢复后会自动补齐对话。'}{conn==='down'&&platform.restartGateway?<button type="button" className="btn" onClick={()=>void platform.restartGateway!()}>重新启动</button>:null}</div>
         ) : null}
         {blocking && !working ? <div className="composer-error"><TaskError error={blocking} task={task} compact /></div> : null}
         {sendErr ? <div className="composer-error"><ErrorNotice error={sendErr} ctx={{ taskId: task.id, kind: task.agent, busy: working }} onDismiss={() => setSendErr(null)} onAction={() => setSendErr(null)} /></div> : null}
@@ -100,7 +132,10 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
             <button type="button" className="btn sm ghost" onClick={() => requestFocusApproval(pending[0]!.id)}>跳到审批</button>
           </div>
         ) : null}
-        <div className="compose-box">
+        <div className={'compose-box'+(attachmentInput.dragging?' dragging':'')+(blocked?' attachment-blocked':'')} {...attachmentInput.handlers}>
+          {working&&idleNotice?<div className="attachment-warning" role="status">正在处理 · {Math.max(0,Math.floor((now-(lastUser?.ts??now))/1000))} 秒，Agent 暂时没有回应。<button type="button" className="btn sm" onClick={stop}>停止</button></div>:null}
+          <Attachments state={attachments} taskId={task.id} info={visionInfo} model={config.model} onModel={(model)=>void chooseImageModel(model)} onBlocked={()=>void send(true)}/>
+          <input type="file" multiple hidden ref={attachmentInput.input} onChange={(e)=>{attachments.add(Array.from(e.target.files??[]));e.target.value='';}}/>
           <AnnotationChip taskId={task.id} />
           <label htmlFor="prompt" className="sr-only">给 Agent 发消息</label>
           <textarea id="prompt" ref={ta} value={text} placeholder={placeholder} maxLength={100_000}
@@ -110,14 +145,14 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); }
             }} />
           <div className="compose-bar">
-            <button type="button" className="btn ghost icon sm" aria-label="添加附件（第 1.3 步提供）" title="添加附件：第 1.3 步提供" disabled><Icon name="clip" /></button>
+            <button type="button" className="btn ghost icon sm" aria-label="添加附件" title="选择文件或粘贴、拖入图片" onClick={()=>attachmentInput.input.current?.click()}><Icon name="clip" /></button>
             <Switcher task={task} config={config} online={online} />
             <span className="grow" />
             <PermChip task={task} online={online} />
             {working ? (
               <button type="button" className="btn" style={{ order: 7 }} onClick={stop} disabled={!online} aria-label="停止 Agent"><Icon name="stop" />停止</button>
             ) : null}
-            <button type="button" className="btn primary" aria-label="发送" disabled={!canSend} aria-busy={sending} onClick={send}><Icon name="send" />发送</button>
+            <button type="button" className="btn primary" aria-label="发送" disabled={!canSend} aria-busy={sending} onClick={()=>void send()}><Icon name="send" />发送</button>
           </div>
         </div>
       </div>
@@ -163,173 +198,28 @@ function cancelPendingSwitch(taskId: string) {
 }
 
 function Switcher({ task, config, online }: { task: Task; config: SessionCfg; online: boolean }) {
-  // 切换器的 Agent 列表只放已启用的；当前任务的 Agent 即使被关掉也照常显示（design.md 6.7）
-  const allAgents = useApp((s) => s.agents);
-  const agents = useMemo(() => allAgents.filter((a) => isEnabled(a) || a.kind === task.agent), [allAgents, task.agent]);
-  const profilesOn = useApp((s) => !!s.hello?.features[FeatureKey.Profiles]);
+  const agents = useApp((s) => s.agents);
   const info = agents.find((a) => a.kind === task.agent);
-  const agentName = useAgentName(task.agent);
-  const [open, setOpen] = useState(false);
-  const [busy, setBusy] = useState<Busy>(null);
-  /** 切换失败：在弹出层里显示“发生了什么 + 怎么处理 + 按钮”，不只是一条会消失的提示 */
-  const [swErr, setSwErr] = useState<ApiError | null>(null);
-  const pendingSw = useStore(pendingSwitchStore, (m) => m[task.id] ?? null);
-  const pop = useRef<HTMLDivElement>(null);
-  const anchor = useRef<HTMLDivElement>(null);
-  const focusSection = useRef<SwitcherSection | null>(null);
-  const close = useMemo(() => () => setOpen(false), []);
-  useDismiss(open, pop, close, anchor);
-  useEffect(() => {
-    if (!open) return;
-    const sel = focusSection.current ? `[data-section="${focusSection.current}"] ` : '';
-    focusSection.current = null;
-    (pop.current?.querySelector<HTMLElement>(`${sel}[aria-selected="true"]:not([disabled]), ${sel}button:not([disabled])`)
-      ?? pop.current?.querySelector<HTMLElement>('button:not([disabled])'))?.focus();
-  }, [open]);
-  useEffect(() => { if (!open) setSwErr(null); }, [open]);
-
-  // 错误按钮“换模型”“换账号”：打开切换器并跳到对应一栏
-  const req = useStore(switcherRequestStore, (s) => s);
-  useEffect(() => {
-    if (!req || req.taskId !== task.id) return;
-    switcherRequestStore.set(() => null);
-    focusSection.current = req.section;
-    setOpen(true);
-  }, [req, task.id]);
-
-  const models = pickModels(info, config);
-  const efforts = pickEfforts(info, config);
-  const how = modelSwitchKind(info?.caps);
-  const profiles = info?.profiles ?? [];
-  const showProfiles = profilesOn && profiles.length > 1;
-  const curProfileId = config.profileId ?? task.profileId ?? profiles.find((p) => p.isDefault)?.id ?? null;
-  const curProfile = profiles.find((p) => p.id === curProfileId) ?? null;
-  const modelName = models.find((m) => m.id === config.model)?.name ?? config.model ?? 'Agent 默认模型';
-
-  const doneText = (kind: Exclude<Busy, null>) => (kind === 'effort' ? '已调整思考强度，从下一条消息生效'
-    : kind === 'profile' ? '已换账号：发下一条消息时会用新账号恢复原来的会话；恢复不了时对话里会提示'
-    : how === 'in_session' ? '已切换模型，从下一条消息生效'
-    : '已切换模型：发下一条消息时会恢复会话并生效');
-
-  const doSwitch = async (kind: Exclude<Busy, null>, patch: SwitchPatch, label: string) => {
-    if (busy) return;
-    setSwErr(null);
-    // Agent 正在执行：换账号、需要重启进程的换模型先问“等当前步骤完成 / 立即中断”（ui-design.md 6.5）
-    if (switchNeedsTurnEnd(task.status, kind, how)) {
-      const choice = await choiceDialog({
-        title: `Agent 正在执行，要${label}吗？`,
-        body: <p style={{ margin: 0 }}>{kind === 'profile' ? '换账号' : '换这个模型'}要先结束 Agent 进程再恢复会话。可以等当前这一轮结束后自动切换，也可以立即中断（和点 [停止] 一样）后切换。</p>,
-        choices: [{ value: 'wait', label: '等当前步骤完成', primary: true }, { value: 'interrupt', label: '立即中断', danger: true }],
-      });
-      if (!choice) return;
-      queueSwitchAfterTurn(task.id, { kind, patch, label });
-      setOpen(false);
-      if (choice === 'interrupt') {
-        try { await cancelTask(task.id); toast(`已请求停止，停下后会${label}`); } catch (e) { cancelPendingSwitch(task.id); toastErrorOf(e, { taskId: task.id, kind: task.agent }); }
-      } else {
-        toast(`这一轮结束后会${label}`);
-      }
-      return;
+  const [busy,setBusy] = useState<Busy>(null), [swErr,setSwErr] = useState<ApiError|null>(null);
+  const pendingSw = useStore(pendingSwitchStore,(m)=>m[task.id]??null);
+  const req=useStore(switcherRequestStore,(s)=>s),[requestKey,setRequestKey]=useState(0);
+  useEffect(()=>{if(req?.taskId===task.id){setRequestKey(req.n);switcherRequestStore.set(()=>null);}},[req,task.id]);
+  const doSwitch=async(kind:Exclude<Busy,null>,patch:SwitchPatch)=>{
+    if(busy)return;setSwErr(null);const label=kind==='model'?'换模型':kind==='profile'?'换账号':'调整思考强度';
+    if(switchNeedsTurnEnd(task.status,kind,modelSwitchKind(info?.caps))){
+      const choice=await choiceDialog({title:'Agent 正在执行',body:<p>可以等当前步骤完成后切换，也可以立即中断这一轮。</p>,choices:[{value:'wait',label:'等当前步骤完成',primary:true},{value:'interrupt',label:'立即中断',danger:true}]});
+      if(!choice)return;queueSwitchAfterTurn(task.id,{kind,patch,label});
+      if(choice==='interrupt')try{await cancelTask(task.id);}catch(e){cancelPendingSwitch(task.id);setSwErr(asApiError(e));}return;
     }
-    setBusy(kind);
-    try {
-      await switchConfig(task.id, patch);
-      toast(busyStatuses.has(task.status) ? `${doneText(kind).replace(/[：:].*$/, '')}，从下一条消息生效` : doneText(kind));
-      setOpen(false);
-    } catch (e) {
-      // 界面仍显示原值（值来自事件）；错误连同按钮留在弹出层里
-      setSwErr(withDefaultActions(asApiError(e), { taskId: task.id, kind: task.agent }));
-    } finally {
-      setBusy(null);
-    }
+    setBusy(kind);try{await switchConfig(task.id,patch);}catch(e){setSwErr(withDefaultActions(asApiError(e),{taskId:task.id,kind:task.agent}));}finally{setBusy(null);}
   };
-
-  const disabled = !online || busy !== null;
-  const hint = how === 'in_session' ? '换模型和思考强度保留完整上下文，从下一条消息生效。'
-    : how === 'resume' ? '这个 Agent 换模型时会先结束进程，再恢复原来的会话，对话不会丢。'
-    : '这个 Agent 不能恢复会话：换模型会新建会话，Agent 不记得之前的对话。';
-
-  return (
-    <div style={{ position: 'relative' }}>
-      <div className="switcher" role="group" aria-label="当前 Agent、账号、模型与思考强度" ref={anchor}>
-        <button type="button" aria-haspopup="dialog" aria-expanded={open} onClick={() => setOpen(!open)} aria-label={`切换 Agent，当前 ${agentName}`}>
-          <AgentBadge kind={task.agent} size="sm" />{agentName}<Icon name="down" />
-        </button>
-        {showProfiles ? (
-          <button type="button" aria-haspopup="dialog" aria-expanded={open} className="hide-narrow"
-            onClick={() => { focusSection.current = 'profile'; setOpen(!open); }}
-            aria-label={`切换账号，当前 ${curProfile?.name ?? '默认账号'}`}>
-            {curProfile?.name ?? '默认账号'}<Icon name="down" />
-          </button>
-        ) : null}
-        <button type="button" aria-haspopup="dialog" aria-expanded={open} onClick={() => { focusSection.current = 'model'; setOpen(!open); }}
-          aria-label={`切换模型和思考强度，当前 ${modelName}${config.effort ? '，思考强度' + config.effort : ''}`} aria-busy={busy !== null}>
-          {busy ? <span className="muted">正在切换…</span> : <>{modelName}{config.effort && efforts ? <span className="muted">· {config.effort}</span> : null}</>}<Icon name="down" />
-        </button>
-      </div>
-      {open ? (
-        <div className="popover switch-pop" ref={pop} role="dialog" aria-label="切换 Agent、账号、模型与思考强度">
-          {swErr ? <ErrorNotice error={swErr} ctx={{ taskId: task.id, kind: task.agent, busy: busyStatuses.has(task.status) }}
-            onDismiss={() => setSwErr(null)} onAction={() => { setSwErr(null); setOpen(false); }} /> : null}
-          {pendingSw ? (
-            <div className="hint" role="status">这一轮结束后会{pendingSw.label}。
-              <button type="button" className="linkish" onClick={() => { cancelPendingSwitch(task.id); toast('已取消待执行的切换'); }}>不换了</button></div>
-          ) : null}
-          <div className="group-label">Agent</div>
-          {agents.map((a) => {
-            const cur = a.kind === task.agent;
-            const r = agentReadiness(a);
-            return (
-              <button key={a.kind} type="button" className="opt" aria-selected={cur} aria-disabled={!cur} disabled={!cur}
-                title={cur ? undefined : r.ready ? '换 Agent 需要交接，第 1.4 步提供' : r.reason ?? undefined}>
-                <AgentBadge kind={a.kind} />{a.displayName}<span className="meta">{cur ? '当前' : r.ready ? '交接：第 1.4 步提供' : r.reason ? '未就绪' : ''}</span>
-              </button>
-            );
-          })}
-          {showProfiles ? (
-            <div data-section="profile">
-              <div className="group-label">账号</div>
-              {profiles.map((p) => {
-                const cur = p.id === curProfileId;
-                // 会话存放位置不同的账号（例如本机登录 ↔ 独立配置目录）：换过去原来的会话一定恢复不了，需要交接
-                const sk = profileSwitchKind(curProfile, p);
-                const blocked = !cur && sk === 'handoff';
-                return (
-                  <button key={p.id} type="button" className="opt" aria-selected={cur} disabled={disabled || blocked}
-                    title={blocked ? '这个账号的会话存在别的地方，换过去 Agent 会不记得之前的对话；交接在第 1.4 步提供，现在可以用它新建任务' : undefined}
-                    onClick={() => { if (!cur) void doSwitch('profile', { profileId: p.id }, `换成账号“${p.name}”`); else setOpen(false); }}>
-                    {p.name}<span className="meta">{cur ? '当前' : p.loggedIn === false ? '未登录' : `${profileKindText[p.kind]} · ${profileSwitchText[sk]}`}</span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
-          <div data-section="model">
-            <div className="group-label">模型</div>
-            {models.length ? models.map((m) => {
-              const cur = m.id === config.model;
-              return (
-                <button key={m.id} type="button" className="opt" aria-selected={cur} disabled={disabled}
-                  onClick={() => { if (!cur) void doSwitch('model', { model: m.id }, `换成模型 ${m.name}`); else setOpen(false); }}>
-                  {m.name}<span className="meta">{cur ? '当前' : switchKindText[how]}</span>
-                </button>
-              );
-            }) : <div className="opt" aria-disabled="true">Agent 默认模型<span className="meta">{emptyModelsText(info)}</span></div>}
-            <div className="group-label" id="eff-l">思考强度</div>
-            {efforts ? (
-              <div className="seg" role="radiogroup" aria-labelledby="eff-l">
-                {efforts.map((x) => (
-                  <button key={x} type="button" role="radio" aria-checked={x === config.effort} disabled={disabled}
-                    onClick={() => { if (x !== config.effort) void doSwitch('effort', { effort: x }, `把思考强度改为 ${x}`); }}>{x}</button>
-                ))}
-              </div>
-            ) : <div className="opt" aria-disabled="true">思考强度由模型自己决定</div>}
-          </div>
-          <div className="hint">{hint}换到其他 Agent 会走交接，第 1.4 步提供。</div>
-        </div>
-      ) : null}
-    </div>
-  );
+  const profileId=config.profileId??task.profileId??info?.profiles?.find((p)=>p.isDefault)?.id??null;
+  return <div>
+    <AgentPicker agents={agents} agent={task.agent} config={config} profileId={profileId} mode="task" disabled={!online||!!busy} requestKey={requestKey} taskPreset={{projectId:task.projectId,prompt:task.prompt}}
+      onPick={(p)=>void doSwitch(p.profileId?'profile':p.model!==undefined?'model':'effort',{...(p.model?{model:p.model}:{}),...(p.effort?{effort:p.effort}:{}),...(p.profileId?{profileId:p.profileId}:{})})}/>
+    {swErr?<ErrorNotice error={swErr} ctx={{taskId:task.id,kind:task.agent}} onDismiss={()=>setSwErr(null)}/>:null}
+    {pendingSw?<div className="hint" role="status">这一轮结束后会{pendingSw.label}。<button type="button" className="linkish" onClick={()=>cancelPendingSwitch(task.id)}>不换了</button></div>:null}
+  </div>;
 }
 
 // ---------------------------------------------------------------------

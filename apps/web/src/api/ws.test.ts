@@ -58,6 +58,14 @@ beforeEach(() => { FakeWs.all = []; vi.useFakeTimers(); });
 afterEach(() => { vi.useRealTimers(); });
 
 describe('WsClient 连接与重连', () => {
+  it('连续失败后探测不可达进入 down，五秒后探测恢复再连接', async () => {
+    const probe=vi.fn().mockResolvedValueOnce(false).mockResolvedValue(true);
+    const {client}=setup({probe});client.start();FakeWs.all[0]!.drop();await vi.advanceTimersByTimeAsync(500);FakeWs.all[1]!.drop();await vi.advanceTimersByTimeAsync(1000);FakeWs.all[2]!.drop();await vi.advanceTimersByTimeAsync(0);
+    expect(client.state).toBe('down');expect(client.canSend).toBe(false);await vi.advanceTimersByTimeAsync(4999);expect(probe).toHaveBeenCalledTimes(1);await vi.advanceTimersByTimeAsync(1);expect(client.state).toBe('connecting');goOnline(FakeWs.all.at(-1)!);expect(client.state).toBe('online');client.stop();
+  });
+  it('已停止客户端不会被迟到的探测重新连接', async () => {
+    let finish!:(up:boolean)=>void;const {client}=setup({probe:()=>new Promise((r)=>{finish=r;})});client.start();FakeWs.all[0]!.drop();await vi.advanceTimersByTimeAsync(500);FakeWs.all[1]!.drop();await vi.advanceTimersByTimeAsync(1000);FakeWs.all[2]!.drop();client.stop();finish(true);await vi.advanceTimersByTimeAsync(0);expect(client.state).toBe('stopped');expect(FakeWs.all).toHaveLength(3);
+  });
   it('连接后先发 subscribe{lastSeq}，收到 replayed 后进入 online', () => {
     const { client, states, setLastSeq } = setup();
     setLastSeq(42);

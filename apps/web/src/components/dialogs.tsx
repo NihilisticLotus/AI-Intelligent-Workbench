@@ -56,7 +56,7 @@ function AddProject({ close, then }: { close: () => void; then?: (id: string) =>
         <div className="alert info" style={{ margin: 0 }}>
           <Icon name="info" />
           <div className="body"><strong>检测结果</strong>
-            <p>{picked.isGit ? '是 git 仓库。' : '不是 git 仓库。'}引擎类型和工作副本方式在第 1.3 步提供。</p>
+            <p>{picked.isGit ? '是 git 仓库。' : '不是 git 仓库。'}引擎类型和工作副本方式在有了独立工作副本后提供。</p>
           </div>
         </div>
       ) : null}
@@ -67,7 +67,7 @@ function AddProject({ close, then }: { close: () => void; then?: (id: string) =>
 // ---------------------------------------------------------------------
 // 新建任务：见 NewTaskDialog.tsx
 // ---------------------------------------------------------------------
-export function openNewTask(preset: { projectId?: string; groupId?: string | null } = {}) {
+export function openNewTask(preset: { projectId?: string; groupId?: string | null; agent?: import('@aic/protocol').AgentKind; model?: string; prompt?: string } = {}) {
   openDialog((close) => (
     <NewTaskDialog close={close} preset={preset}
       onAddProject={() => { close(); openAddProject((id) => openNewTask({ projectId: id })); }} />

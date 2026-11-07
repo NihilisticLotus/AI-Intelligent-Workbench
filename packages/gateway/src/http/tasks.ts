@@ -2,6 +2,7 @@
 import { Hono } from 'hono';
 import { ApprovalsQuery, CreateTaskBody, EventsQuery, PatchTaskBody, PutTaskDraftBody, TasksQuery, type TaskDraft } from '@aic/protocol';
 import type { Services } from '../services';
+import { Errors } from '../util';
 import { parseQuery, readBody, type Env } from './app';
 
 export function taskRoutes(s: Services) {
@@ -15,7 +16,7 @@ export function taskRoutes(s: Services) {
   r.post('/tasks/:id/attachments', async (c) => {
     s.tasks.getRow(c.req.param('id'));
     let name: string;
-    try { name = decodeURIComponent(c.req.header('X-AIC-Filename') ?? '附件'); } catch { throw new Error('附件文件名编码无效'); }
+    try { name = decodeURIComponent(c.req.header('X-AIC-Filename') ?? '附件'); } catch { throw Errors.badRequest('附件文件名编码无效'); }
     const a = s.attachments.upload(c.req.param('id'), name, Buffer.from(await c.req.arrayBuffer()));
     return c.json(a, 201);
   });
@@ -46,7 +47,8 @@ export function taskRoutes(s: Services) {
     try { annotations = row ? JSON.parse(row.annotations_json) : []; } catch { annotations = []; }
     const ids: string[] = row?.attachments_json ? JSON.parse(row.attachments_json) : [];
     const attachments = ids.filter((attId) => { try { s.attachments.get(id, attId); return true; } catch { return false; } });
-    return c.json({ text: row?.text ?? '', annotations, ...(row?.attachments_json ? { attachments } : {}), updatedAt: row?.updated_at ?? null } satisfies TaskDraft);
+    if (attachments.length !== ids.length) s.db.run('UPDATE task_drafts SET attachments_json = ? WHERE task_id = ?', JSON.stringify(attachments), id);
+    return c.json({ text: row?.text ?? '', annotations, ...(row?.attachments_json ? { attachments } : {}), ...(attachments.length !== ids.length ? { expiredAttachments: true } : {}), updatedAt: row?.updated_at ?? null } satisfies TaskDraft);
   });
   r.put('/tasks/:id/draft', async (c) => {
     const id = c.req.param('id');

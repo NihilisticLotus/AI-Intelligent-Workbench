@@ -31,6 +31,7 @@ export type ConnState =
   | 'online'        // 实时
   | 'reconnecting'  // 断线，等待重连
   | 'unauthorized'  // 令牌失效，停止重连
+  | 'down'
   | 'stopped';      // 主动停止
 
 type OpName = ClientOp['op'];
@@ -47,6 +48,7 @@ export interface WsClientOptions {
   onReplayed?: (upToSeq: number, info: { reset: boolean; bootId: string | null; restarted: boolean }) => void;
   onState?: (s: ConnState) => void;
   /** 每次连接失败（含握手失败）后回调，attempt 从 1 开始；界面可以借机用 /hello 检查是不是令牌失效了 */
+  probe?: () => Promise<boolean>;
   onConnectFailure?: (attempt: number) => void;
   ackTimeoutMs?: number;
   backoffMinMs?: number;
@@ -71,7 +73,7 @@ const SUBSCRIBE_IDLE_TIMEOUT_MS = 30_000;
 const OPEN = 1;
 
 export class WsClient {
-  private readonly o: Required<Omit<WsClientOptions, 'onReplayed' | 'onState' | 'onConnectFailure' | 'WebSocketImpl' | 'protocols'>> & WsClientOptions;
+  private readonly o: Required<Omit<WsClientOptions, 'onReplayed' | 'onState' | 'onConnectFailure' | 'probe' | 'WebSocketImpl' | 'protocols'>> & WsClientOptions;
   private ws: WebSocketLike | null = null;
   private _state: ConnState = 'idle';
   private pending = new Map<string, Pending>();
@@ -82,6 +84,7 @@ export class WsClient {
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private subscribeId: string | null = null;
   private everOnline = false;
+  private epoch = 0;
   /** 上次 replayed 带来的服务启动标识 */
   private bootId: string | null = null;
   /** 本次连接打开时就在等 ack 的指令（断线前发出的），收到 replayed 后决定重发还是拒绝 */
@@ -105,6 +108,7 @@ export class WsClient {
   }
 
   stop(): void {
+    this.epoch++;
     this.clearTimers();
     const ws = this.ws;
     this.ws = null;
@@ -266,12 +270,20 @@ export class WsClient {
 
   private scheduleReconnect() {
     if (this._state === 'stopped' || this._state === 'unauthorized') return;
+    if (this.o.probe && this.attempt >= 2) { void this.checkService(this.epoch); return; }
     // 第一次连接就失败时保持“连接中”，之后都算“正在重新连接”
     this.setState(this.everOnline || this.attempt > 0 ? 'reconnecting' : 'connecting');
     const delay = Math.min(this.o.backoffMaxMs, this.o.backoffMinMs * 2 ** this.attempt);
     this.attempt++;
     if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
     this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; this.open(); }, delay);
+  }
+
+  private async checkService(epoch: number) {
+    const up = await this.o.probe!().catch(() => false);
+    if (epoch !== this.epoch || this._state === 'stopped' || this._state === 'unauthorized') return;
+    if (up) { this.attempt = 0; this.setState('connecting'); this.open(); }
+    else { this.setState('down'); this.reconnectTimer = setTimeout(() => { this.reconnectTimer = null; void this.checkService(epoch); }, 5000); }
   }
 
   /** 心跳：长时间没有回应说明连接已半死，主动断开触发重连 */

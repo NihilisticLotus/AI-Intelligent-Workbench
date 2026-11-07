@@ -50,3 +50,8 @@ export class Credentials {
     return [WS_SUBPROTOCOL, (this.delivery === 'cookie' ? WS_KEY_PROTOCOL_PREFIX : WS_BEARER_PROTOCOL_PREFIX) + this.value];
   }
 }
+
+/** 没有本地凭据时不向需要鉴权的接口发送请求。 */
+export async function authenticatedStartup(hasCredentials: boolean, start: () => Promise<void>, pair: () => void) {
+  if (!hasCredentials) { pair(); return; } await start();
+}

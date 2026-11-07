@@ -14,6 +14,8 @@ import {
   applyAgentSnapshot, applyApprovalSnapshot, applyEvents, applyTaskSnapshot, emptyCore, mergeRestTask, type CoreState,
 } from './core';
 import { createStore, useStore } from './store';
+import { createFlusher } from './flush';
+import { authenticatedStartup } from '../api/credentials';
 import { announce, navigate, routeStore } from './ui';
 
 export type BootState = 'loading' | 'unpaired' | 'ready' | 'error';
@@ -55,18 +57,11 @@ let ws: WsClient | null = null;
 
 // ---------- 实时事件：每帧合并一次，流式输出时不会每个字都触发一次渲染 ----------
 let queue: EventEnvelope[] = [];
-let flushScheduled = false;
-function enqueueEvent(ev: EventEnvelope) {
-  queue.push(ev);
-  if (flushScheduled) return;
-  flushScheduled = true;
-  let done = false;
-  const run = () => { if (done) return; done = true; flushScheduled = false; flushEvents(); };
-  // 优先跟随动画帧合并；但窗口被遮挡或最小化时浏览器可能停发动画帧，而 visibilityState 仍是 visible
-  // （联调时实测：审批卡片一直不出现），所以同时设一个 100ms 的兜底，谁先到用谁。
-  if (typeof requestAnimationFrame !== 'undefined' && document.visibilityState === 'visible') requestAnimationFrame(run);
-  setTimeout(run, typeof requestAnimationFrame !== 'undefined' && document.visibilityState === 'visible' ? 100 : 16);
-}
+const scheduleFlush = createFlusher({
+  raf: (run) => typeof requestAnimationFrame !== 'undefined' ? requestAnimationFrame(run) : undefined,
+  setTimeout: (run,ms)=>setTimeout(run,ms), visibility: () => typeof document !== 'undefined' && document.visibilityState === 'visible', flush: flushEvents,
+});
+function enqueueEvent(ev: EventEnvelope) { queue.push(ev); scheduleFlush(); }
 function flushEvents() {
   if (!queue.length) return;
   const batch = queue;
@@ -82,8 +77,8 @@ function sideEffects(before: AppState, batch: EventEnvelope[]) {
     if (ev.type === 'approval.requested' && !before.approvals[ev.data.approval.id] && ev.data.approval.status === 'pending') {
       const a = ev.data.approval;
       announce(`新审批：${a.title}`);
-      void platform.notify({
-        title: '有审批等你处理', body: `${a.title}：${a.detail.slice(0, 120)}`, tag: a.id,
+      if (!document.hasFocus()) void platform.notify({
+        title: '有审批等你处理', body: a.title, tag: a.id,
         onClick: () => navigate({ page: 'task', taskId: a.taskId }),
       });
     }
@@ -134,7 +129,7 @@ async function doBoot() {
       return;
     }
   }
-  await startOrFail();
+  await authenticatedStartup(creds.has, () => startOrFail(), toUnpaired);
 }
 
 async function startOrFail(hello?: Hello) {
@@ -186,6 +181,7 @@ function connectWs() {
       if (conn === 'unauthorized') toUnpaired();
       if (conn === 'online') void resyncAfterReconnect();
     },
+    probe: async () => { try { await api.hello(); return true; } catch (e) { return e instanceof ApiRequestError && e.code !== 'client.network'; } },
     onConnectFailure: (attempt) => {
       // 浏览器看不到握手失败的 HTTP 状态码：连续失败时用 /hello 判断是不是令牌失效
       if (attempt === 2 || attempt % 5 === 0) api.hello().catch(() => { /* 401 会走 onUnauthorized */ });
@@ -266,7 +262,7 @@ export async function loadHistory(taskId: string) {
 
 // ---------- 指令（WebSocket） ----------
 const notConnected = () => Promise.reject(new ApiRequestError({ code: 'client.offline', message: '还没有连上服务', actions: [] }));
-export const sendPrompt = (taskId: string, text: string) => (ws ? ws.request('prompt', { taskId, text }) : notConnected());
+export const sendPrompt = (taskId: string, text: string, attachments?: string[]) => (ws ? ws.request('prompt', { taskId, text, attachments }) : notConnected());
 export const cancelTask = (taskId: string) => (ws ? ws.request('cancel', { taskId }) : notConnected());
 export const approve = (approvalId: string, optionId: string, note?: string) =>
   ws ? ws.request('approve', note ? { approvalId, optionId, note } : { approvalId, optionId }) : notConnected();

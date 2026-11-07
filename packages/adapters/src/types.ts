@@ -295,7 +295,7 @@ export interface AgentAdapter {
   /** 某类账号是否只是“实验”支持（只有源码依据） */
   experimentalProfile?(kind: 'subscription' | 'apiKey' | 'customEndpoint'): boolean;
   /**
-   * 账号的会话存在哪（不透明的键）：键相同的账号之间可以恢复彼此的会话；不同时换账号需要交接（第 1.4 步）。
+   * 账号的会话存在哪（不透明的键）：键相同的账号之间可以恢复彼此的会话；不同时换账号需要交接（之后的版本）。
    * 不提供时：配置目录 isolated → 账号自己的目录，shared → Agent 的默认目录
    */
   sessionStore?(p: { id: string; kind: 'subscription' | 'apiKey' | 'customEndpoint'; configDir: 'shared' | 'isolated' }): string;

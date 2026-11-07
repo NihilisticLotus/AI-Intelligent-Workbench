@@ -62,8 +62,8 @@ export function readLastExit(dataDir: string): import('@aic/protocol').Hello['la
     const lines = readFileSync(path.join(dataDir, 'logs', GATEWAY_LOG), 'utf8').trim().split('\n');
     const last = lines.findLast((l) => l.includes('生命周期 '));
     if (last) {
-      const r = JSON.parse(last.slice(last.indexOf('生命周期 ') + 5)) as { phase: string; pid: number; at: number; reason: string | null };
-      return { clean: r.phase === 'exit', at: r.at, reason: r.phase === 'exit' ? r.reason : '上次运行没有正常退出（pid ' + r.pid + '）' };
+      const r = JSON.parse(last.slice(last.indexOf('生命周期 ') + 5)) as { phase: string; pid: number; at: number; reason: string | null; code?: number };
+      return { clean: r.phase === 'exit' && (r.code ?? 0) === 0, at: r.at, reason: r.phase === 'exit' ? r.reason : '上次运行没有正常退出（pid ' + r.pid + '）' };
     }
     const legacy = lines.findLast((l) => /启动|退出/.test(l));
     return legacy ? { clean: /正常退出/.test(legacy), at: Date.parse(legacy.slice(0, 24)) || Date.now(), reason: /正常退出/.test(legacy) ? '正常退出' : '上次运行没有正常退出' } : null;

@@ -3,8 +3,12 @@
 import type { ModelInfo, SessionConfigState } from '../types';
 import { isRecord, str } from '../util';
 
-interface SelectOption { value: string; name: string; description: string | null }
+interface SelectOption { value: string; name: string; description: string | null; vision?: boolean }
 interface SelectConfig { id: string; category: string | null; currentValue: string | null; options: SelectOption[] }
+
+// CodeBuddy 的 toAcpModelInfo 明确报告这个扩展；没有字段时保持未知。
+const imageCapability = (item: Record<string, unknown>): { vision?: boolean } =>
+  isRecord(item._meta) && typeof item._meta.supportsImages === 'boolean' ? { vision: item._meta.supportsImages } : {};
 
 /** 把 select 的 options 拍平（ACP 允许分组：{ group, name, options: [...] }） */
 function flatOptions(raw: unknown): SelectOption[] {
@@ -15,7 +19,7 @@ function flatOptions(raw: unknown): SelectOption[] {
     if (Array.isArray(o.options)) { out.push(...flatOptions(o.options)); continue; }
     const value = str(o.value) ?? str(o.id);
     if (value === null) continue;
-    out.push({ value, name: str(o.name) ?? value, description: str(o.description) });
+    out.push({ value, name: str(o.name) ?? value, description: str(o.description), ...imageCapability(o) });
   }
   return out;
 }
@@ -59,7 +63,10 @@ export function parseConfigState(resp: Record<string, unknown>, prev: SessionCon
     const mode = selects.find((s) => s.category === 'mode');
     st.ids = { model: model?.id ?? null, effort: effort?.id ?? null, mode: mode?.id ?? null };
     if (model) {
-      st.models = model.options.map((o) => ({ id: o.value, name: o.name, contextWindow: null }));
+      st.models = model.options.map((o) => {
+        const vision = o.vision ?? prev.models.find((m) => m.id === o.value)?.vision;
+        return { id: o.value, name: o.name, contextWindow: null, ...(vision === undefined ? {} : { vision }) };
+      });
       st.model = model.currentValue;
       st.source = 'configOptions';
     } else {
@@ -74,7 +81,7 @@ export function parseConfigState(resp: Record<string, unknown>, prev: SessionCon
   // 旧字段 models（unstable）：只在没有 model 类配置项时使用
   if (!st.ids.model && isRecord(resp.models)) {
     const avail = Array.isArray(resp.models.availableModels) ? resp.models.availableModels : [];
-    const items = avail.filter(isRecord).map((m) => ({ id: str(m.modelId) ?? str(m.id) ?? '', name: str(m.name) ?? str(m.modelId) ?? '' })).filter((m) => m.id);
+    const items = avail.filter(isRecord).map((m) => ({ id: str(m.modelId) ?? str(m.id) ?? '', name: str(m.name) ?? str(m.modelId) ?? '', ...imageCapability(m) })).filter((m) => m.id);
     const cur = str(resp.models.currentModelId);
     const combo = items.length > 0 && items.every((m) => COMBO.test(m.id));
     if (combo) {
@@ -82,7 +89,7 @@ export function parseConfigState(resp: Record<string, unknown>, prev: SessionCon
       const efforts: string[] = [];
       for (const m of items) {
         const [, base, eff] = COMBO.exec(m.id)!;
-        if (!models.some((x) => x.id === base)) models.push({ id: base!, name: stripEffortName(m.name), contextWindow: null });
+        if (!models.some((x) => x.id === base)) models.push({ ...m, id: base!, name: stripEffortName(m.name), contextWindow: null });
         if (!efforts.includes(eff!)) efforts.push(eff!);
       }
       st.models = models;
@@ -90,10 +97,16 @@ export function parseConfigState(resp: Record<string, unknown>, prev: SessionCon
       st.model = cm ? cm[1]! : cur;
       if (!st.ids.effort) { st.efforts = efforts; st.effort = cm ? cm[2]! : null; }
     } else {
-      st.models = items.map((m) => ({ id: m.id, name: m.name, contextWindow: null }));
+      st.models = items.map((m) => ({ ...m, contextWindow: null }));
       st.model = cur;
     }
     st.source = items.length ? 'legacy' : st.source;
+  }
+
+  // 新配置优先保留模型顺序；旧 models 返回可补充明确的能力元数据。
+  if (st.ids.model && isRecord(resp.models) && Array.isArray(resp.models.availableModels)) {
+    const reported = resp.models.availableModels.filter(isRecord);
+    st.models = st.models.map((m) => ({ ...m, ...imageCapability(reported.find((x) => (str(x.modelId) ?? str(x.id)) === m.id) ?? {}) }));
   }
 
   // 旧字段 modes
@@ -121,4 +134,4 @@ export function modelSwitchOf(st: SessionConfigState, resp: Record<string, unkno
 }
 
 /** 状态签名：用于判断有没有变化（CodeBuddy 一次切换会连发 2–3 条同样的推送） */
-export const configSignature = (s: SessionConfigState) => JSON.stringify([s.model, s.effort, s.mode, s.models.map((m) => m.id), s.efforts, s.modes.map((m) => m.id)]);
+export const configSignature = (s: SessionConfigState) => JSON.stringify([s.model, s.effort, s.mode, s.models.map((m) => [m.id,m.vision]), s.efforts, s.modes.map((m) => m.id)]);

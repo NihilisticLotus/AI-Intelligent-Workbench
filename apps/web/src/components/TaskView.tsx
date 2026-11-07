@@ -54,7 +54,7 @@ export function TaskView({ taskId }: { taskId: string }) {
             <Icon name={task.permission === 'readonly' ? 'eye' : 'warn'} />
             <span>{task.permission === 'readonly'
               ? '这个任务直接在项目目录里运行。当前是“只读”，Agent 不会修改文件；改成其他权限后会直接修改项目文件，建议用“需审批”。'
-              : `会直接修改项目文件：这个任务直接在项目目录里运行（第 1.3 步起改为独立的工作副本）。建议权限保持“需审批”${task.permission === 'ask' ? '（当前就是）' : ''}。`}</span>
+              : `会直接修改项目文件：这个任务直接在项目目录里运行；有了独立工作副本后会在副本里修改。建议权限保持“需审批”${task.permission === 'ask' ? '（当前就是）' : ''}。`}</span>
           </div>
         ) : null}
         <div className="main-body">

@@ -255,7 +255,7 @@ export class TaskService {
   /** 真实 Agent 第 1.2 步只开放“只读”和“需审批”（phase-1.md 6.3.4） */
   private checkPermission(a: AgentAdapter, level: PermissionLevel) {
     if (a.permissionLevels && !a.permissionLevels.includes(level)) {
-      throw Errors.levelUnavailable(`${a.displayName} 暂时不能使用这个权限级别`, '“工作区内自动”和“全自动”会在第 1.3 步有了工作副本后开放；现在可以选“只读”或“需审批”');
+      throw Errors.levelUnavailable(`${a.displayName} 暂时不能使用这个权限级别`, '“工作区内自动”和“全自动”会在有了独立工作副本后开放；现在可以选“只读”或“需审批”');
     }
   }
 
@@ -510,7 +510,7 @@ export class TaskService {
       });
       if (opts.strictResume && resume && !conn.resumed) {
         await conn.close().catch(() => {});
-        throw Errors.notRecoverable('换账号后原来的会话找不到了', '同一个 Agent 换账号需要交接，会在第 1.4 步提供；现在可以换回原来的账号');
+        throw Errors.notRecoverable('换账号后原来的会话找不到了', '同一个 Agent 换账号需要交接，会在之后的版本提供；现在可以换回原来的账号');
       }
       if (signal?.aborted) { await conn.close().catch(() => {}); throw new AbortError(); }
       const caps = await a.probeCapabilities(conn);
@@ -697,7 +697,7 @@ export class TaskService {
   async switch(taskId: string, opts: { agent?: AgentKind | undefined; model?: string | undefined; effort?: string | undefined; profileId?: string | undefined }): Promise<Task> {
     const row = this.getRow(taskId);
     if (opts.agent && opts.agent !== row.agent) {
-      throw Errors.agentUnavailable('暂时不能切换到其他 Agent', '跨 Agent 交接会在第 1.4 步提供；现在可以换模型或思考强度');
+      throw Errors.agentUnavailable('暂时不能切换到其他 Agent', '跨 Agent 交接会在之后的版本提供；现在可以换模型或思考强度');
     }
     if (opts.profileId !== undefined && opts.profileId !== row.profile_id) await this.switchProfile(taskId, opts.profileId);
     if (opts.model === undefined && opts.effort === undefined) return this.get(taskId);
@@ -724,8 +724,8 @@ export class TaskService {
       }
       if (opts.model !== undefined && opts.model !== st?.model && caps?.modelSwitch === 'none') {
         // H1：结束进程 → 用新模型参数重启 → 恢复
-        if (!caps.resume && !caps.loadSession) throw Errors.agentUnavailable(`${a.displayName} 不支持在会话里换模型，也不能恢复会话`, '换模型需要交接，会在第 1.4 步提供');
-        if (!a.launchModel) throw Errors.agentUnavailable(`${a.displayName} 不支持在会话里换模型，也不能在启动时指定模型`, '换模型需要交接，会在第 1.4 步提供');
+        if (!caps.resume && !caps.loadSession) throw Errors.agentUnavailable(`${a.displayName} 不支持在会话里换模型，也不能恢复会话`, '换模型需要交接，会在之后的版本提供');
+        if (!a.launchModel) throw Errors.agentUnavailable(`${a.displayName} 不支持在会话里换模型，也不能在启动时指定模型`, '换模型需要交接，会在之后的版本提供');
         if (this.isBusy(taskId)) throw Errors.invalidState('任务正在执行', '请等这一轮结束，或先点 [停止] 再换模型', [{ label: '停止', action: 'task.cancel', args: { taskId } }]);
         this.db.run('UPDATE tasks SET model = ?, effort = COALESCE(?, effort), updated_at = ? WHERE id = ?', opts.model, opts.effort ?? null, now(), taskId);
         await this.dropRuntime(taskId, 'switch_model');
@@ -772,7 +772,7 @@ export class TaskService {
     if (hadSession && this.agentSvc.profiles.sessionStore(from) !== this.agentSvc.profiles.sessionStore(target)) {
       throw Errors.notRecoverable(
         `“${target.name}”和“${from.name}”的会话不在同一个地方，换过去 Agent 会不记得之前的对话`,
-        '换到这个账号需要交接，会在第 1.4 步提供；现在可以新建一个任务并选这个账号',
+        '换到这个账号需要交接，会在之后的版本提供；现在可以新建一个任务并选这个账号',
       );
     }
     const rt = this.runtimes.get(taskId);

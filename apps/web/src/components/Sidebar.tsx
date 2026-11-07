@@ -70,7 +70,7 @@ export function Sidebar({ onSearch }: { onSearch: () => void }) {
   };
 
   const isCur = (r: Route['page']) => route.page === r;
-  const onlineText = conn === 'online' ? '服务运行中，仅本机访问' : conn === 'replaying' ? '正在同步…' : conn === 'connecting' || conn === 'idle' ? '正在连接…' : '正在重新连接…';
+  const onlineText = conn === 'down' ? '服务已停止' : conn === 'online' ? '服务运行中，仅本机访问' : conn === 'replaying' ? '正在同步…' : conn === 'connecting' || conn === 'idle' ? '正在连接…' : '正在重新连接…';
   const night = theme !== 'light';
   const themeTip = night ? '夜间模式（点击切换到日间模式）' : '日间模式（点击切换到夜间模式）';
 
@@ -125,7 +125,7 @@ export function Sidebar({ onSearch }: { onSearch: () => void }) {
       </div>
 
       <div className="sb-foot">
-        <span className={'status ' + (conn === 'online' ? 'ok' : 'wait')} title={onlineText} role="status">
+        <span className={'status ' + (conn === 'online' ? 'ok' : conn === 'down' ? 'bad' : 'wait')} title={onlineText} role="status">
           <span className="dot" aria-hidden="true" /><span className="status-text">{onlineText}</span>
         </span>
         <button type="button" className="btn ghost icon sm" aria-label={themeTip} title={themeTip} onClick={() => setPref('theme', night ? 'light' : 'dark')}>

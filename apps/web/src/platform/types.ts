@@ -34,6 +34,7 @@ export interface Platform {
 
   /** 系统通知（审批到来等）；没有权限时静默忽略 */
   notify(opts: { title: string; body: string; tag?: string; onClick?: () => void }): Promise<void>;
+  restartGateway?(): Promise<boolean>;
   /** 选文件夹：浏览器版打开基于 /fs/browse 的对话框；桌面版可以用系统对话框。取消时返回 null */
   pickFolder(): Promise<PickedFolder | null>;
   /** 在 IDE 中打开 */

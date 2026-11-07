@@ -3,7 +3,7 @@
 //  1. 同一个 seq 只应用一次（重连补发、历史与实时重叠都不会重复）。
 //  2. 乱序到达按 seq 处理：任务日志始终按 seq 升序；实体（任务、审批、Agent）只接受比上次更新更新的事件。
 //  3. 这里全是纯函数，不碰网络和界面，方便测试。
-import type { AgentInfo, ApiError, Approval, EventEnvelope, EventOf, ModelInfo, Task } from '@aic/protocol';
+import type { AgentInfo, ApiError, Approval, EventEnvelope, EventOf, ModelInfo, Task, AttachmentInfo } from '@aic/protocol';
 
 /** 1.2：登录流程的最新状态（agent.login 事件），键为 loginId */
 export type LoginInfo = EventOf<'agent.login'>['data'] & { ts: number };
@@ -163,7 +163,7 @@ export interface ToolItem {
 }
 export interface PlanEntry { text: string; status: 'pending' | 'in_progress' | 'completed' }
 export type TimelineItem =
-  | { kind: 'user'; key: string; id: string; text: string; ts: number }
+  | { kind: 'user'; key: string; id: string; text: string; ts: number; attachments?: AttachmentInfo[] }
   | {
       kind: 'agent'; key: string; id: string; text: string; thought: string;
       thoughtStart: number | null; thoughtEnd: number | null; done: boolean; ts: number;
@@ -186,6 +186,7 @@ export function buildTimeline(events: readonly EventEnvelope[]): TimelineItem[] 
   const items: TimelineItem[] = [];
   const agentMsgs = new Map<string, AgentItem>();
   const tools = new Map<string, ToolItem>();
+  const notices = new Map<string, Extract<TimelineItem,{kind:'note'}>>();
   const approvals = new Map<string, Extract<TimelineItem, { kind: 'approval' }>>();
   let lastGroup: Extract<TimelineItem, { kind: 'tools' }> | null = null;
   let agent: string | null = null;
@@ -224,9 +225,11 @@ export function buildTimeline(events: readonly EventEnvelope[]): TimelineItem[] 
         // 1.2：恢复原来的会话（H1）时留一行提示；恢复失败、新建会话由 Gateway 发 session.notice 说明
         if (ev.data.resumed) push({ kind: 'note', key: 'r:' + ev.seq, text: '已恢复原来的会话，Agent 记得之前的对话', ts: ev.ts });
         break;
-      case 'session.notice':
-        push({ kind: 'note', key: 'n:' + ev.seq, text: ev.data.text, ts: ev.ts, level: ev.data.level });
-        break;
+      case 'session.notice': {
+        const old=ev.data.id?notices.get(ev.data.id):undefined;
+        if(old){old.text=ev.data.text;old.ts=ev.ts;old.level=ev.data.level;}
+        else {const note={kind:'note' as const,key:'n:'+(ev.data.id??ev.seq),text:ev.data.text,ts:ev.ts,level:ev.data.level};push(note);if(ev.data.id)notices.set(ev.data.id,note);}break;
+      }
       case 'session.config': {
         // 只在真的变了时留一行提示（有的实现每次开会话都会报一次完整配置）
         const d = ev.data;
@@ -256,7 +259,7 @@ export function buildTimeline(events: readonly EventEnvelope[]): TimelineItem[] 
       case 'message.user':
         closeOpen(ev.ts);
         turnHasAgent = false;
-        push({ kind: 'user', key: 'u:' + ev.data.messageId, id: ev.data.messageId, text: ev.data.text, ts: ev.ts });
+        push({ kind: 'user', key: 'u:' + ev.data.messageId, id: ev.data.messageId, text: ev.data.text, ts: ev.ts, ...(ev.data.attachments?{attachments:ev.data.attachments}:{}) });
         break;
       case 'thought.delta': {
         const it = agentItem(ev.data.messageId, ev.ts);
@@ -280,6 +283,9 @@ export function buildTimeline(events: readonly EventEnvelope[]): TimelineItem[] 
         if (!lastGroup) { lastGroup = { kind: 'tools', key: 'tg:' + ev.seq, tools: [] }; items.push(lastGroup); }
         lastGroup.tools.push(t);
         break;
+      }
+      case 'tool.update': {
+        const t=tools.get(ev.data.toolId);if(t){if(ev.data.title!==undefined)t.title=ev.data.title;if(ev.data.target!==undefined)t.target=ev.data.target;if(ev.data.kind!==undefined)t.kind=ev.data.kind;}break;
       }
       case 'tool.output': {
         const t = tools.get(ev.data.toolId);

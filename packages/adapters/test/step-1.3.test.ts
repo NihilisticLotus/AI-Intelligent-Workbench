@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { createFakeAdapter } from '../src/fake';
 import { quotaHint, textResponseError, TEXT_ERROR_PATTERNS } from '../src/acp/errors';
 import { fakeAdapter, RecordingHost, scenario } from './helpers';
+import { parseConfigState, configSignature } from '../src/acp/config';
 const close: (() => unknown | Promise<unknown>)[] = [];
 afterEach(async () => { for (const f of close.splice(0).reverse()) await f(); });
 async function open(sc: Record<string, unknown>) {
@@ -13,6 +14,18 @@ async function open(sc: Record<string, unknown>) {
   close.push(() => c.close()); c.ready?.(); return { s, c, host };
 }
 describe('1.3 适配器', () => {
+  it('只采用明确的模型图片元数据，兼容配置项和旧模型列表', () => {
+    const availableModels = [{ modelId: 'a', _meta: { supportsImages: true } }, { modelId: 'b', _meta: { supportsImages: false } }, { modelId: 'deepseek' }];
+    const legacy = parseConfigState({ models: { availableModels } });
+    expect(legacy.models.map((m) => m.vision)).toEqual([true,false,undefined]);
+    const configOptions = [{ id: 'model', category: 'model', type: 'select', options: availableModels.map((m) => ({ value: m.modelId })) }];
+    const unknown = parseConfigState({ configOptions });
+    const enriched = parseConfigState({ configOptions, models: { availableModels } });
+    expect(enriched.models.map((m) => m.vision)).toEqual([true,false,undefined]);
+    expect(parseConfigState({configOptions},enriched).models.map((m)=>m.vision)).toEqual([true,false,undefined]);
+    expect(configSignature(enriched)).not.toBe(configSignature(unknown));
+    expect(parseConfigState({ configOptions: [{ ...configOptions[0], options: [{ value: 'a', _meta: { supportsImages: false } }] }] }).models[0]?.vision).toBe(false);
+  });
   it('额度原文不误当时间，并识别明确时间', () => {
     expect(quotaHint('API Error: Request rejected (429) · upstream account quota usage limit has been reached; wait for quota to reset or use an account with available quota')).toBe('额度或调用频率达到上限，可以稍后再试，或换个模型 / 账号');
     for (const t of ['resets at 2026-11-09T12:00:00Z', 'retry in 3 minutes', 'try again at 14:30 UTC', 'retry 2 h', 'reset after Monday']) expect(quotaHint(t)).toContain(t.replace(/^(?:resets?|retry|try again)\s+(?:at\s+)?/, ''));

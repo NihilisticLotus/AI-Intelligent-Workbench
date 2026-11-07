@@ -56,7 +56,7 @@ export function SettingsPage() {
           <section className="set-sec" aria-labelledby="s-dev">
             <h3 id="s-dev">设备</h3>
             <p style={{ margin: '0 0 var(--sp-3)', fontSize: 'var(--fs-13)', color: 'var(--fg-2)' }}>
-              能访问这台电脑上 AI Console 的设备。目前只能从这台电脑访问；局域网访问在第 1.5 步提供。
+              能访问这台电脑上 AI Console 的设备。目前只能从这台电脑访问；局域网访问在之后的版本提供。
             </p>
             {err ? <ErrorNotice error={err} onRetry={load} /> : null}
             {devices === null && !err ? <p style={{ color: 'var(--fg-3)' }}>正在载入…</p> : null}
@@ -80,6 +80,7 @@ export function SettingsPage() {
               <dl className="ctx">
                 <dt>服务版本</dt><dd>{hello.version}（协议 {hello.protocol}）</dd>
                 <dt>这台电脑</dt><dd>{hello.machine.name}</dd>
+                <dt>上次退出</dt><dd>{hello.lastExit ? (hello.lastExit.clean ? '正常退出' : '没有正常退出') + ' · ' + (hello.lastExit.reason ?? '原因未知') + ' · ' + new Date(hello.lastExit.at).toLocaleString('zh-CN') : '没有记录'}</dd>
                 <dt>当前设备</dt><dd>{hello.device.name}</dd>
               </dl>
             </section>

@@ -3,8 +3,9 @@ import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeAdapter } from '@aic/adapters';
 import { AttachmentService, sniffAttachment } from '../src/attachments';
-import { openDb, SCHEMA_VERSION } from '../src/db';
+import { openDb, SCHEMA_VERSION, type SqlValue } from '../src/db';
 import { createGateway } from '../src/server';
+import { DatabaseSync } from 'node:sqlite';
 import { makeProject, startGw, type TestGw } from './helpers';
 let t: TestGw | null = null;
 afterEach(async () => { vi.useRealTimers(); await t?.stop(); t = null; });
@@ -19,9 +20,15 @@ async function upload(token: string, taskId: string, b: Buffer, name = '../截�
 }
 describe('附件接口和迁移 v5', () => {
   it('迁移只追加，并能重新打开已有数据库', async () => {
-    const { s } = await setup(); expect(SCHEMA_VERSION).toBe(5); expect(s.db.get<{user_version:number}>('PRAGMA user_version')?.user_version).toBe(5);
+    const { s,task } = await setup(); expect(SCHEMA_VERSION).toBe(5); expect(s.db.get<{user_version:number}>('PRAGMA user_version')?.user_version).toBe(5);
     expect(s.db.all('PRAGMA table_info(attachments)').length).toBe(11);
-    const db = openDb(path.join(t!.dataDir, 'migration.db')); db.close(); const db2 = openDb(path.join(t!.dataDir, 'migration.db')); expect(db2.all('SELECT * FROM model_failures')).toEqual([]); db2.close();
+    const file=path.join(t!.dataDir,'migration.db');const db = openDb(file);
+    const oldTask=s.db.get<Record<string,SqlValue>>('SELECT * FROM tasks WHERE id = ?',task.id)!;
+    db.run(`INSERT INTO tasks (${Object.keys(oldTask).join(',')}) VALUES (${Object.keys(oldTask).map(()=>'?').join(',')})`,...Object.values(oldTask));
+    db.run('INSERT INTO task_drafts (task_id,text,annotations_json,updated_at) VALUES (?,?,?,?)',task.id,'历史草稿','[]',1);db.close();
+    // 构造与已发布 v4 一致的表形状，再执行真实升级，验证历史草稿保留。
+    const v4=new DatabaseSync(file);v4.exec('DROP TABLE attachments; DROP TABLE model_failures; ALTER TABLE task_drafts DROP COLUMN attachments_json; PRAGMA user_version=4;');v4.close();
+    const db2 = openDb(file); expect(db2.all('SELECT * FROM model_failures')).toEqual([]);expect(db2.all('PRAGMA table_info(task_drafts)').some((c)=>c.name==='attachments_json')).toBe(true);expect(db2.get('SELECT text,attachments_json FROM task_drafts WHERE task_id = ?',task.id)).toEqual({text:'历史草稿',attachments_json:null}); db2.close();
   });
   it('上传按头判断、清洗名字；下载带鉴权和安全响应头', async () => {
     const { token, task } = await setup(); const r = await upload(token, task.id, png()); expect(r.status).toBe(201); const a = await r.json();
@@ -65,7 +72,8 @@ describe('附件接口和迁移 v5', () => {
     const file = s.attachments.get(task.id, a.id).path; s.attachments.markUsed(task.id,[used.id]);
     await t!.api('PUT', `/tasks/${task.id}/draft`, { token, body: { text:'',annotations:[],attachments:[a.id] } });
     s.attachments.cleanup(Date.now()+24*60*60_000+100); expect(existsSync(file)).toBe(false); expect(s.attachments.get(task.id,used.id).info.id).toBe(used.id);
-    expect((await t!.api('GET', `/tasks/${task.id}/draft`, { token })).json.attachments).toEqual([]);
+    expect((await t!.api('GET', `/tasks/${task.id}/draft`, { token })).json).toMatchObject({attachments:[],expiredAttachments:true});
+    expect((await t!.api('GET', `/tasks/${task.id}/draft`, { token })).json.expiredAttachments).toBeUndefined();
     s.attachments.deleteTask(task.id); expect(existsSync(path.dirname(file))).toBe(false);
   });
   it('GIF、WebP、JPEG 尺寸与二进制类型', () => {

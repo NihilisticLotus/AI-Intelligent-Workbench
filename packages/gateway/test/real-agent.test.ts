@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSpecAdapter, isAlive } from '@aic/adapters';
 import { ErrorCode, ServerFrame, type Approval, type EventEnvelope, type Task } from '@aic/protocol';
 import { MemorySecretStore } from '../src/secrets';
@@ -75,6 +75,16 @@ const PERM = (id: string) => ({
 });
 
 describe('真实形态的 Agent（假 ACP 进程）', () => {
+  it('假 ACP sleep 不发事件时提醒并发送 session/cancel', async () => {
+    const sc=scenario({config:CONFIG,turns:[{steps:[{sleep:60_000}]}]});
+    const {projectId,gw}=await setup(sc,{noResponseNoticeMs:100,noResponseCancelMs:300});
+    const task=await gw.gw.services.tasks.create({projectId,agent:'claude',prompt:'等待',permission:'ask'});
+    await vi.waitFor(()=>expect(gw.gw.services.tasks.get(task.id).status).toBe('paused'),{timeout:5000});
+    const events=gw.gw.services.events.read({after:0,taskId:task.id,limit:1000});
+    expect(events.some((e)=>e.type==='session.notice'&&!!e.data.id)).toBe(true);
+    expect(events.some((e)=>e.type==='error'&&e.data.error.code==='agent.no_response')).toBe(true);
+    await vi.waitFor(()=>expect(sc.log().some((r)=>r.method==='session/cancel')).toBe(true));
+  });
   it('建任务 → 对话 → 审批 → 换模型 → 崩溃 → 恢复', async () => {
     const sc = scenario({ config: CONFIG, persistTurns: true, turns: [PERM('c1'), { steps: [{ sleep: 100 }, { crash: 1 }] }, { steps: [{ update: { sessionUpdate: 'agent_message_chunk', content: text('我回来了') } }] }] });
     const { token, projectId, ws } = await setup(sc);

@@ -33,6 +33,6 @@
 | 目录 | 说明 |
 |---|---|
 | [acceptance/](acceptance/) | 每一步的验收记录 |
-| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 稳定、补验与输入框：部分通过；旧 API 补验停止，自定义 API 归属及独立 Agent 按用户澄清调整（ISSUE-0029） |
+| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 稳定、补验与输入框：部分通过；第三方原生边界已整改，独立执行器首轮 27 项离线验证通过，正式功能仍待实现（ISSUE-0029、0030） |
 | [devlog/](devlog/) | 开发笔记，每月一个文件，只追加 |
 | [issues/](issues/README.md) | 问题收纳：总表 + 每个问题一个文件 |

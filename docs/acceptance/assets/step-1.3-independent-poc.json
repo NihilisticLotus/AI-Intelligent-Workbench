@@ -1,0 +1,149 @@
+{
+  "schemaVersion": 1,
+  "checkedAt": "2026-11-07T20:51:06.299Z",
+  "node": "v24.14.0",
+  "platform": "win32",
+  "mode": "离线候选验证，非正式执行器验收",
+  "checks": [
+    {
+      "name": "搜索、读取和实际编辑形成连续工具闭环，结果进入下一次请求",
+      "passed": true
+    },
+    {
+      "name": "审批等待前保存调用；拒绝不执行且理由进入后续模型上下文",
+      "passed": true
+    },
+    {
+      "name": "审批期间文件变动由宿主冲突检查阻断，候选循环保留错误结果",
+      "passed": true
+    },
+    {
+      "name": "原始循环会将数字强制转换成字符串，宿主不能仅依赖其校验",
+      "passed": true
+    },
+    {
+      "name": "宿主严格检查原始参数后，类型错误和未注册工具不触发执行",
+      "passed": true
+    },
+    {
+      "name": "截断的工具调用即使参数完整也不执行",
+      "passed": true
+    },
+    {
+      "name": "异步事件订阅可在工具开始前完成持久化",
+      "passed": true
+    },
+    {
+      "name": "记录失败阻止执行但返回 error 终态；不以 Promise resolve 当作成功",
+      "passed": true
+    },
+    {
+      "name": "串行配置确保同轮副作用按调用顺序执行",
+      "passed": true
+    },
+    {
+      "name": "等待审批时取消可经 AbortSignal 结束且工具不执行",
+      "passed": true
+    },
+    {
+      "name": "模型慢流取消后保留 aborted 终态并返回空闲",
+      "passed": true
+    },
+    {
+      "name": "取消正在执行的协作工具，不再执行同批排队工具",
+      "passed": true
+    },
+    {
+      "name": "宿主可在每次模型请求前阻断超预算输入",
+      "passed": true
+    },
+    {
+      "name": "已完成工具的记录可恢复到新实例，续聊不重放副作用",
+      "passed": true
+    },
+    {
+      "name": "同名模型在两个显式服务下不串地址、Key 和模型请求",
+      "passed": true
+    },
+    {
+      "name": "直接协议适配器缺 Key 时不回退到诱饵环境认证",
+      "passed": true
+    },
+    {
+      "name": "401 不自动切服务，明确关闭重试后只请求一次",
+      "passed": true
+    },
+    {
+      "name": "真实协议解析的工具分片可驱动工具执行与第二轮续传",
+      "passed": true
+    },
+    {
+      "name": "原始适配器缺地址会同步抛错，宿主必须先校验并统一错误",
+      "passed": true
+    },
+    {
+      "name": "宿主边界拒绝缺地址、缺 Key、跨地址和认证替换",
+      "passed": true
+    },
+    {
+      "name": "SDK 可注入禁止重定向的传输；302 不重试或改走另一服务",
+      "passed": true
+    },
+    {
+      "name": "流缺 usage 时 SDK 返回零；宿主需另记是否报告，不能当作实际零用量",
+      "passed": true
+    },
+    {
+      "name": "Responses 显式服务与 Key 支持无 DONE 标记的终态流",
+      "passed": true
+    },
+    {
+      "name": "Anthropic Messages 显式服务与 Key 可解析消息流和用量",
+      "passed": true
+    },
+    {
+      "name": "openai-responses 缺显式 Key 时不使用宿主诱饵认证",
+      "passed": true
+    },
+    {
+      "name": "anthropic-messages 缺显式 Key 时不使用宿主诱饵认证",
+      "passed": true
+    },
+    {
+      "name": "导入及上述场景的监控未发现越界读文件或真实网络尝试",
+      "passed": true
+    }
+  ],
+  "monitoredFileViolations": 0,
+  "monitoredNetworkAttempts": 0,
+  "childProcessAllowed": false,
+  "unverified": [
+    "Windows 命令及进程树取消",
+    "worker / Gateway 崩溃恢复与副作用核对",
+    "多任务并发与路径攻击",
+    "压缩质量与真实 token 预算",
+    "图片及推理参数",
+    "真实网络、账号、模型与费用",
+    "正式接口、数据库与界面集成",
+    "操作系统网络沙箱"
+  ],
+  "packages": [
+    {
+      "name": "@earendil-works/pi-agent-core",
+      "version": "1.5.0",
+      "integrity": "sha512-FOj+jXj48DbzMycR/ghNa2KcsqWmvOln24e0FnQOVgnd8vn5H79g335WdHaZUVdRo+zCeogb40/qPPlCWFuvmA=="
+    },
+    {
+      "name": "@earendil-works/pi-ai",
+      "version": "1.5.0",
+      "integrity": "sha512-VeWxNqTHSqRCf8AcY/6kvNwh+neRL6MPxZPePVztIQy6qqK9MR/YoCSN/ZgDnIyCD3pqEXgRyQbzk4KV4uvjbg=="
+    },
+    {
+      "name": "@earendil-works/pi-schema",
+      "version": "1.5.0",
+      "integrity": "sha512-RW0MbT2tR65OY6xMsgB/yVBb7m/RTNwA+9hurSN1vVXfHZRVmVnXbruBPrx/PzbrQnW5yLVlMRWxErGDQtF1Hg=="
+    }
+  ],
+  "lockSha256": "801637c8fb196639fdf70d86f4c4ed187c49a9568af651ad7ad2e2872bf202f7",
+  "lockPackageCount": 88
+}

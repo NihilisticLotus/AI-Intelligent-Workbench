@@ -33,3 +33,4 @@
 | [ISSUE-0027](ISSUE-0027-codebuddy-auto-label.md) | CodeBuddy 自动强度在提示和面板中显示 enabled | fixed | bug | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0028](ISSUE-0028-api-profile-delete-policy.md) | API 账号删除时的目录与凭据清理规则冲突（旧配置已阻断，清理待完成） | investigating | 验收未通过 | 2026-11-08 | |
 | [ISSUE-0029](ISSUE-0029-custom-api-agent-boundary.md) | 工作台自定义 API 被错误归属到第三方认证（原生边界已整改，独立 Agent / 多 API 模型与能力识别待实现） | investigating | 验收未通过 | 2026-11-08 | |
+| [ISSUE-0030](ISSUE-0030-pi-runtime-contracts.md) | Pi 候选的参数、终态与用量语义需宿主适配 | investigating | 外部依赖 | 2026-11-08 | |

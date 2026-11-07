@@ -36,6 +36,16 @@
   .field { display: grid; grid-template-columns: 96px 1fr; gap: var(--sp-2); align-items: center; font-size: var(--fs-13); margin-bottom: var(--sp-2); }
   .field label { color: var(--fg-2); }
   .testlog { margin: 0; padding: 10px 12px; background: var(--bg-0); border-radius: var(--r-card); font-size: 12.5px; color: var(--fg-2); white-space: pre-wrap; }
+  .sec-h { font-size: var(--fs-13); font-weight: 600; margin: var(--sp-5) 0 var(--sp-2); display: flex; gap: var(--sp-2); align-items: baseline; }
+  .sec-h:first-of-type { margin-top: 0; }
+  .sec-h .muted { font-weight: 400; font-size: var(--fs-12); color: var(--fg-3); }
+  .agent-card .top .switch { margin-left: var(--sp-2); }
+  .off-list { display: flex; flex-direction: column; gap: 6px; }
+  .off-row { display: flex; align-items: center; gap: var(--sp-3); padding: 10px 14px; border-radius: var(--r-card); background: var(--bg-2); font-size: var(--fs-13); }
+  .off-row .name { font-weight: 600; }
+  .off-row .sub { color: var(--fg-3); font-size: var(--fs-12); flex: 1; min-width: 0; }
+  .off-row .lbl { color: var(--fg-3); font-size: var(--fs-12); }
+  .cards-empty { padding: var(--sp-4); border-radius: var(--r-card); border: 1px dashed var(--line-strong); color: var(--fg-3); font-size: var(--fs-13); }
   @media (max-width: 1023px) { .detail { grid-template-columns: 1fr; gap: var(--sp-4); } }
 </style>
 </head>
@@ -50,9 +60,10 @@
     </header>
     <div class="content-scroll">
       <div class="page">
-        <p class="page-lead">上次检测：今天 13:58。安装、登录、更新都在这里点按钮完成，不需要打开命令行。</p>
+        <p class="page-lead">上次检测：今天 13:58。安装、登录、更新都在这里点按钮完成，不需要打开命令行。只有打开的 Agent 会检测、出现在新建任务和切换器里。</p>
+        <h2 class="sec-h">已启用 <span class="muted" id="on-count"></span></h2>
         <div class="cards">
-          <article class="agent-card" tabindex="0" aria-current="true">
+          <article class="agent-card" tabindex="0" aria-current="true" data-agent="claude">
             <span class="top"><span class="ag claude lg">C</span><span><span class="name">Claude Code</span><br><span class="src">npm 全局安装</span></span><span style="margin-left:auto" class="status ok"><span class="dot"></span>就绪</span></span>
             <dl>
               <dt>版本</dt><dd>2.3.8（已验证）</dd>
@@ -61,7 +72,7 @@
             </dl>
           </article>
 
-          <article class="agent-card" tabindex="0">
+          <article class="agent-card" tabindex="0" data-agent="codex">
             <span class="top"><span class="ag codex lg">X</span><span><span class="name">Codex</span><br><span class="src">npm 全局安装</span></span><span style="margin-left:auto" class="status wait"><span class="dot"></span>需要登录</span></span>
             <div class="alert attn" style="padding:8px 10px">
               <svg class="i" aria-hidden="true"><use href="#i-warn"/></svg>
@@ -94,15 +105,19 @@
             <div class="acts"><button class="btn sm" data-wb-recheck>重新检测</button></div>
           </article>
 
-          <article class="agent-card" tabindex="0">
+          <article class="agent-card" tabindex="0" data-agent="zcode">
             <span class="top"><span class="ag zcode lg">Z</span><span><span class="name">ZCode</span><br><span class="src">ZCode 内置引擎</span></span><span style="margin-left:auto" class="status idle"><span class="dot"></span>未连接</span></span>
             <dl>
               <dt>版本</dt><dd>0.17.1</dd>
-              <dt>说明</dt><dd>需要协议桥接，目前是实验功能，可能没有中途审批。</dd>
+              <dt>说明</dt><dd>本机已安装。通过工作台的协议桥接连接（实验），可能没有中途审批。</dd>
             </dl>
-            <div class="acts"><button class="btn sm">启用实验桥接</button></div>
+            <div class="acts"><button class="btn sm" data-zc-test>连接并测试</button></div>
           </article>
         </div>
+        <div class="cards-empty" hidden>还没有启用任何 Agent。在下面打开一个就能开始用。</div>
+
+        <h2 class="sec-h">其他 Agent <span class="muted">本机检测到，默认关闭，需要时打开</span></h2>
+        <div class="off-list" role="list"></div>
 
         <section class="detail" aria-label="Claude Code 详情">
           <div>

@@ -275,7 +275,10 @@
   panel.addEventListener('change', (e) => {
     if (!e.target.matches('.sc-model') || !active) return;
     active.model = e.target.value;
-    note(active, `后面的回答改用 ${esc(active.model)}`);
+    // 连续切换、中间没有新问答时只留一行，显示最终结果（和主对话一致，ISSUE-0018）
+    const last = active.el.lastElementChild;
+    if (last?.matches('.sysnote[data-kind="model"]')) $('span', last).textContent = `后面的回答改用 ${active.model}`;
+    else { note(active, `后面的回答改用 ${esc(active.model)}`); active.el.lastElementChild.dataset.kind = 'model'; }
     toast(`侧聊模型改为 ${esc(active.model)}`);
   });
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); ask(input.value); } });
@@ -309,15 +312,46 @@
   // 选中文字后的小菜单（design.md 15.2、ui-design.md 5.15）：[添加到对话] 加为注释（对照 Codex）；
   // [在侧边聊天中提问] 正式版由功能开关 chat.side 控制，侧聊上线前不显示；原型里画出来演示
   // 注释：评论框“添加可选评论…” → 原文旁编号圆点 → 输入框上方“N 条注释” → 发送时附在消息后面
-  const annos = [];
-  let annoSeq = 0, annoEd = null;
+  // 注释按任务保存：刷新页面、切到别的任务再回来都还在（正式版存到 Gateway 的草稿里，见 ui-design.md 5.15）。
+  // 保存原文和它在对话文字里的位置；恢复时在对话里重新找到这段文字，找不到就只保留注释、不画圆点
+  const ANNO_KEY = 'aic-proto-annos-' + (document.body.dataset.task || 'default');
+  const streamText = () => {
+    const nodes = []; let all = '';
+    const tw = document.createTreeWalker(stream, NodeFilter.SHOW_TEXT);
+    for (let n = tw.nextNode(); n; n = tw.nextNode()) { nodes.push([n, all.length]); all += n.data; }
+    return { nodes, all };
+  };
+  const offsetOf = (range) => {
+    const { nodes } = streamText();
+    const hit = nodes.find(([n]) => n === range.startContainer);
+    return hit ? hit[1] + range.startOffset : -1;
+  };
+  const rangeAt = (raw, hint) => {
+    const { nodes, all } = streamText();
+    let best = -1, i = all.indexOf(raw);
+    while (i >= 0) { if (best < 0 || Math.abs(i - hint) < Math.abs(best - hint)) best = i; i = all.indexOf(raw, i + 1); }
+    if (best < 0) return null;
+    const at = (pos) => { for (let k = nodes.length - 1; k >= 0; k--) if (nodes[k][1] <= pos) return [nodes[k][0], pos - nodes[k][1]]; return null; };
+    const a = at(best), b = at(best + raw.length);
+    if (!a || !b) return null;
+    const r = document.createRange(); r.setStart(a[0], a[1]); r.setEnd(b[0], b[1]); return r;
+  };
+  const annos = (() => {
+    try { return (JSON.parse(localStorage.getItem(ANNO_KEY)) || []).map((a) => ({ ...a, range: null })); } catch { return []; }
+  })();
+  const annoSave = () => localStorage.setItem(ANNO_KEY, JSON.stringify(annos.map(({ id, text, raw, pos, comment }) => ({ id, text, raw, pos, comment }))));
+  let annoSeq = annos.reduce((m, a) => Math.max(m, +a.id.slice(2) || 0), 0), annoEd = null;
   const ic2 = (n) => `<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
   const annoChipHost = () => $('.composer .compose-box');
   const annoClose = () => { annoEd?.remove(); annoEd = null; CSS.highlights?.delete('aic-anno'); };
   const annoRender = () => {
     $$('.anno-badge').forEach((b) => b.remove());
     const sr = stream.getBoundingClientRect();
+    annoSave();
     annos.forEach((a, i) => {
+      // 页面重建过（刷新、对话重新渲染）时按原文重新定位
+      if (!a.range || !a.range.startContainer.isConnected) a.range = a.raw ? rangeAt(a.raw, a.pos) : null;
+      if (!a.range) return;
       const rs = a.range.getClientRects(); const r = rs[rs.length - 1];
       if (!r || r.top < sr.top || r.top > sr.bottom - 10) return;
       document.body.insertAdjacentHTML('beforeend', `<button type="button" data-wired="1" class="anno-badge" style="left:${r.right}px;top:${r.top}px" aria-label="注释 ${i + 1}，点击修改">${i + 1}<span class="anno-tip">${esc(a.comment || a.text)}</span></button>`);
@@ -339,6 +373,7 @@
   };
   const annoEdit = (a, isNew) => {
     annoClose();
+    if (!a.range) return;
     if (typeof Highlight !== 'undefined') CSS.highlights?.set('aic-anno', new Highlight(a.range));
     const r = a.range.getClientRects()[0], sr = stream.getBoundingClientRect();
     const below = r.top - sr.top < 120;
@@ -358,13 +393,15 @@
     annoEd._save = save;
   };
   const annoAdd = (text, range) => {
-    const a = { id: 'an' + (++annoSeq), text, comment: '', range };
+    const raw = range.toString();
+    const a = { id: 'an' + (++annoSeq), text, raw, pos: offsetOf(range), comment: '', range };
     annos.push(a); annoRender(); annoEdit(a, true);
   };
   document.addEventListener('mousedown', (e) => {
     if (!annoEd || annoEd.contains(e.target) || e.target.closest('.anno-badge')) return;
     annoEd.dataset.isNew ? annoEd._save() : annoClose();
   });
+  if (annos.length) setTimeout(annoRender, 300);
   stream?.addEventListener('scroll', () => { if (annos.length) annoRender(); }, { passive: true });
   window.addEventListener('resize', () => { if (annos.length) annoRender(); });
   // 发送时取走注释（interact.js 调用）

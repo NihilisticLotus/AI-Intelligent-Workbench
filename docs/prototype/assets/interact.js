@@ -1275,11 +1275,85 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
     card.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target === card) pickCard(card); });
   });
 
+  // 启用开关（ui-design.md 5.5）：Claude Code、Codex 默认打开，其他默认关闭。
+  // 关闭的 Agent 不检测、不探测、不出现在新建任务和切换器里；本机检测到的列在“其他 Agent”里，打开后才检测并测试连接。
+  const ENABLE_KEY = 'aic-proto-agents-enabled';
+  const enabled = (() => { try { return JSON.parse(localStorage.getItem(ENABLE_KEY)) || null; } catch { return null; } })()
+    || { claude: true, codex: true, codebuddy: false, workbuddy: false, zcode: false };
+  const saveEnabled = () => localStorage.setItem(ENABLE_KEY, JSON.stringify(enabled));
+  const offHint = { claude: 'npm 全局安装 · 2.3.8', codex: 'npm 全局安装 · 0.61.0', codebuddy: '工作台自带的官方独立版引擎 · 2.181.0', workbuddy: 'WorkBuddy 内置引擎 · 2.165.0（只带精简引擎，打开后显示为暂不支持）', zcode: '本机已安装 · 0.17.1 · 协议桥接（实验）' };
+  const cardsEl = $('.cards'), offList = $('.off-list');
+  const cardOf = (k) => $(`.agent-card[data-agent="${k}"]`);
+  const switchHtml = (k, on, name) => `<button type="button" class="switch" role="switch" data-wired="1" data-en="${k}" aria-checked="${on}" aria-label="${on ? '关闭' : '打开'} ${name}" title="${on ? '已启用，点击关闭' : '已关闭，点击打开'}"></button>`;
+  $$('.agent-card').forEach((c) => $('.top', c).insertAdjacentHTML('beforeend', switchHtml(c.dataset.agent, true, $('.name', c).textContent)));
+  const paintEnabled = () => {
+    let on = 0;
+    $$('.agent-card').forEach((c) => { const k = c.dataset.agent; c.hidden = !enabled[k]; if (enabled[k]) on++; });
+    $('#on-count').textContent = `${on} 个`;
+    $('.cards-empty').hidden = on > 0;
+    const offs = $$('.agent-card').filter((c) => c.hidden);
+    offList.innerHTML = offs.length ? offs.map((c) => {
+      const k = c.dataset.agent, name = $('.name', c).textContent;
+      return `<div class="off-row" role="listitem"><span class="ag ${k}">${$('.ag', c).textContent}</span><span class="name">${name}</span><span class="sub">${offHint[k]}</span><span class="lbl">已关闭</span>${switchHtml(k, false, name)}</div>`;
+    }).join('') : '<div class="cards-empty">本机检测到的 Agent 都已启用。</div>';
+    offList.previousElementSibling.hidden = !offs.length;
+    // 详情区跟着第一个启用的 Agent；全部关闭时隐藏
+    const cur = $('.agent-card[aria-current="true"]');
+    if (!cur || cur.hidden) { const first = $$('.agent-card').find((c) => !c.hidden); if (first) pickCard(first); }
+    detail.hidden = on === 0;
+  };
+  const setEnabled = (k, v) => {
+    const card = cardOf(k), name = $('.name', card).textContent;
+    enabled[k] = v; saveEnabled(); paintEnabled();
+    $(`.switch[data-en="${k}"]`, card).setAttribute('aria-checked', String(v));
+    if (!v) { toast(`已关闭 ${name}：不再检测，新建任务和切换器里不显示。已有任务的记录保留`); return; }
+    pickCard(card); card.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    setStatus(card, 'idle', '检测中…');
+    setTimeout(() => {
+      if (k === 'zcode') { setStatus(card, 'idle', '未连接'); runTest('zcode'); }
+      else if (k === 'workbuddy') setStatus(card, 'err', '暂不支持');
+      else if (k === 'codebuddy') setStatus(card, 'wait', '需要登录');
+      else setStatus(card, k === 'codex' ? 'wait' : 'ok', k === 'codex' ? '需要登录' : '就绪');
+      toast(`已打开 ${name}，检测完成`);
+    }, 700);
+  };
+  document.addEventListener('click', (e) => {
+    const sw = e.target.closest('.switch[data-en]'); if (!sw) return;
+    e.stopPropagation();
+    const k = sw.dataset.en, on = sw.getAttribute('aria-checked') === 'true';
+    if (on && k === 'claude') return modal({ title: '关闭 Claude Code？', body: '<p>有 2 个会话正在运行。关闭后不再接新任务，运行中的会话会照常做完；已有任务的记录都保留，随时可以再打开。</p>',
+      actions: [{ label: '取消' }, { label: '关闭', kind: 'danger', onClick() { setEnabled(k, false); } }] });
+    setEnabled(k, !on);
+  }, true);
+
+  // 测试连接：详情区的日志；ZCode 走协议桥接
+  const runTest = (k) => {
+    const log = $('.testlog'); const t = () => new Date().toTimeString().slice(0, 8);
+    const card = cardOf(k);
+    pickCard(card);
+    const steps = k === 'zcode' ? [
+      '找到引擎 %LOCALAPPDATA%\\Programs\\ZCode\\resources\\glm\\zcode.cjs（0.17.1）',
+      '启动 zcode app-server',
+      '协议桥接握手成功（ZCode Protocol → ACP）',
+      '读取模型列表：glm-5.1',
+      '发送测试消息，2.4 秒收到回复',
+      '中途审批：不支持，工具调用按 ZCode 自己的设置执行（已在卡片上提示）',
+    ] : ['找到引擎', 'ACP 握手成功，协议版本 1', '发送测试消息，1.7 秒收到回复'];
+    log.textContent = '';
+    steps.forEach((s, i) => setTimeout(() => { log.textContent += (i ? '\n' : '') + `${t()}  ${s}`; }, 350 * (i + 1)));
+    setTimeout(() => {
+      log.textContent += `\n结果：${k === 'zcode' ? '已连接（实验）' : '一切正常'}`;
+      if (k === 'zcode') { setStatus(card, 'ok', '已连接（实验）'); $('[data-zc-test]', card).textContent = '再测一次'; }
+      toast(k === 'zcode' ? 'ZCode 连接测试通过（实验桥接）' : '测试通过');
+    }, 350 * (steps.length + 1));
+  };
+  paintEnabled();
+
   // 顶部重新检测
   const redetect = $('.main-head .btn');
   wire(redetect).addEventListener('click', () => progress(redetect, () => {
     $('.page-lead').firstChild.textContent = `上次检测：今天 ${hhmm()}。`;
-    toast('检测完成：找到 5 个 Agent，其中 WorkBuddy 暂不支持');
+    toast(`检测完成：本机找到 5 个 Agent，已启用 ${Object.values(enabled).filter(Boolean).length} 个（只检测已启用的）`);
   }, '检测中'));
 
   $$('.agent-card .btn').forEach((b) => {
@@ -1306,9 +1380,7 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
     else if (t.includes('更新')) b.addEventListener('click', () => progress(b, () => {
       $('dl dd', card).textContent = '0.63.2（已验证）'; b.remove(); toast('Codex 已更新到 0.63.2');
     }, '更新中'));
-    else if (t.includes('桥接')) b.addEventListener('click', () => progress(b, () => {
-      setStatus(card, 'ok', '已连接（实验）'); b.textContent = '关闭桥接'; toast('ZCode 已通过实验桥接连接');
-    }, '连接中'));
+    else if (b.hasAttribute('data-zc-test')) b.addEventListener('click', () => runTest('zcode'));
   });
 
   // 账号行
@@ -1354,12 +1426,7 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
 
   // 再测一次
   const retest = $$('.detail h3 .btn').find((b) => b.textContent.includes('再测'));
-  wire(retest)?.addEventListener('click', () => {
-    const log = $('.testlog'); const t = () => new Date().toTimeString().slice(0, 8);
-    log.textContent = `${t()}  找到引擎`;
-    setTimeout(() => { log.textContent += `\n${t()}  ACP 握手成功，协议版本 1`; }, 400);
-    setTimeout(() => { log.textContent += `\n${t()}  发送测试消息，1.7 秒收到回复\n结果：一切正常`; toast('测试通过'); }, 1200);
-  });
+  wire(retest)?.addEventListener('click', () => runTest($('.agent-card[aria-current="true"]').dataset.agent));
 })();
 
 // ---------- 兜底：任何还没有动作的按钮或链接，至少给出说明 ----------

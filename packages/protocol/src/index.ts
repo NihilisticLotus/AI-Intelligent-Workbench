@@ -63,6 +63,7 @@ export const ErrorCode = {
   AttachmentNotFound: 'attachment.not_found',
   AttachmentBadType: 'attachment.bad_type',
   AgentNativeConfiguration: 'agent.native_configuration',
+  IndependentDiscoveryFailed: 'independent.discovery_failed',
 } as const;
 
 /**
@@ -417,6 +418,7 @@ export const FeatureKey = {
   Drafts: 'tasks.draft',             // 任务草稿按任务保存（GET / PUT /tasks/:id/draft）
   IndependentCatalog: 'independent.catalog', // 独立服务和模型配置，不表示执行器已就绪
   IndependentRuntime: 'independent.runtime',
+  IndependentDiscovery: 'independent.discovery',
 } as const;
 
 // ---------- 设备与配对 ----------
@@ -752,3 +754,27 @@ export const IndependentDefault = z.object({ selection: IndependentSelection.nul
 export type IndependentDefault = z.infer<typeof IndependentDefault>;
 export const IndependentModelBinding = IndependentSelection.extend({ taskId: Id, configRevision: Revision, modelRevision: Revision, createdAt: Ts }).strict();
 export type IndependentModelBinding = z.infer<typeof IndependentModelBinding>;
+
+// 独立发现只返回规范化的候选与证据，不接受远端路由或认证模板。
+export const DiscoverIndependentModelsBody = z.object({ expectedConfigRevision: Revision, includeCatalog: z.boolean() }).strict();
+export type DiscoverIndependentModelsBody = z.infer<typeof DiscoverIndependentModelsBody>;
+export const IndependentDiscoveredModel = CreateIndependentModelBody.extend({ evidence: z.array(IndependentCapabilityEvidence).max(256) }).strict();
+export type IndependentDiscoveredModel = z.infer<typeof IndependentDiscoveredModel>;
+export const IndependentDiscoverySnapshot = z.object({
+  id: Id, serviceId: Id, configRevision: Revision, items: z.array(IndependentDiscoveredModel).max(500),
+  skipped: z.number().int().nonnegative(), pageCount: z.number().int().nonnegative().max(10), requestCount: z.number().int().nonnegative().max(11),
+  fetchedAt: Ts, expiresAt: Ts, includeCatalog: z.boolean(), notices: z.array(z.string().max(300)).max(32),
+}).strict();
+export type IndependentDiscoverySnapshot = z.infer<typeof IndependentDiscoverySnapshot>;
+export const IndependentDiscoveryState = z.object({
+  snapshot: IndependentDiscoverySnapshot.nullable(), stale: z.boolean(),
+  lastError: z.object({ message: z.string().max(300), at: Ts }).strict().nullable(),
+}).strict();
+export type IndependentDiscoveryState = z.infer<typeof IndependentDiscoveryState>;
+export const ImportIndependentModelsBody = z.object({
+  snapshotId: Id, expectedConfigRevision: Revision,
+  remoteModelIds: z.array(CreateIndependentModelBody.shape.remoteModelId).min(1).max(500).refine((v) => new Set(v).size === v.length, '模型不能重复'),
+}).strict();
+export type ImportIndependentModelsBody = z.infer<typeof ImportIndependentModelsBody>;
+export const ImportIndependentModelsResult = z.object({ items: z.array(IndependentModel).max(500), nextCursor: z.null() }).strict();
+export type ImportIndependentModelsResult = z.infer<typeof ImportIndependentModelsResult>;

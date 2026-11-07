@@ -34,4 +34,13 @@ describe('独立目录 REST 客户端', () => {
     await expect(client.patchIndependentService(service.id, { expectedRevision: 1, name: '新名' })).rejects.toMatchObject({ status: 409 }); expect(fetcher).toHaveBeenCalledTimes(1);
     const broken = new HttpClient({ fetchImpl: async () => new Response('{}') }); await expect(broken.independentServices()).rejects.toThrow('版本不匹配');
   });
+  it('发现预览与导入仅经 Gateway，显式传递范围、公共目录选择和勾选 ID', async () => {
+    let response: unknown = {snapshot:null,stale:true,lastError:null};
+    const fetcher = vi.fn(async () => new Response(JSON.stringify(response))); const client = new HttpClient({fetchImpl:fetcher});
+    await client.independentDiscovery(service.id); expect((fetcher.mock.calls.at(-1)! as unknown as [string,RequestInit])[0]).toBe('/api/v1/independent/services/s%20%2F%3F/discovery');
+    const body = {expectedConfigRevision:2,includeCatalog:true}; await client.discoverIndependentModels(service.id,body);
+    expect(JSON.parse((fetcher.mock.calls.at(-1)! as unknown as [string,RequestInit])[1].body as string)).toEqual(body);
+    response={items:[model],nextCursor:null}; const selected={snapshotId:'snapshot',expectedConfigRevision:2,remoteModelIds:['remote']};await client.importIndependentModels(service.id,selected);
+    const [url,init]=fetcher.mock.calls.at(-1)! as unknown as [string,RequestInit];expect(url).toBe('/api/v1/independent/services/s%20%2F%3F/models/import');expect(JSON.parse(init.body as string)).toEqual(selected);
+  });
 });

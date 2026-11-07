@@ -155,6 +155,13 @@ const MIGRATIONS: string[] = [
     config_revision INTEGER NOT NULL, model_revision INTEGER NOT NULL, created_at INTEGER NOT NULL
   );
   `,
+  // v8：发现预览与固定错误摘要；不保存上游原文或认证信息。
+  `
+  CREATE TABLE independent_discoveries (
+    service_id TEXT PRIMARY KEY REFERENCES independent_services(id) ON DELETE CASCADE,
+    snapshot_json TEXT, last_error_json TEXT, attempted_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

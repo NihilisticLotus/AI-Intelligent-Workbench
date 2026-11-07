@@ -1,6 +1,6 @@
-// 独立目录配置只经统一鉴权 REST，不在这里调用上游或解密密钥。
+// 独立目录经统一鉴权 REST；元数据网络和解密由独立发现服务处理。
 import { Hono } from 'hono';
-import { CreateIndependentServiceBody, PatchIndependentServiceBody, CreateIndependentModelBody, PatchIndependentModelBody, PatchIndependentOverridesBody, IndependentDefault } from '@aic/protocol';
+import { CreateIndependentServiceBody, PatchIndependentServiceBody, CreateIndependentModelBody, PatchIndependentModelBody, PatchIndependentOverridesBody, IndependentDefault, DiscoverIndependentModelsBody, ImportIndependentModelsBody } from '@aic/protocol';
 import type { Services } from '../services';
 import { readBody, type Env } from './app';
 
@@ -12,6 +12,9 @@ export function independentRoutes(s: Services) {
   r.patch('/independent/services/:serviceId', async (c) => c.json(await catalog.patchService(c.req.param('serviceId'), await readBody(c, PatchIndependentServiceBody), c.get('device').id)));
   r.delete('/independent/services/:serviceId', (c) => { catalog.deleteService(c.req.param('serviceId'), c.get('device').id); return c.json({ ok: true }); });
   r.get('/independent/services/:serviceId/models', (c) => c.json({ items: catalog.listModels(c.req.param('serviceId')), nextCursor: null }));
+  r.get('/independent/services/:serviceId/discovery', (c) => c.json(s.independentDiscovery.state(c.req.param('serviceId'))));
+  r.post('/independent/services/:serviceId/discovery', async (c) => c.json(await s.independentDiscovery.refresh(c.req.param('serviceId'),await readBody(c, DiscoverIndependentModelsBody))));
+  r.post('/independent/services/:serviceId/models/import', async (c) => c.json(s.independentDiscovery.import(c.req.param('serviceId'),await readBody(c, ImportIndependentModelsBody),c.get('device').id)));
   r.post('/independent/services/:serviceId/models', async (c) => c.json(catalog.createModel(c.req.param('serviceId'), await readBody(c, CreateIndependentModelBody), c.get('device').id), 201));
   r.get('/independent/services/:serviceId/models/:modelId', (c) => c.json(catalog.getModel(c.req.param('serviceId'), c.req.param('modelId'))));
   r.patch('/independent/services/:serviceId/models/:modelId', async (c) => c.json(catalog.patchModel(c.req.param('serviceId'), c.req.param('modelId'), await readBody(c, PatchIndependentModelBody), c.get('device').id)));

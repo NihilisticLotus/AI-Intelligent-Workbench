@@ -23,6 +23,8 @@ import { GroupService, ProjectService } from './projects';
 import type { Services } from './services';
 import { AttachmentService } from './attachments';
 import { IndependentCatalog } from './independent/catalog';
+import { IndependentDiscovery } from './independent/discovery';
+import type { readMetadataJson } from './independent/metadata-http';
 import { TaskService } from './tasks';
 import { newId } from './util';
 
@@ -83,6 +85,8 @@ export interface GatewayOptions {
   adapters?: AgentAdapter[] | ((rt: AcpRuntime) => AgentAdapter[]);
   /** 密钥存储；默认 Windows 用 DPAPI，其他平台不支持 */
   secretStore?: SecretStore;
+  /** 离线测试注入元数据响应；正式启动不从环境加载替代客户端。 */
+  metadataReader?: typeof readMetadataJson;
   /** 会话空闲多久后关闭 Agent 进程，默认 30 分钟 */
   idleTimeoutMs?: number;
   noResponseNoticeMs?: number;
@@ -192,6 +196,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   };
   const secrets = new SecretService(db, opts.secretStore ?? defaultSecretStore(db));
   const independent = new IndependentCatalog(db, secrets, events);
+  const independentDiscovery = new IndependentDiscovery(db, independent, opts.metadataReader);
   const agentSvc = new AgentService(db, events, agents, { dataDir, log, audit });
   const profiles = new ProfileService(db, secrets, {
     dataDir, audit,
@@ -219,7 +224,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   const groups = new GroupService(db, tasks);
 
   const services: Services = {
-    db, attachments, independent, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks,
+    db, attachments, independent, independentDiscovery, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks,
     port: () => port,
     machine: { id: machineId, name: hostname(), os: process.platform === 'win32' ? 'windows' : process.platform },
     version: VERSION,
@@ -261,6 +266,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
       if (closed) return;
       closed = true;
       clearInterval(cleanupTimer);
+      independentDiscovery.close();
       ws.close();
       agentSvc.shutdown();
       const graceful = tasks.shutdown();

@@ -7,9 +7,9 @@
   const render = () => {
     root.querySelector('[data-independent-default]').textContent = '默认模型：' + (selected ? `${selected.service.name} / ${selected.model.name}` : '尚未设置');
     root.querySelector('[data-independent-list]').innerHTML = services.map((s, i) => `<details open style="margin-top:16px;border:1px solid var(--line);padding:12px;border-radius:8px"><summary><b>${esc(s.name)}</b> · ${esc(s.protocol)} · ${s.models.length} 个模型</summary>
-      <p class="mono">${esc(s.url)}</p><p class="muted">原型不保存密钥；在线识别尚未接入</p><button class="btn" data-add-model="${i}" data-wired>添加模型</button>
+      <p class="mono">${esc(s.url)}</p><p class="muted">原型不保存密钥、不联网；发现只演示虚构候选</p><button class="btn" data-add-model="${i}" data-wired>添加模型</button> <button class="btn" data-discover="${i}" data-wired>获取模型与能力（演示）</button>
       ${s.models.map((m, j) => `<article style="margin-top:12px;padding:12px;background:var(--bg-1);border-radius:8px"><h3>${esc(m.name)}</h3><code>${esc(m.id)}</code>
-        <p>上下文：${esc(m.context || '未知')} · 图片：${m.image === '' ? '未知' : m.image === 'false' ? '不支持（手动）' : '支持（手动）'} · 思考强度：${esc(m.effort || '未知')}</p>
+        <p>上下文：${esc(m.context || '未知')} · 图片：${m.image === '' ? '未知' : m.image === 'false' ? '不支持' : '支持'} · 思考强度：${esc(m.effort || '未知')} · 来源：${m.auto ? '模拟目录' : '手动 / 未知'}</p>
         <button class="btn" data-cap="${i}:${j}" data-wired>能力与来源</button> <button class="btn" data-default="${i}:${j}" data-wired>设为默认</button></article>`).join('')}</details>`).join('');
     root.querySelectorAll('[data-add-model]').forEach((b) => b.onclick = () => {
       const service = services[Number(b.dataset.addModel)];
@@ -20,14 +20,22 @@
       } }] });
     });
     root.querySelectorAll('[data-default]').forEach((b) => b.onclick = () => { const [i, j] = b.dataset.default.split(':').map(Number); selected = { service: services[i], model: services[i].models[j] }; render(); });
+    root.querySelectorAll('[data-discover]').forEach((b) => b.onclick = () => {
+      const service = services[Number(b.dataset.discover)];
+      const candidates = [{id:'demo-vision',name:'图片候选（虚构）',context:'32000',image:'true',effort:'low, medium',auto:true},{id:'demo-unknown',name:'未知候选（虚构）',context:'',image:'',effort:'',auto:true}];
+      window.aicModal({title:'获取模型与能力（原型）',body:`<p>这里只显示虚构候选，不请求网络。正式版由用户明确获取，最多 10 次服务列表请求及可选 1 次匿名目录请求，不发模型消息。</p><p>导入只追加所选项，已有名称、人工值和默认值保留；正式版可核对逐字段来源、冲突、获取时间和过期状态。</p><div class="form-row"><label for="pic-search">搜索候选</label><input id="pic-search" class="input" type="search"></div>${candidates.map((m,i)=>`<label data-candidate-row="${i}" style="display:block;padding:12px"><input type="checkbox" data-candidate="${i}"> ${esc(m.name)} · ${esc(m.id)} · ${m.context ? '窗口 32000，图片支持，low / medium（模拟目录）' : '能力未知'}</label>`).join('')}`,onOpen(d){d.querySelector('#pic-search').oninput=(e)=>{const q=e.target.value.toLowerCase();d.querySelectorAll('[data-candidate-row]').forEach((row)=>{const m=candidates[Number(row.dataset.candidateRow)];row.style.display=(m.id+m.name).toLowerCase().includes(q)?'block':'none';});};},actions:[{label:'取消'},{label:'导入勾选项',kind:'primary',onClick(d){
+        const checked=[...d.querySelectorAll('[data-candidate]:checked')];if(!checked.length){window.aicToast('请先勾选候选模型','attn');return false;}
+        checked.forEach((input)=>{const m=candidates[Number(input.dataset.candidate)];if(!service.models.some((old)=>old.id===m.id))service.models.push({...m});});render();
+      }}]});
+    });
     root.querySelectorAll('[data-cap]').forEach((b) => b.onclick = () => {
       const [i, j] = b.dataset.cap.split(':').map(Number); const m = services[i].models[j];
-      window.aicModal({ title: `能力与来源：${esc(m.name)}（原型）`, body: `<p>在线识别未接入，无自动来源记录。手动值只作用于当前服务和模型，清空即恢复自动。</p>
+      window.aicModal({ title: `能力与来源：${esc(m.name)}（原型）`, body: `<p>来源：${m.auto ? '模拟目录（虚构数据，非实际验证）' : '手动 / 未知'}。正式版保留来源和人工修订；此简化原型编辑后整项按手动显示。</p>
         <div class="form-row"><label for="pic-context">上下文总窗口</label><input id="pic-context" class="input" inputmode="numeric" value="${esc(m.context)}" placeholder="未知"></div>
         <div class="form-row"><label for="pic-image">图片输入</label><select id="pic-image" class="select"><option value="">自动（未知）</option><option value="true">支持</option><option value="false">不支持</option></select></div>
         <div class="form-row"><label for="pic-effort">思考强度列表</label><input id="pic-effort" class="input" value="${esc(m.effort)}" placeholder="沿用服务原始名称，逗号分隔"></div><p class="muted">正式版提供全部 16 个字段和逐字段来源日期、冲突与范围。</p>`, onOpen(d) { d.querySelector('#pic-image').value = m.image; }, actions: [{ label: '取消' }, { label: '保存', kind: 'primary', onClick(d) {
           const context = d.querySelector('#pic-context').value.trim(); if (context && !/^[1-9]\d*$/.test(context)) { window.aicToast('上下文请输入正整数', 'attn'); return false; }
-          m.context = context; m.image = d.querySelector('#pic-image').value; m.effort = d.querySelector('#pic-effort').value.trim(); render();
+          m.context = context; m.image = d.querySelector('#pic-image').value; m.effort = d.querySelector('#pic-effort').value.trim(); m.auto=false; render();
         } }] });
     });
   };

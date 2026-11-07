@@ -136,3 +136,19 @@ usage 按每次请求存输入、输出、推理、缓存读写等原始可得�
 - 验收至少覆盖：相同模型 ID 在两个服务上的不同能力、一个服务两种协议的差异、未知字段保留、目录冲突与过期、用户覆盖不被刷新冲掉、列表失败可手动加模型、流中断 usage 未知、发现失败不改发其他服务、跨源重定向不泄露凭据、恶意目录不能安装或执行内容、私网目录 SSRF / DNS 重绑定防护。
 
 本次仅新增本调研文档，读取项目规则并浏览上述官方文档 / 固定源码；未安装依赖、未调用模型、未修改第三方设置、未读取 Agent 凭据。没有代码改动，因此未运行 typecheck / test / build，也没有把未做的运行验证写成已通过。
+
+## 9. 发现接入前补充核查（2026-11-08）
+
+本节追加最新证据，不改写上述调研时点的未验证记录。用户授权继续多路调研；本轮分别复核协议字段和公共目录发布格式，再实现 phase-1 9.19。
+
+- [OpenAI 模型列表](https://developers.openai.com/api/reference/resources/models/methods/list)未声明能力字段或分页契约，兼容服务不能仅因采用同一传输就按 DeepSeek 格式解释额外字段。
+- [Anthropic Models](https://platform.claude.com/docs/en/api/models/list)、[HTTP 定义](https://platform.claude.com/docs/en/api/http/models)、[版本规则](https://platform.claude.com/docs/en/api/versioning)核实 2026-10-21 版本的最大输入 / 输出、image_input、structured_outputs、thinking 类型、effort 独立档位及 after_id / has_more。禁用思考只取 disabled.supported，工具服务器列表不证明本地工具支持；不静默修改服务版本。
+- [DeepSeek 列表](https://api-docs.deepseek.com/zh-cn/api/list-models/)声明 context_window / max_output_tokens、模态及 effort 列表与默认值。[OpenRouter 模型元数据](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties)的顶层 context_length / architecture 与 top_provider 含义不同，不能把聚合结果的某供应商限制当成当前账号实测。
+- models.dev 固定核查提交 `c46cf594fe855f42d2ce7a53a38db7778aab4973`（2026-11-07，MIT，仍在更新）。[官方路由](https://github.com/anomalyco/models.dev/blob/c46cf594fe855f42d2ce7a53a38db7778aab4973/packages/function/src/worker.ts#L94)显示 `/catalog.json` 是 v1 聚合，真正 v2 为 `/experimental/v2.0/api.json`，只有 type 筛选，没有按 provider 缩小 JSON 的接口。v1 的首协议投影会丢失能力适用范围，不能降级用于当前配置的有效证据。
+- [v2 定义](https://github.com/anomalyco/models.dev/blob/c46cf594fe855f42d2ce7a53a38db7778aab4973/packages/core/src/schema-v2.ts#L353)与[发布合并](https://github.com/anomalyco/models.dev/blob/c46cf594fe855f42d2ce7a53a38db7778aab4973/packages/core/src/generate-v2.ts#L479)：model.api 按 responses / chat-completions / messages 区分地址；工具 supported 来自顶层，API 级工具细节不是整个顶层能力的替代。modalities.input 实际包含 image/jpeg 等 MIME。精确匹配 API 地址后仍属于目录声明，不是实际能力验证。
+- v2 未提供标准化 plan / apiVersion，不能把缺失当默认套餐，也不能从 SDK 名字推断。api.path 或模板无对应实现时拒绝匹配。reasoning.budget 为 min / max，但未核实单位；toggle 的“可关闭”语义未独立证实。首批不把两者写成令牌预算 / thinkingCanDisable；stream_usage 只取显式布尔，一般 streaming 留未知。
+- 调研子智能体匿名实读 `?type=chat`：HTTP 200、233 个 provider、解压 9,635,409 字节；v1 另一次为 5,968,194 字节。ETag 可见，但条件 304 未验证。本实现不使用 ETag 重验证，不把这些动态大小当永久规格。
+- 新 Gateway 客户端三次匿名读取固定 v2：前两次按 50 万节点限制拒绝；区分固定结构错误后，将公共来源上限调为 100 万节点（仍限制 16 MiB / 深度 24），第三次通过，并按 openai / gpt-6-sol / responses / 官方基础地址解析出窗口、输入 / 输出、MIME 图片、工具、结构化输出、思考与其原始档位。此次内容 SHA-256 为 `a2129f2c2af4ef9c3a2113cc830f83ccd8f17c0c8f96cb468809092a9d3a723d`。没有向 OpenAI 或任何用户模型服务发请求；此结果只证明公共目录下载和样本解析。
+- 网络实现依据 Node 24.14 的 [HTTP](https://nodejs.org/download/release/v24.14.0/docs/api/http.html) 和 [net.BlockList](https://nodejs.org/download/release/v24.14.0/docs/api/net.html)；本机实际连接 / 压缩 / DNS / 超时测试另记验收，不以 API 文档替代运行证据。
+
+本轮未读取第三方凭据、未改第三方设置、未新增依赖、未发真实模型消息。用户 API 的列表、套餐、真实能力、完整独立执行器及付费验证继续未验证；实现和 GUI 结果见 [step-1.3](../acceptance/step-1.3.md)。

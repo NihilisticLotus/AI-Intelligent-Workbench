@@ -143,7 +143,7 @@ export class IndependentCatalog {
   }
 
   /** 内部元数据接缝：不公开写入路由，不允许把客户端值冒充接口声明。 */
-  recordEvidence(serviceId: string, id: string, input: IndependentCapabilityEvidence[]): IndependentModel {
+  recordEvidence(serviceId: string, id: string, input: IndependentCapabilityEvidence[], deviceId: string | null = null): IndependentModel {
     const incoming = IndependentCapabilityEvidence.array().max(256).parse(input);
     return this.change({ scope: 'model', action: 'updated', serviceId, modelId: id }, () => {
       const model = this.getModel(serviceId, id); const scope = capabilityScope(this.getService(serviceId), model.remoteModelId);
@@ -156,7 +156,7 @@ export class IndependentCatalog {
         merged.set(evidenceId, { ...e, id: evidenceId });
       }
       return this.saveEvidence(serviceId, id, [...merged.values()]);
-    });
+    }, deviceId);
   }
 
   getDefault(): IndependentDefault {
@@ -216,7 +216,19 @@ export class IndependentCatalog {
     return IndependentModelBinding.parse({ taskId, serviceId: service.id, modelId: model.id, configRevision: row.config_revision, modelRevision: row.model_revision, createdAt: row.created_at });
   }
 
-  /** 仅运行时内部使用；没有公开读取密钥的路由，不从进程环境或其他服务兜底。 */
+  /** 仅发现服务内部使用；没有公开读取密钥的路由，不从进程环境或其他服务兜底。 */
+  async discoveryCredentials(serviceId: string, expectedConfigRevision: number) {
+    const check = () => { const s = this.getService(serviceId); this.expectRevision(s.configRevision, expectedConfigRevision); if (!s.enabled) throw Errors.invalidState('所选 API 服务已停用'); return s; };
+    const service = check(); const secretId = this.row(serviceId).secret_id as string | null;
+    let key: string | null;
+    try { key = service.authentication === 'none' ? null : secretId ? await this.secrets.read(secretId) : null; }
+    catch { throw Errors.secretUnavailable('这个 API 服务的密钥无法读取'); }
+    check();
+    if (service.authentication === 'api_key' && !key) throw Errors.secretUnavailable('这个 API 服务尚未保存可用密钥');
+    return { service, key };
+  }
+
+  /** 仅按任务固定绑定读取运行凭据。 */
   async credentials(taskId: string) {
     const binding = this.bound(taskId); const { service, model } = this.usable(binding);
     const secretId = this.row(service.id).secret_id as string | null;

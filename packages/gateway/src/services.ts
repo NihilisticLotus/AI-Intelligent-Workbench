@@ -1,6 +1,7 @@
 // 各服务的集合，路由和 WebSocket 共用
 import type { AttachmentService } from './attachments';
 import type { IndependentCatalog } from './independent/catalog';
+import type { IndependentDiscovery } from './independent/discovery';
 import type { Hello } from '@aic/protocol';
 import type { AuthService } from './auth';
 import type { AgentRegistry } from './agents/registry';
@@ -17,6 +18,7 @@ export interface Services {
   db: Db;
   attachments: AttachmentService;
   independent: IndependentCatalog;
+  independentDiscovery: IndependentDiscovery;
   lastExit: Hello['lastExit'];
   auth: AuthService;
   events: EventStore;

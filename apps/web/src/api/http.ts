@@ -9,9 +9,9 @@ import {
 } from '@aic/protocol';
 import { z } from 'zod';
 import {
-  IndependentService, IndependentModel, IndependentDefault,
+  IndependentService, IndependentModel, IndependentDefault, IndependentDiscoveryState, ImportIndependentModelsResult,
   type CreateIndependentServiceBody, type PatchIndependentServiceBody, type CreateIndependentModelBody,
-  type PatchIndependentModelBody, type PatchIndependentOverridesBody,
+  type PatchIndependentModelBody, type PatchIndependentOverridesBody, type DiscoverIndependentModelsBody, type ImportIndependentModelsBody,
 } from '@aic/protocol';
 
 /** 客户端自己产生的错误码（网络断开、超时等），不在服务端协议里 */
@@ -183,6 +183,9 @@ export class HttpClient {
   patchIndependentOverrides(sid: string, mid: string, body: PatchIndependentOverridesBody) { return this.request('PATCH', `/independent/services/${encodeURIComponent(sid)}/models/${encodeURIComponent(mid)}/overrides`, { body, parse: IndependentModel }); }
   independentDefault() { return this.request('GET', '/independent/default', { parse: IndependentDefault }); }
   putIndependentDefault(body: IndependentDefault) { return this.request('PUT', '/independent/default', { body, parse: IndependentDefault }); }
+  independentDiscovery(id: string) { return this.request('GET', `/independent/services/${encodeURIComponent(id)}/discovery`, { parse: IndependentDiscoveryState }); }
+  discoverIndependentModels(id: string, body: DiscoverIndependentModelsBody) { return this.request('POST', `/independent/services/${encodeURIComponent(id)}/discovery`, { body, parse: IndependentDiscoveryState }); }
+  importIndependentModels(id: string, body: ImportIndependentModelsBody) { return this.request('POST', `/independent/services/${encodeURIComponent(id)}/models/import`, { body, parse: ImportIndependentModelsResult }); }
   hello() { return this.request('GET', '/hello', { parse: Hello }); }
   pairingStart() { return this.request('POST', '/pairing/start', { body: {}, parse: PairingStartResult }); }
   /** kind / tokenDelivery 由 Platform 决定：浏览器要 Cookie + 设备密钥，桌面和手机要 Bearer 令牌 */

@@ -29,6 +29,7 @@ export function systemRoutes(s: Services) {
         [FeatureKey.AgentToggle]: true,
         [FeatureKey.Drafts]: true,
         [FeatureKey.IndependentCatalog]: true,
+        [FeatureKey.IndependentDiscovery]: true,
         [FeatureKey.IndependentRuntime]: false,
         [FeatureKey.PageAssets]: false,
         [FeatureKey.PageGenerate]: false,

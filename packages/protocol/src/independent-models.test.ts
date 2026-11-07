@@ -1,9 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { CreateIndependentServiceBody, IndependentBaseUrl, IndependentService, IndependentCapabilityEvidence, IndependentCapabilityPatch, IndependentDefault, PatchIndependentServiceBody, EventEnvelope } from './index';
+import { CreateIndependentServiceBody, IndependentBaseUrl, IndependentService, IndependentCapabilityEvidence, IndependentCapabilityPatch, IndependentDefault, PatchIndependentServiceBody, EventEnvelope, DiscoverIndependentModelsBody, ImportIndependentModelsBody, IndependentDiscoveredModel } from './index';
 
 const service = { name: '服务一', protocol: 'chat_completions', baseUrl: 'https://example.com/api/v1', authentication: 'api_key', apiVersion: null, providerId: null, plan: null, enabled: true };
 const evidence = { id: 'e', field: 'imageInput', value: false, kind: 'endpoint', scope: { serviceId: 's', configRevision: 1, protocol: 'chat_completions', apiVersion: null, providerId: null, plan: null, remoteModelId: 'model' }, sourceUrl: 'https://example.com/api/v1/models', sourceVersion: 'fixture-v1', fieldPath: 'data.image', observedAt: 1, expiresAt: 2 };
 describe('独立模型配置协议', () => {
+  it('发现请求须明确修订与公共目录选择，导入只接受快照身份和唯一勾选项', () => {
+    expect(DiscoverIndependentModelsBody.safeParse({expectedConfigRevision:1}).success).toBe(false);
+    expect(DiscoverIndependentModelsBody.parse({expectedConfigRevision:1,includeCatalog:false}).includeCatalog).toBe(false);
+    for(const extra of [{remoteModelIds:[]},{remoteModelIds:['m','m']},{evidence:[]},{baseUrl:'https://evil.example'}])expect(ImportIndependentModelsBody.safeParse({snapshotId:'s',expectedConfigRevision:1,remoteModelIds:['m'],...extra}).success).toBe(false);
+    expect(IndependentDiscoveredModel.safeParse({remoteModelId:'m',name:'模型',evidence:[],apiKey:'fixture-key'}).success).toBe(false);
+  });
   it('配置写入和读取分离，精确值不转换，修订必须明确', () => {
     expect(CreateIndependentServiceBody.parse({ ...service, apiKey: 'fixture-private-value' }).name).toBe('服务一');
     expect(IndependentService.safeParse({ ...service, id: 's', revision: 1, configRevision: 1, hasSecret: true, secretHint: 'alue', createdAt: 1, updatedAt: 1, apiKey: 'fixture-private-value' }).success).toBe(false);

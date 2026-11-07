@@ -8,11 +8,13 @@ import { ApiRequestError } from '../api/http';
 import { Dialog, ErrorNotice, asApiError, confirmDialog, openDialog } from '../components/ui';
 import { toast } from '../state/ui';
 import { capabilityKinds, capabilityLabels, capabilityText, evidenceApplies, latestRequest, overridePatch, sourceLabels } from '../lib/independent';
+import { IndependentDiscoveryDialog } from './independent-discovery-dialog';
 
 const protocolLabels = { chat_completions: 'Chat Completions', responses: 'Responses', anthropic_messages: 'Anthropic Messages' };
 
 export function IndependentAgentPanel() {
   const available = useApp((s) => !!s.hello?.features[FeatureKey.IndependentCatalog]);
+  const discovery = useApp((s) => !!s.hello?.features[FeatureKey.IndependentDiscovery]);
   const version = useApp((s) => s.independentCatalogVersion);
   const conn = useApp((s) => s.conn);
   const [snapshot, setSnapshot] = useState<{ services: IndependentService[]; models: Record<string, IndependentModel[]>; selection: IndependentDefault['selection'] } | null>(null);
@@ -45,7 +47,7 @@ export function IndependentAgentPanel() {
   return <section className="independent-panel" aria-labelledby="independent-title">
     <div className="independent-heading"><div><h2 id="independent-title">工作台独立 Agent</h2><p>自己的 API 服务与模型目录，可添加多个服务，每个服务保留多个模型。</p></div>
       <span className="tag">执行能力尚未实现</span></div>
-    <p className="muted">目前可保存配置、手动修订能力和设置默认值；暂不能派发任务。在线识别尚未接入，刷新只读取工作台已保存的目录，不调用模型。</p>
+    <p className="muted">可管理配置、获取模型与能力、手动修订和设置默认值；暂不能派发任务。“刷新已保存目录”只读取工作台资料，在线获取需进入服务后明确操作。</p>
     {!available ? <p role="status">当前 Gateway 未提供独立模型目录，请更新服务后刷新页面。</p> : <>
       <div className="independent-actions"><button className="btn primary" onClick={() => serviceDialog()}>添加 API 服务</button>
         <button className="btn" disabled={loading} onClick={() => void refresh()}>{loading ? '正在读取…' : '刷新已保存目录'}</button></div>
@@ -60,6 +62,7 @@ export function IndependentAgentPanel() {
           <p className="muted">{service.authentication === 'none' ? '明确使用无认证服务' : service.hasSecret ? `密钥已加密保存在工作台 · 结尾 …${service.secretHint ?? ''}` : '尚未保存密钥，不能运行'} · 配置修订 {service.configRevision}</p>
           <div className="independent-actions"><button className="btn" onClick={() => serviceDialog(service)}>编辑服务</button>
             <button className="btn" onClick={() => modelDialog(service)}>添加模型</button>
+            {discovery ? <button className="btn" disabled={!service.enabled} onClick={() => openDialog((close) => <IndependentDiscoveryDialog initialService={service} close={close} saved={refresh} />)}>获取模型与能力</button> : null}
             <button className="btn" disabled={busy} onClick={() => void run(() => api.patchIndependentService(service.id, { expectedRevision: service.revision, enabled: !service.enabled }))}>{service.enabled ? '停用服务' : '启用服务'}</button>
             <button className="btn danger" disabled={busy} onClick={async () => {
               if (await confirmDialog({ title: `删除“${service.name}”？`, body: <p>会删除本服务的模型和工作台保存的密钥。若有任务绑定，服务端会拒绝删除。不会选择其他默认模型。</p>, ok: '删除服务', danger: true })) void run(() => api.deleteIndependentService(service.id));
@@ -172,7 +175,7 @@ function ModelDialog({ service, initial, close, saved }: { service: IndependentS
     <p>所属服务：{service.name}。添加不会改变已有模型、能力设置或默认选择。</p>
     <div className="form-row"><label htmlFor="im-name">显示名称</label><input className="input" id="im-name" required maxLength={100} value={name} onChange={(e) => setName(e.target.value)} /></div>
     <div className="form-row"><label htmlFor="im-id">原始模型 ID</label><input className="input mono" id="im-id" required maxLength={200} readOnly={!!model} value={remoteId} onChange={(e) => setRemoteId(e.target.value)} aria-describedby="im-note" /></div>
-    <p className="form-note" id="im-note">复制服务提供的原始 ID；不同服务可以使用相同 ID。模型 ID 保存后不可修改，可另加模型。在线获取列表尚未接入。</p>
+    <p className="form-note" id="im-note">复制服务提供的原始 ID；不同服务可以使用相同 ID。模型 ID 保存后不可修改，可另加模型；也可在服务中“获取模型与能力”后批量导入。</p>
   </WriteDialog>;
 }
 function CapabilitiesDialog({ service: initialService, initial, close, saved }: { service: IndependentService; initial: IndependentModel; close: () => void; saved: () => Promise<void> }) {
@@ -184,7 +187,7 @@ function CapabilitiesDialog({ service: initialService, initial, close, saved }: 
     setModel(fresh); setDraft({}); toast('能力修订已保存'); await saved();
   };
   return <WriteDialog title={`能力与来源：${model.name}`} close={close} write={write} submit={submit} initialFocus="summary" reload={async () => { const [fresh, freshService] = await Promise.all([api.independentModel(service.id, model.id), api.independentService(service.id)]); setService(freshService); setModel(fresh); setDraft({}); }}>
-    <p>{service.name} / {model.remoteModelId}。在线识别尚未接入；未知不会当作不支持。手动设置仅作用于此服务下的此模型。</p>
+    <p>{service.name} / {model.remoteModelId}。服务中可获取模型与能力并导入来源；未知不会当作不支持。手动设置仅作用于此服务下的此模型。</p>
     <p className="form-note">展开字段可查看来源并修订；“恢复自动”会清除此字段人工值，保存后生效。列表用逗号分隔，[] 表示无可选项；沿用服务原始名称，不预填通用思考强度。</p>
     <div className="independent-capabilities">{(Object.keys(capabilityLabels) as IndependentCapabilityField[]).map((field) => {
       const cap = model.capabilities.find((c) => c.field === field); const evidence = model.evidence.filter((e) => e.field === field);

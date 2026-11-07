@@ -15,6 +15,9 @@
 .independent-service-body, .independent-capability-body { padding: 0 16px 16px; }
 .independent-url { overflow-wrap: anywhere; white-space: normal; }
 .independent-model { margin-top: 16px; padding: 16px; background: var(--bg-1); border-radius: var(--r-card); }
+.independent-model code { overflow-wrap: anywhere; }
+.independent-discovery-list .btn, .dlg:has(.independent-discovery-list) .btn { min-height: 44px; }
+.independent-discovery-list summary { padding: 10px 0; cursor: pointer; min-height: 44px; }
 .independent-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 16px 0; }
 .independent-summary dt { color: var(--fg-3); font-size: var(--fs-12); }
 .independent-summary dd { margin: 4px 0 0; overflow-wrap: anywhere; }

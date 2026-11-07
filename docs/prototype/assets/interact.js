@@ -90,8 +90,11 @@
   Object.assign(window, { aicJudge: judge, aicJudgeOn: judgeOn, aicJudgeCfg: judgeCfg, aicJudgeKinds: judgeKinds, aicJudgeFixes: corrections });
 
   // ---------- 小菜单 ----------
+  // 再点一次同一个按钮就收起（2026-11-07 用户反馈）
   const menu = (anchor, items) => {
-    $$('.menu').forEach((m) => m.remove());
+    const open = $('.menu');
+    $$('.menu').forEach((m) => { m._anchor?.setAttribute('aria-expanded', 'false'); m.remove(); });
+    if (open && open._anchor === anchor) { anchor.focus(); return; }
     const m = document.createElement('div');
     m.className = 'menu';
     m.setAttribute('role', 'menu');
@@ -103,15 +106,20 @@
       b.addEventListener('click', () => { m.remove(); fn(); });
       m.appendChild(b);
     });
+    m._anchor = anchor;
+    anchor.setAttribute('aria-expanded', 'true');
     document.body.appendChild(m);
     const r = anchor.getBoundingClientRect();
     m.style.top = Math.min(r.bottom + 4, innerHeight - m.offsetHeight - 8) + 'px';
     m.style.left = Math.min(r.left, innerWidth - m.offsetWidth - 8) + 'px';
     m.querySelector('button').focus();
+    const shut = () => { m.remove(); anchor.setAttribute('aria-expanded', 'false'); };
     setTimeout(() => document.addEventListener('click', function off(e) {
-      if (!m.contains(e.target)) { m.remove(); document.removeEventListener('click', off); }
+      // 点的是自己的按钮时交给按钮处理（上面的“再点一次收起”），这里不抢先关掉
+      if (!m.isConnected) { document.removeEventListener('click', off); return; }
+      if (!m.contains(e.target) && !anchor.contains(e.target)) { shut(); document.removeEventListener('click', off); }
     }), 0);
-    m.addEventListener('keydown', (e) => { if (e.key === 'Escape') { m.remove(); anchor.focus(); } });
+    m.addEventListener('keydown', (e) => { if (e.key === 'Escape') { shut(); anchor.focus(); } });
   };
 
   // ---------- 侧栏：新建任务、搜索、设置 ----------
@@ -127,7 +135,9 @@
   window.aicAgents = agentModels;
 
   // preset：{ proj, group }，从项目或分组的“+”进入时预先选好
-  const newTask = (preset = {}) => modal({
+  // 2026-11-07 起新建任务改为起始页（new-task.js 提供 aicNewTaskPage），对话框只在没加载起始页时兜底
+  const newTask = (preset = {}) => (window.aicNewTaskPage ? window.aicNewTaskPage(preset) : newTaskDialog(preset));
+  const newTaskDialog = (preset = {}) => modal({
     title: '新建任务',
     body: `<div class="form-row"><label for="nt-p">项目</label><select class="select" id="nt-p">${SB.projects.map((p) => `<option ${p.name === preset.proj ? 'selected' : ''}>${esc(p.name)}</option>`).join('')}</select></div>
       <div class="form-row"><label for="nt-g">分组</label><select class="select" id="nt-g"><option value="">不分组（未分类）</option>${SB.groups.map((g) => `<option value="${g.id}" ${g.id === preset.group ? 'selected' : ''}>${esc(g.name)}</option>`).join('')}</select></div>
@@ -772,8 +782,10 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
       btns[2].setAttribute('aria-label', `切换模型，当前 ${cur.model}${cur.effort ? '，思考强度' + cur.effort : ''}`);
       const opt = (kind, val, label, meta, sel) => `<div class="opt" role="option" tabindex="0" data-kind="${kind}" data-val="${val}" aria-selected="${sel}">${label}<span class="meta"${meta === '登录已过期' ? ' style="color:var(--attn)"' : ''}>${meta}</span></div>`;
       const ef = efforts[cur.agent];
-      pop.innerHTML = `<div class="group-label">Agent（换 Agent 会生成交接包）</div>
-        ${Object.keys(agents).map((k) => opt('agent', k, `<span class="ag ${k}">${letter[k]}</span>${agents[k][0]}`, k === cur.agent ? '当前' : status[k], k === cur.agent)).join('')}
+      // Agent 一级；鼠标移到某个 Agent 上（或按 →）展开它的模型，直接选“Agent · 模型”（二级选择，Agent 多了也好找）
+      pop.innerHTML = `<div class="group-label">Agent（换 Agent 后，发送下一条消息时才交接）</div>
+        ${Object.keys(agents).map((k) => `<div class="opt-wrap">${opt('agent', k, `<span class="ag ${k}">${letter[k]}</span>${agents[k][0]}`, (k === cur.agent ? '当前' : status[k]) + (agents[k][1].length > 1 ? ` · ${agents[k][1].length} 个模型` : ''), k === cur.agent)}
+          ${k === cur.agent || agents[k][1].length < 2 ? '' : `<div class="sub-opts" role="group" aria-label="${agents[k][0]} 的模型">${agents[k][1].map((m) => `<div class="opt" role="option" tabindex="-1" data-kind="agent" data-val="${k}" data-model="${m}" aria-selected="false">${m}</div>`).join('')}</div>`}</div>`).join('')}
         <div class="group-label">账号</div>
         ${accounts[cur.agent].map((a) => opt('account', a, a, a === cur.account ? '当前' : '恢复原会话（无损）', a === cur.account)).join('')}
         <div class="group-label">模型</div>
@@ -781,9 +793,37 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
         <div class="group-label">思考强度</div>
         ${ef ? `<div class="seg" role="radiogroup" aria-label="思考强度">${ef.map((e) => `<button role="radio" aria-checked="${e === cur.effort}" data-kind="effort" data-val="${e}">${e}</button>`).join('')}</div>`
           : `<div class="hint" style="margin-top:2px">${agents[cur.agent][0]} 的思考强度由模型自己决定，这里不能调。</div>`}
-        <div class="hint">换模型、换账号、调思考强度都保留完整上下文。换到其他 Agent 会生成交接包并开启新会话，发送前可以检查和编辑。</div>`;
+        <div class="hint">换模型、换账号、调思考强度都保留完整上下文。换到其他 Agent 只是选定下一条消息交给谁，发送时才自动交接；不发就不交接，可以撤销。</div>`;
     };
     render();
+    // 换 Agent 只是“选定下一条消息交给谁”，真正发出消息时才交接（2026-11-07 用户反馈：没输入就交接不对）。
+    // pending.back 是切换前的 Agent；连续切换只保留一行提示，切回原 Agent 等于撤销。
+    let pending = null;
+    const pendingNote = () => addNote(`下一条消息交给 ${agents[cur.agent][0]}（${cur.model}）：发送时才自动交接，不发就不交接
+      <button type="button" class="linkish" data-wired="1" data-undo-switch>撤销</button>`, 'agent-pending');
+    const dropPendingNote = () => $$('.sysnote[data-kind="agent-pending"]', inner || document).forEach((n) => n.remove());
+    const cancelPending = () => {
+      if (!pending) return;
+      Object.assign(cur, pending.back); pending = null; dropPendingNote(); render();
+      toast(`已撤销，继续用 ${agents[cur.agent][0]}`);
+    };
+    inner?.addEventListener('click', (e) => { if (e.target.closest('[data-undo-switch]')) cancelPending(); });
+    // 发送时调用：有待交接就先交接，再由新 Agent 回复这条消息；返回 true 表示已接手
+    window.aicFlushSwitch = (text) => {
+      if (!pending) return false;
+      const { back } = pending; pending = null; dropPendingNote();
+      const val = cur.agent, toModel = cur.model;
+      window.aicHandoff(back.agent, back.model, val, toModel, (h) => {
+        window.aicRegisterHandoff(h);
+        h.back = back;
+        add(window.aicHandoffDivider(h));
+        const restate = `目标：${h.goal}。下一步：${h.next}。我会先读 ${h.readFirst}。`;
+        streamReply(val, toModel, `这是从 ${agents[back.agent][0]} 交接过来的任务，用户刚发来新要求。先核对交接内容里的约束和未提交改动，再处理这条要求；已经跑过的命令不重复执行。`,
+          `<details class="restate"><summary>${ic('check')}交接确认（我的理解）</summary><p>${esc(restate)}</p></details><p>已读取交接内容和 <code>.aic/TASK.md</code>，代码以工作区当前文件为准。收到：“${esc(text)}”，${ctx.resume}</p>`);
+        toast(`已自动交接到 ${agents[val][0]}（${h.level}），原会话已保留`);
+      });
+      return true;
+    };
     // 切回原会话：走原生恢复，可选恢复工作区到交接时的检查点
     window.aicSwitchBack = (h) => modal({
       title: `切回 ${agents[h.back.agent][0]}？`,
@@ -823,6 +863,10 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
         return;
       }
       closePop();
+      // 已选了别的 Agent、还没发消息：换模型、换账号只改“下一条交给谁”，不进对话记录
+      if (pending && (kind === 'model' || kind === 'account')) {
+        cur[kind] = val; render(); pendingNote(); return;
+      }
       if (kind === 'model' && val !== cur.model) {
         addNote(`已切换到 ${val}，会话内切换，上下文完整保留`, 'model');
         cur.model = val; render(); toast(`已切换到 ${val}`);
@@ -830,24 +874,17 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
         addNote(`已切换账号：${val}，用新账号恢复了原会话，上下文完整保留`, 'account');
         cur.account = val; render(); toast(`已切换到账号“${val}”`);
       } else if (kind === 'agent' && val !== cur.agent) {
+        if (pending && val === pending.back.agent) return cancelPending();
         if (val === 'codex') return modal({ title: 'Codex 登录已过期', body: '<p>重新登录后才能交接给 Codex。登录会在浏览器里打开授权页面，完成后回到这里即可。</p>',
           actions: [{ label: '取消' }, { label: '去重新登录', kind: 'primary', onClick() { location.href = 'agents.html'; } }] });
         if (val === 'zcode') return modal({ title: 'ZCode 还没连接', body: '<p>ZCode 需要先在 Agent 管理里启用实验桥接。</p>',
           actions: [{ label: '取消' }, { label: '去 Agent 管理', kind: 'primary', onClick() { location.href = 'agents.html'; } }] });
-        const toModel = agents[val][1][0];
-        const back = { agent: cur.agent, model: cur.model, account: cur.account, effort: cur.effort };
-        window.aicHandoff(cur.agent, cur.model, val, toModel, (h) => {
-          window.aicRegisterHandoff(h);
-          h.back = back;
-          const div = add(window.aicHandoffDivider(h));
-          Object.assign(cur, { agent: val, model: toModel, account: accounts[val][0], effort: efforts[val] ? '中' : null });
-          render();
-          const restate = `目标：${h.goal}。下一步：${h.next}。我会先读 ${h.readFirst}。`;
-          streamReply(val, toModel, `这是从 ${agents[back.agent][0]} 交接过来的任务。先核对交接内容里的约束和未提交改动，确认工作区和描述一致；已经跑过的命令不重复执行。`,
-            `<details class="restate"><summary>${ic('check')}交接确认（我的理解）</summary><p>${esc(restate)}</p></details><p>已读取交接内容和 <code>.aic/TASK.md</code>，代码以工作区当前文件为准。${ctx.resume}</p>`,
-            () => { const r = $('.ho-restate', div); if (r) r.textContent = restate + '　✓ 与交接内容一致'; });
-          toast(`已自动交接到 ${agents[val][0]}（${h.level}），原会话已保留`);
-        });
+        // 只记下“下一条交给谁”，不交接；发送消息时由 aicFlushSwitch 真正交接
+        if (!pending) pending = { back: { agent: cur.agent, model: cur.model, account: cur.account, effort: cur.effort } };
+        const toModel = o.dataset.model || agents[val][1][0];
+        Object.assign(cur, { agent: val, model: toModel, account: accounts[val][0], effort: efforts[val] ? '中' : null });
+        render(); pendingNote();
+        $('.compose-box textarea')?.focus();
       }
     };
     pop.addEventListener('click', (e) => { const o = e.target.closest('.opt, .seg button'); if (o) choose(o); });
@@ -870,6 +907,8 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
       const h1 = $('.main-head h1')?.textContent;
       const tid = window.aicSB?.tasks.find((t) => t.title === h1)?.id || document.body.dataset.task;
       if (tid) window.aicSB.touch(tid);
+      // 之前选了别的 Agent：现在才交接，新 Agent 接着回复这条消息
+      if (window.aicFlushSwitch?.(text)) return;
       streamReply(cur.agent, cur.model, `你补充了：“${text}”。先确认当前步骤能不能安全停下，再把这条要求加进计划，${cur.effort === '最高' || cur.effort === '高' ? '顺便检查它会不会和已有约束冲突。' : '然后继续。'}`,
         `<p>收到：“${esc(text)}”。我会在当前步骤完成后接着处理。（原型模拟回复）</p>`);
     };

@@ -799,7 +799,10 @@
       const d = window.aicNewTask?.({ proj: '雾港物语' }); if (!d) return;
       const ta = $('#nt-d', d), g = it.j.g;
       ta.value = `参考附带的生成结果 ${it.file}（${g.name}，seed ${it.seed}），${it.j.kind === 'audio' ? '接进 Wwise 事件表，替换现在的占位音效' : it.j.kind === 'video' ? '剪进宣传片的开场' : '用在宝箱模型上，材质名不要改'}。`;
-      ta.closest('.form-row').insertAdjacentHTML('afterend', `<div class="form-row"><span class="lbl">附件</span><span><span class="attach" style="margin:0">${ic(KIND_ICON[it.j.kind])}${esc(it.file)}<span class="mono" style="font-size:11px">生成记录 ${it.rid}</span></span></span></div>`);
+      const att = `<span class="attach" style="margin:0">${ic(KIND_ICON[it.j.kind])}${esc(it.file)}<span class="mono" style="font-size:11px">生成记录 ${it.rid}</span></span>`;
+      const slot = $('.nt-attach', d); // 起始页有附件位；兜底的对话框插在描述下面
+      if (slot) slot.insertAdjacentHTML('beforeend', att);
+      else ta.closest('.form-row')?.insertAdjacentHTML('afterend', `<div class="form-row"><span class="lbl">附件</span><span>${att}</span></div>`);
       ta.dispatchEvent(new Event('input'));
       toast('已打开新建任务，附上了这个结果和它的生成记录');
     };

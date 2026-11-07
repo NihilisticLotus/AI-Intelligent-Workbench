@@ -13,8 +13,10 @@ import {
 import { AgentBadge, ErrorNotice, asApiError, choiceDialog, confirmDialog, openMenu, toastErrorOf, useAgentName } from './ui';
 import { Icon } from './Icon';
 import { useDismiss } from './hooks';
-import { composerInsertStore, requestFocusApproval, switcherRequestStore, type SwitcherSection } from './focus';
+import { requestFocusApproval, switcherRequestStore, type SwitcherSection } from './focus';
 import { TaskError } from './Chat';
+import { AnnotationChip, clearAnnotations, useAnnotations } from './Annotations';
+import { composeWithAnnotations } from '../lib/annotations';
 
 /** 每个任务的草稿：切换任务时保留没发出去的内容（父组件按任务 id 重新挂载本组件） */
 const drafts = new Map<string, string>();
@@ -31,28 +33,22 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
 
   useEffect(() => { drafts.set(task.id, text); }, [task.id, text]);
 
-  // 对话里选中文字后点 [添加到对话]：引用追加到输入框末尾，光标放到最后
-  const insertReq = useStore(composerInsertStore, (x) => x);
-  const lastInsert = useRef(0);
-  useEffect(() => {
-    if (!insertReq || insertReq.taskId !== task.id || insertReq.n === lastInsert.current) return;
-    lastInsert.current = insertReq.n;
-    setText((t) => (t.trim() ? t.replace(/\s*$/, '\n\n') : '') + insertReq.text);
-    requestAnimationFrame(() => { const el = ta.current; if (el) { el.focus(); el.selectionStart = el.selectionEnd = el.value.length; } });
-  }, [insertReq, task.id]);
+  // 对话里选中文字添加的注释：发送时附在消息后面（Annotations.tsx）
+  const annos = useAnnotations(task.id);
 
   const working = busyStatuses.has(task.status);
-  const canSend = online && !working && !sending && text.trim().length > 0;
+  const canSend = online && !working && !sending && (text.trim().length > 0 || annos.length > 0);
 
   const send = async () => {
     if (!canSend) return;
-    const body = text.trim();
+    const body = composeWithAnnotations(text, annos);
     setSending(true);
     setSendErr(null);
     try {
       await sendPrompt(task.id, body);
       setText('');
       drafts.delete(task.id);
+      clearAnnotations(task.id);
     } catch (e) {
       setSendErr(withDefaultActions(asApiError(e), { taskId: task.id, kind: task.agent })); // 发送失败时保留输入内容，错误连同按钮显示在输入框上方
     } finally {
@@ -88,6 +84,7 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
           </div>
         ) : null}
         <div className="compose-box">
+          <AnnotationChip taskId={task.id} />
           <label htmlFor="prompt" className="sr-only">给 Agent 发消息</label>
           <textarea id="prompt" ref={ta} value={text} placeholder={placeholder} maxLength={100_000}
             onChange={(e) => setText(e.target.value)}

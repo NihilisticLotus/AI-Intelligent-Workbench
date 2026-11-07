@@ -13,8 +13,8 @@ import { modelSwitchKind, switchKindText, withDefaultActions } from '../lib/agen
 import { AgentBadge, ErrorNotice, actionNeedsIdle, toastErrorOf, useAgentName } from './ui';
 import { Icon } from './Icon';
 import { useNow } from './hooks';
-import { focusApprovalStore, requestComposerInsert } from './focus';
-import { FeatureKey } from '@aic/protocol';
+import { focusApprovalStore } from './focus';
+import { AnnotationLayer } from './Annotations';
 
 const busyStatuses = new Set<Task['status']>(['running', 'waiting', 'queued']);
 
@@ -58,45 +58,7 @@ export function Stream({ task, items, loading, onOpenPlan }: { task: Task; items
           <div className="empty stream-empty">{loading ? <p>正在载入对话…</p> : <><h3>还没有消息</h3><p>在下面的输入框里告诉 Agent 要做什么。</p></>}</div>
         ) : view.map((it, i) => <Item key={it.key} it={it} task={task} onOpenPlan={onOpenPlan} live={i > lastUserIdx} />)}
       </div>
-      <SelectionMenu container={ref} taskId={task.id} />
-    </div>
-  );
-}
-
-/**
- * 选中对话里的文字后出现的小菜单（对照 Codex，用户 2026-11-07）：
- * - [添加到对话]：把选中的内容作为引用插进输入框（1.2 提供）
- * - [在侧边聊天中提问]：侧边聊天上线后才显示（功能开关 chat.side，design.md 第 26 节）
- */
-function SelectionMenu({ container, taskId }: { container: React.RefObject<HTMLDivElement | null>; taskId: string }) {
-  const sideChat = useApp((s) => !!s.hello?.features[FeatureKey.SideChat]);
-  const [sel, setSel] = useState<{ text: string; x: number; y: number } | null>(null);
-  useEffect(() => {
-    const el = container.current;
-    if (!el) return;
-    const update = () => {
-      const s = window.getSelection();
-      const text = s && !s.isCollapsed ? s.toString().trim() : '';
-      if (!s || !text || s.rangeCount === 0 || !el.contains(s.anchorNode) || !el.contains(s.focusNode)) { setSel(null); return; }
-      const r = s.getRangeAt(0).getBoundingClientRect();
-      setSel({ text, x: r.left + r.width / 2, y: r.top });
-    };
-    const onUp = () => setTimeout(update, 0);
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setSel(null); else if (e.shiftKey) setTimeout(update, 0); };
-    const hide = () => setSel(null);
-    el.addEventListener('mouseup', onUp);
-    el.addEventListener('keyup', onKey);
-    el.addEventListener('scroll', hide);
-    return () => { el.removeEventListener('mouseup', onUp); el.removeEventListener('keyup', onKey); el.removeEventListener('scroll', hide); };
-  }, [container]);
-  if (!sel) return null;
-  const quote = sel.text.split('\n').map((l) => '> ' + l).join('\n') + '\n\n';
-  const add = () => { requestComposerInsert(taskId, quote); window.getSelection()?.removeAllRanges(); setSel(null); };
-  return (
-    <div className="sel-menu" role="toolbar" aria-label="选中内容的操作" style={{ left: sel.x, top: sel.y }}
-      onMouseDown={(e) => e.preventDefault()}>
-      <button type="button" onClick={add}>添加到对话</button>
-      {sideChat ? <button type="button" disabled title="侧边聊天在后续阶段提供">在侧边聊天中提问</button> : null}
+      <AnnotationLayer container={ref} taskId={task.id} />
     </div>
   );
 }

@@ -282,8 +282,53 @@ dialog.dlg[open] { display: flex; flex-direction: column; animation: toast-in va
 .md li { margin: 0.15em 0; }
 
 /* 选中对话文字后的小菜单 */
-.sel-menu { position: fixed; z-index: 50; transform: translate(-50%, calc(-100% - 8px)); display: inline-flex; background: var(--bg-3); border-radius: var(--r-ctl); box-shadow: 0 6px 20px rgb(0 0 0 / .35); overflow: hidden; }
+.sel-menu { position: fixed; z-index: 50; transform: translate(0, calc(-100% - 6px)); display: inline-flex; background: var(--bg-3); border-radius: var(--r-ctl); box-shadow: 0 6px 20px rgb(0 0 0 / .35); overflow: hidden; }
 .sel-menu button { border: 0; background: transparent; color: var(--fg-1); font: inherit; font-size: var(--fs-13); padding: 6px 12px; cursor: pointer; }
 .sel-menu button + button { border-left: 1px solid var(--line); }
 .sel-menu button:hover { background: var(--bg-2); }
 .sel-menu button:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* 对话注释（对照 Codex）：编号圆点、评论框、输入框上方的“N 条注释” */
+::highlight(aic-anno) { background-color: color-mix(in srgb, var(--accent) 35%, transparent); color: inherit; }
+.anno-badge {
+  position: fixed; z-index: 40; transform: translate(-30%, -70%);
+  min-width: 22px; height: 22px; padding: 0 6px; border-radius: 11px 11px 11px 3px; border: 0;
+  background: var(--accent); color: #fff; font: 600 12px/22px var(--font-ui, inherit); cursor: pointer;
+  box-shadow: 0 2px 6px rgb(0 0 0 / .3);
+}
+.anno-badge.on { outline: 2px solid color-mix(in srgb, var(--accent) 45%, transparent); }
+.anno-badge .anno-tip {
+  display: none; position: absolute; left: 50%; bottom: calc(100% + 6px); transform: translateX(-50%);
+  max-width: 280px; width: max-content; padding: 6px 10px; border-radius: var(--r-card); background: var(--bg-3);
+  color: var(--fg-1); font-weight: 400; font-size: var(--fs-13); line-height: 1.5; text-align: left; white-space: pre-wrap;
+  box-shadow: var(--shadow-pop); pointer-events: none;
+}
+.anno-badge:hover .anno-tip, .anno-badge:focus-visible .anno-tip { display: block; }
+.anno-editor {
+  position: fixed; z-index: 60; transform: translateY(-100%); width: min(420px, calc(100vw - 32px));
+  display: flex; flex-direction: column; gap: 6px; padding: 10px 12px; border-radius: 14px; background: var(--bg-3); box-shadow: var(--shadow-pop);
+}
+.anno-editor.below { transform: none; }
+.anno-editor.new { flex-direction: row; align-items: center; border-radius: 22px; padding: 6px 6px 6px 14px; }
+.anno-editor textarea {
+  flex: 1; resize: none; border: 0; outline: 0; background: transparent; color: var(--fg-1); font: inherit; font-size: var(--fs-14, 14px); line-height: 1.5; min-height: 22px;
+}
+.anno-editor .anno-send { width: 30px; height: 30px; border-radius: 50%; border: 0; background: var(--fg-1); color: var(--bg-1); display: grid; place-items: center; cursor: pointer; flex: none; }
+.anno-editor .anno-acts { display: flex; align-items: center; gap: 6px; }
+.anno-editor .anno-acts .grow { flex: 1; }
+.anno-chip-wrap { position: relative; display: inline-block; margin: 8px 10px 0; }
+.anno-chip { display: inline-flex; align-items: center; border-radius: var(--r-ctl, 6px); background: var(--bg-2); border: 1px solid var(--line); }
+.anno-chip button { border: 0; background: transparent; color: var(--fg-1); font: inherit; cursor: pointer; display: inline-flex; align-items: center; }
+.anno-chip-main { gap: 6px; padding: 4px 8px 4px 10px; font-size: var(--fs-13); font-weight: 600; }
+.anno-chip-x { padding: 4px 8px 4px 4px; color: var(--fg-3) !important; }
+.anno-chip-x:hover { color: var(--fg-1) !important; }
+.anno-list {
+  position: absolute; left: 0; bottom: calc(100% + 6px); z-index: 30; width: min(460px, calc(100vw - 48px)); max-height: 320px; overflow: auto;
+  padding: 8px; border-radius: var(--r-card); background: var(--bg-2); box-shadow: var(--shadow-pop);
+}
+.anno-item { display: grid; grid-template-columns: 20px 1fr auto; gap: 6px; padding: 8px; border-radius: var(--r-ctl, 6px); font-size: var(--fs-13); line-height: 1.55; }
+.anno-item + .anno-item { border-top: 1px solid var(--line); }
+.anno-item .n { color: var(--fg-3); }
+.anno-item .lbl { color: var(--fg-3); font-weight: 600; margin-top: 2px; }
+.anno-item .quote { color: var(--fg-1); white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.anno-item .acts { display: flex; gap: 2px; align-items: flex-start; }

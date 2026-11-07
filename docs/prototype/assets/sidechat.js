@@ -306,8 +306,76 @@
     if (document.activeElement === input) { $('.composer textarea')?.focus(); return; }
     open(selected());
   });
-  // 选中文字后的小菜单（design.md 15.2、ui-design.md 5.15）：[添加到对话] 把引用插进主输入框末尾；
+  // 选中文字后的小菜单（design.md 15.2、ui-design.md 5.15）：[添加到对话] 加为注释（对照 Codex）；
   // [在侧边聊天中提问] 正式版由功能开关 chat.side 控制，侧聊上线前不显示；原型里画出来演示
+  // 注释：评论框“添加可选评论…” → 原文旁编号圆点 → 输入框上方“N 条注释” → 发送时附在消息后面
+  const annos = [];
+  let annoSeq = 0, annoEd = null;
+  const ic2 = (n) => `<svg class="i" aria-hidden="true"><use href="#i-${n}"/></svg>`;
+  const annoChipHost = () => $('.composer .compose-box');
+  const annoClose = () => { annoEd?.remove(); annoEd = null; CSS.highlights?.delete('aic-anno'); };
+  const annoRender = () => {
+    $$('.anno-badge').forEach((b) => b.remove());
+    const sr = stream.getBoundingClientRect();
+    annos.forEach((a, i) => {
+      const rs = a.range.getClientRects(); const r = rs[rs.length - 1];
+      if (!r || r.top < sr.top || r.top > sr.bottom - 10) return;
+      document.body.insertAdjacentHTML('beforeend', `<button type="button" data-wired="1" class="anno-badge" style="left:${r.right}px;top:${r.top}px" aria-label="注释 ${i + 1}，点击修改">${i + 1}<span class="anno-tip">${esc(a.comment || a.text)}</span></button>`);
+      const b = document.body.lastElementChild;
+      b.addEventListener('mousedown', (e) => e.preventDefault());
+      b.addEventListener('click', () => annoEdit(a, false));
+    });
+    const host = annoChipHost(); if (!host) return;
+    $('.anno-chip-wrap', host)?.remove();
+    if (!annos.length) return;
+    host.insertAdjacentHTML('afterbegin', `<div class="anno-chip-wrap"><div class="anno-chip"><button type="button" data-wired="1" class="anno-chip-main">${ic2('chat')}${annos.length} 条注释</button><button type="button" data-wired="1" class="anno-chip-x" aria-label="清空全部注释">${ic2('x')}</button></div>
+      <div class="anno-list" hidden>${annos.map((a, i) => `<div class="anno-item"><span class="n">${i + 1}.</span><div><div class="lbl">所选文本：</div><div class="quote">${esc(a.text)}</div>${a.comment ? `<div class="lbl">用户评论：</div><div>${esc(a.comment)}</div>` : ''}</div><div class="acts"><button type="button" data-wired="1" class="btn ghost icon sm" data-anno-del="${a.id}" aria-label="删除注释 ${i + 1}">${ic2('trash')}</button></div></div>`).join('')}</div></div>`);
+    const w = $('.anno-chip-wrap', host), list = $('.anno-list', w);
+    w.addEventListener('mouseenter', () => { list.hidden = false; });
+    w.addEventListener('mouseleave', () => { list.hidden = true; });
+    $('.anno-chip-main', w).addEventListener('click', () => { list.hidden = !list.hidden; });
+    $('.anno-chip-x', w).addEventListener('click', () => { annos.length = 0; annoClose(); annoRender(); });
+    $$('[data-anno-del]', w).forEach((b) => b.addEventListener('click', () => { annos.splice(annos.findIndex((a) => a.id === b.dataset.annoDel), 1); annoClose(); annoRender(); }));
+  };
+  const annoEdit = (a, isNew) => {
+    annoClose();
+    if (typeof Highlight !== 'undefined') CSS.highlights?.set('aic-anno', new Highlight(a.range));
+    const r = a.range.getClientRects()[0], sr = stream.getBoundingClientRect();
+    const below = r.top - sr.top < 120;
+    document.body.insertAdjacentHTML('beforeend', `<div class="anno-editor${isNew ? ' new' : ''}${below ? ' below' : ''}" role="dialog" aria-label="${isNew ? '给选中的内容加评论' : '修改注释'}" style="left:${Math.max(sr.left + 8, r.left - 24)}px;top:${below ? r.bottom + 8 : r.top - 8}px">
+      <textarea rows="${isNew ? 1 : 2}" placeholder="添加可选评论…" aria-label="评论（可以不填）">${esc(a.comment)}</textarea>
+      ${isNew ? `<button type="button" data-wired="1" class="anno-send" aria-label="完成">${ic2('send')}</button>` : `<div class="anno-acts"><button type="button" data-wired="1" class="btn ghost icon sm" data-a="del" aria-label="删除这条注释">${ic2('trash')}</button><span class="grow"></span><button type="button" data-wired="1" class="btn sm" data-a="cancel">取消</button><button type="button" data-wired="1" class="btn sm primary" data-a="save">保存</button></div>`}</div>`);
+    annoEd = document.body.lastElementChild;
+    const ta = $('textarea', annoEd); ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length);
+    const save = () => { a.comment = ta.value.trim(); annoClose(); annoRender(); };
+    ta.addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); save(); } if (e.key === 'Escape') { e.preventDefault(); isNew ? save() : annoClose(); } });
+    annoEd.addEventListener('click', (e) => {
+      const act = e.target.closest('.anno-send') ? 'save' : e.target.closest('[data-a]')?.dataset.a;
+      if (act === 'save') save(); else if (act === 'cancel') annoClose();
+      else if (act === 'del') { annos.splice(annos.indexOf(a), 1); annoClose(); annoRender(); }
+    });
+    annoEd.dataset.isNew = isNew ? '1' : '';
+    annoEd._save = save;
+  };
+  const annoAdd = (text, range) => {
+    const a = { id: 'an' + (++annoSeq), text, comment: '', range };
+    annos.push(a); annoRender(); annoEdit(a, true);
+  };
+  document.addEventListener('mousedown', (e) => {
+    if (!annoEd || annoEd.contains(e.target) || e.target.closest('.anno-badge')) return;
+    annoEd.dataset.isNew ? annoEd._save() : annoClose();
+  });
+  stream?.addEventListener('scroll', () => { if (annos.length) annoRender(); }, { passive: true });
+  window.addEventListener('resize', () => { if (annos.length) annoRender(); });
+  // 发送时取走注释（interact.js 调用）
+  window.aicAnnos = {
+    take() {
+      if (!annos.length) return '';
+      const out = `我在对话里标注了 ${annos.length} 处内容：\n\n` + annos.map((a, i) => `${i + 1}. 所选文本：${a.text}${a.comment ? `\n   用户评论：${a.comment}` : ''}`).join('\n');
+      annos.length = 0; annoClose(); annoRender();
+      return out;
+    },
+  };
   let selMenu = null;
   const hideSel = () => { selMenu?.remove(); selMenu = null; };
   const showSel = () => {
@@ -322,11 +390,7 @@
     selMenu.addEventListener('click', (e) => {
       const b = e.target.closest('[data-sel]'); if (!b) return;
       if (b.dataset.sel === 'add') {
-        const ta = $('.composer textarea');
-        const quote = raw.split('\n').map((l) => '> ' + l).join('\n') + '\n\n';
-        ta.value = (ta.value && !ta.value.endsWith('\n') ? ta.value + '\n\n' : ta.value) + quote;
-        ta.focus(); ta.setSelectionRange(ta.value.length, ta.value.length); ta.scrollTop = ta.scrollHeight;
-        toast('已把选中的内容作为引用加到输入框');
+        annoAdd(raw, getSelection().getRangeAt(0).cloneRange());
       } else open(selected());
       getSelection().removeAllRanges(); hideSel();
     });

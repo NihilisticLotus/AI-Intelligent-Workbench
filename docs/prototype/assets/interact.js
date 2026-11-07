@@ -860,7 +860,9 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
     const ta = $('textarea', box);
     const sendBtn = $('.compose-bar .btn.primary', box);
     const send = () => {
-      const text = ta.value.trim();
+      // 对话注释（sidechat.js 的 aicAnnos）：附在消息后面一起发出，发出后清空
+      const annos = window.aicAnnos?.take() ?? '';
+      const text = [ta.value.trim(), annos].filter(Boolean).join('\n\n');
       if (!text) { ta.focus(); return; }
       add(userMsg(text));
       ta.value = '';

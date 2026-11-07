@@ -869,5 +869,6 @@ export interface IndependentModelDriver {
   }, signal: AbortSignal): Promise<IndependentAssistantMessage>;
 }
 export interface IndependentToolDriver {
+  /** 收到取消后实际关闭工具资源再 settle；循环等待该 promise，不将信号当作收尾。 */
   execute(call: IndependentToolCall, identity: { taskId: string; sessionId: string; turnId: string }, signal: AbortSignal): Promise<IndependentToolMessage>;
 }

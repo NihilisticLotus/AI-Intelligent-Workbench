@@ -162,6 +162,31 @@ const MIGRATIONS: string[] = [
     snapshot_json TEXT, last_error_json TEXT, attempted_at INTEGER NOT NULL
   );
   `,
+  // v9：完整独立会话与回合控制；原始消息不复用事件表，附件仅为身份引用。
+  `
+  CREATE TABLE independent_turns (
+    id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    binding_json TEXT NOT NULL, limits_json TEXT NOT NULL, system_prompt TEXT NOT NULL,
+    status TEXT NOT NULL, phase TEXT NOT NULL, revision INTEGER NOT NULL,
+    model_calls INTEGER NOT NULL DEFAULT 0, tool_calls INTEGER NOT NULL DEFAULT 0,
+    output_tokens INTEGER, stop TEXT, owner TEXT, active_call_id TEXT,
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  );
+  CREATE UNIQUE INDEX idx_independent_active_turn ON independent_turns(session_id) WHERE status='running';
+  CREATE TABLE independent_messages (
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    seq INTEGER NOT NULL, turn_id TEXT NOT NULL REFERENCES independent_turns(id) ON DELETE CASCADE,
+    message_json TEXT NOT NULL, previous_hash TEXT NOT NULL, hash TEXT NOT NULL, created_at INTEGER NOT NULL,
+    PRIMARY KEY(session_id,seq)
+  );
+  CREATE INDEX idx_independent_messages_turn ON independent_messages(turn_id,seq);
+  CREATE TABLE independent_checkpoints (
+    id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    through_seq INTEGER NOT NULL, source_hash TEXT NOT NULL, summary TEXT NOT NULL, created_at INTEGER NOT NULL,
+    UNIQUE(session_id,through_seq)
+  );
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

@@ -968,3 +968,17 @@ op('prompt', z.object({ taskId: Id, text: z.string().max(100_000), attachments: 
 #### 2026-11-08 第一轮离线验证进度
 
 新增开发验证脚本 `scripts/dev/verify-independent-agent.mjs`，仅加载忽略目录中固定的 Pi 1.5.0 候选。27 项假模型与临时文件场景通过，覆盖三种模拟协议、工具续传、部分审批 / 取消 / 恢复接缝；具体结果与八组门槛缺口见 [step-1.3](../acceptance/step-1.3.md#独立执行器第一轮离线验证2026-11-08)。这是候选验证进展，不是正式引擎选型通过；项目运行依赖未变，独立 Agent 未实现。SDK 默认参数转换、error 终态、缺 usage 零值及 Messages beta 路径的正式适配由 ISSUE-0030 跟踪；真实命令进程树、崩溃恢复、路径与上下文等验证仍须继续。
+
+### 9.17 独立工具执行与恢复的基础契约（2026-11-08）
+
+这是 9.16 门槛的实现细化，不代表引擎已选定或正式独立 Agent 已开放。先实现不依赖 SDK 的 Gateway 命令执行与持久意图，再与模型循环、审批和界面整合。
+
+- protocol 只追加 IndependentCommandSpec / Outcome / Result、IndependentToolIntent / State / Record。命令为程序与 argv、时限和输出上限；严格校验原始值，不接受调用方夹带环境和工作目录。Gateway 提供并校验绝对程序、工作区与私有配置目录；命令不经过隐式 shell。
+- 工具记录绑定 task / session / turn / call 和规范化输入 SHA-256，重复身份但输入或工具不同报冲突。先 pending，再审批；执行只能原子地从 approved 进入 running。终态不可被晚到结果覆写；拒绝或取消前的操作不能执行。
+- 持久记录只保存身份、指纹、状态、进程身份和无正文的结果概要；不保存 Key、附件正文、原始 argv 或 stdout / stderr。模型上下文与工具完整结果的持久化另行整合，不能把本表当作已完成会话恢复。
+- 新迁移 v6 只追加独立工具表，旧迁移不改。恢复将遗留 pending / approved / running 标为 interrupted，保留已完成终态；不在恢复函数中启动或重放命令。待核对副作用保持未知，不自动重试。
+- Windows 命令宿主拟采用 Job Object，并先将宿主纳入带 KILL_ON_JOB_CLOSE 的作业，再启动获准命令；普通子孙由作业收尾，父链中途退出也不能仅依赖递归枚举。宿主进程登记持久化完成后才通过 stdin 发启动数据；取消、超时、输出超限和父进程断开均停止作业。行为须由本机测试证明，不能仅凭 API 设计记为通过。
+- 工作目录、私有 HOME、环境白名单和作业对象只处理配置与进程生命周期，不是文件 / 网络沙箱；不承诺恶意命令无法访问工作区外文件。服务 Key 不进入命令环境，输出只返回工具调用方，不自动进入日志 / 事件；正式权限与内容展示仍须后续集成。
+- 验证覆盖正常 / 非零命令、参数边界、输出超限、取消与超时、真实子孙进程、命令父进程先退出、宿主被结束、登记失败前不启动、父进程断开、跨进程重开数据库与持久化故障位置。本轮阶段性通过的项目追加到 step-1.3，不开放新的真实调用。
+
+Windows 机制依据：[Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)、[CreateProcessW](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw)。作业不替代权限隔离，WMI 创建等绕开普通继承链的路径仍需单独处理，不能扩大进程测试的证明范围。

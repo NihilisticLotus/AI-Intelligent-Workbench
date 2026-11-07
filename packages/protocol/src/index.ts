@@ -621,3 +621,42 @@ export type DeleteProfileResult = z.infer<typeof DeleteProfileResult>;
 
 /** 真实 Agent 第 1.2 步开放的权限级别（工作区内自动、全自动等 1.3 有了工作副本再开放） */
 export const REAL_AGENT_PERMISSIONS: readonly PermissionLevel[] = ['readonly', 'ask'];
+
+// ---------- 独立 Agent：命令与工具持久意图（只追加，不改变旧任务和事件） ----------
+const CommandArgument = z.string().max(32_768).refine((s) => !s.includes('\0'), { message: '命令参数不能包含空字符' });
+/** 规范化后交给审批与执行的命令；环境和工作目录只由 Gateway 提供。 */
+export const IndependentCommandSpec = z.object({
+  program: CommandArgument.refine((s) => s.length > 0, { message: '需要可执行文件' }),
+  args: z.array(CommandArgument).max(256),
+  timeoutMs: z.number().int().min(1).max(600_000),
+  maxOutputBytes: z.number().int().min(1024).max(1024 * 1024),
+}).strict();
+export type IndependentCommandSpec = z.infer<typeof IndependentCommandSpec>;
+
+export const IndependentCommandOutcome = z.object({
+  reason: z.enum(['completed', 'cancelled', 'timed_out', 'output_limit', 'start_failed', 'interrupted']),
+  exitCode: z.number().int().nullable(),
+  outputBytes: z.number().int().nonnegative(),
+  truncated: z.boolean(),
+  durationMs: z.number().nonnegative(),
+});
+export type IndependentCommandOutcome = z.infer<typeof IndependentCommandOutcome>;
+/** 输出仅给工具调用方；不自动写入事件、审计或进程登记。 */
+export const IndependentCommandResult = IndependentCommandOutcome.extend({ stdout: z.string(), stderr: z.string() });
+export type IndependentCommandResult = z.infer<typeof IndependentCommandResult>;
+
+export const IndependentToolState = z.enum(['pending', 'approved', 'rejected', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted']);
+export type IndependentToolState = z.infer<typeof IndependentToolState>;
+/** hash 覆盖规范化参数、工作区和审批基准；记录不保存密钥、附件正文或工具原始参数。 */
+export const IndependentToolIntent = z.object({
+  taskId: Id, sessionId: Id, turnId: Id,
+  callId: z.string().min(1).max(200), toolName: z.string().min(1).max(100),
+  inputHash: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+export type IndependentToolIntent = z.infer<typeof IndependentToolIntent>;
+export const IndependentToolRecord = IndependentToolIntent.extend({
+  id: Id, state: IndependentToolState, createdAt: Ts, updatedAt: Ts,
+  pid: z.number().int().positive().nullable(), processStartedAt: Ts.nullable(),
+  outcome: IndependentCommandOutcome.nullable(),
+});
+export type IndependentToolRecord = z.infer<typeof IndependentToolRecord>;

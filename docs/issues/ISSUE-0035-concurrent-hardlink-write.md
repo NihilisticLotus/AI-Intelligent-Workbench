@@ -39,3 +39,7 @@ Windows 文件用只允许读取共享的句柄打开且已核对单链接后，
 ## 时间线
 
 - 2026-11-08 开启：独立文本工具接入审查中复现共享模式不能阻止并发硬链接；进一步使用实际 file-guard.cs 的 Open 与根句柄重现外部临时别名同步改变。正式运行时继续关闭，修复前不按完整文件保护验收。
+- 2026-11-08 内部文件工具与限制记录提交 `f31d466`，全量 477 项默认测试通过、3 跳过，类型检查 / 构建通过；这些正常 / 错误处理验证没有修复本单反例，状态保持 investigating，正式文件写入仍未开放。
+- 2026-11-08 按用户授权派一路只读研究补核官方契约，尚未选定可靠替代。[IRP_MJ_SET_INFORMATION](https://learn.microsoft.com/en-us/windows-hardware/drivers/ifs/irp-mj-set-information2) 的硬链接 oplock 说明限定覆盖既有目标链接的情形；[MS-FSA 新增链接算法](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/891bb8eb-89f8-46ca-80b7-9f5d4e8b5583) 未提供源文件新增任意别名必定阻塞的充分契约。因此 RWH / RH 只是研究候选，不能据此关单；本轮未实现或实测 oplock。
+- 2026-11-08 [IRP_MJ_CREATE](https://learn.microsoft.com/en-us/windows-hardware/drivers/ifs/irp-mj-create2) 说明仅属性 / 同步权限的打开不打断 oplock，[FILE_LINK_INFORMATION](https://learn.microsoft.com/en-us/windows-hardware/drivers/ddi/ntifs/ns-ntifs-_file_link_information) 说明设置该信息不要求特定访问权限。后续并发回归必须覆盖预开 / 新开的低权限原生句柄与 NtSetInformationFile，不能仅凭 Node 包装调用一次被阻塞就宣布保护完整。以上是文档核查，不冒充本机原生低权限句柄实测。
+- 2026-11-08 [FSCTL_REQUEST_OPLOCK](https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ni-winioctl-fsctl_request_oplock) 要求重叠句柄与异步生命周期；[CancelIoEx](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-cancelioex) 本身不等待请求完成。后续若选用必须验证申请失败即拒绝、事件 / 内存收尾与对端解除阻塞。替换文件也须保留审批后目标身份 / 摘要的冲突检查，尚未证明可靠的比较交换，当前不采用未经验证的快速补丁。

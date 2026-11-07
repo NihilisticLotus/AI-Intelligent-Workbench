@@ -168,6 +168,8 @@ export type TimelineItem =
       kind: 'agent'; key: string; id: string; text: string; thought: string;
       thoughtStart: number | null; thoughtEnd: number | null; done: boolean; ts: number;
       agent: string | null; model: string | null;
+      /** 同一轮回复的后续片段（Agent 在工具调用之间分段输出）：界面不再重复头像和名称，看起来是一条回复 */
+      cont: boolean;
     }
   | { kind: 'tools'; key: string; tools: ToolItem[] }
   | { kind: 'plan'; key: string; items: PlanEntry[]; ts: number }
@@ -190,6 +192,12 @@ export function buildTimeline(events: readonly EventEnvelope[]): TimelineItem[] 
   let model: string | null = null;
   /** undefined 表示还没见过思考强度（第一次报告不算“切换”） */
   let effort: string | null | undefined = undefined;
+  /** 这一轮（上一条用户消息之后）是否已经有 Agent 的回复片段 */
+  let turnHasAgent = false;
+  /** 新片段或新工具开始时，之前的片段都已结束：收起“正在思考 / 正在回复”，避免一直转圈 */
+  const closeOpen = (ts: number) => {
+    for (const m of agentMsgs.values()) if (!m.done) { m.done = true; if (m.thought && m.thoughtEnd === null) m.thoughtEnd = ts; }
+  };
 
   const push = (it: TimelineItem) => { items.push(it); if (it.kind !== 'tools') lastGroup = null; };
   const agentItem = (id: string, ts: number, forText = false): AgentItem => {
@@ -200,7 +208,9 @@ export function buildTimeline(events: readonly EventEnvelope[]): TimelineItem[] 
       if (last?.kind === 'agent' && last.thought && !last.text && !last.done) { it = last; agentMsgs.set(id, it); }
     }
     if (!it) {
-      it = { kind: 'agent', key: 'm:' + id, id, text: '', thought: '', thoughtStart: null, thoughtEnd: null, done: false, ts, agent, model };
+      closeOpen(ts);
+      it = { kind: 'agent', key: 'm:' + id, id, text: '', thought: '', thoughtStart: null, thoughtEnd: null, done: false, ts, agent, model, cont: turnHasAgent };
+      turnHasAgent = true;
       agentMsgs.set(id, it);
       push(it);
     }
@@ -225,7 +235,15 @@ export function buildTimeline(events: readonly EventEnvelope[]): TimelineItem[] 
         if (d.model !== undefined) model = d.model;
         if (d.effort !== undefined) effort = d.effort;
         if (modelChanged || effortChanged) {
-          push({ kind: 'config', key: 'c:' + ev.seq, model: modelChanged ? model : null, effort: effortChanged ? effort ?? null : null, agent, ts: ev.ts });
+          // 连续切换（中间没有新消息）只保留一行，显示最终结果；否则来回切几次就堆出一串提示（用户报告）
+          const last = items[items.length - 1];
+          if (last?.kind === 'config') {
+            if (modelChanged) last.model = model;
+            if (effortChanged) last.effort = effort ?? null;
+            last.ts = ev.ts;
+          } else {
+            push({ kind: 'config', key: 'c:' + ev.seq, model: modelChanged ? model : null, effort: effortChanged ? effort ?? null : null, agent, ts: ev.ts });
+          }
         }
         break;
       }
@@ -236,6 +254,8 @@ export function buildTimeline(events: readonly EventEnvelope[]): TimelineItem[] 
         break;
       }
       case 'message.user':
+        closeOpen(ev.ts);
+        turnHasAgent = false;
         push({ kind: 'user', key: 'u:' + ev.data.messageId, id: ev.data.messageId, text: ev.data.text, ts: ev.ts });
         break;
       case 'thought.delta': {
@@ -254,6 +274,7 @@ export function buildTimeline(events: readonly EventEnvelope[]): TimelineItem[] 
         agentItem(ev.data.messageId, ev.ts, true).done = true;
         break;
       case 'tool.start': {
+        closeOpen(ev.ts);
         const t: ToolItem = { id: ev.data.toolId, kind: ev.data.kind, title: ev.data.title, target: ev.data.target, output: '', state: 'running', summary: null, startTs: ev.ts, endTs: null };
         tools.set(t.id, t);
         if (!lastGroup) { lastGroup = { kind: 'tools', key: 'tg:' + ev.seq, tools: [] }; items.push(lastGroup); }

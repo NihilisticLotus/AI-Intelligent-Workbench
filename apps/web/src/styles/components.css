@@ -76,3 +76,8 @@
 .compose-bar .grow { flex: 1; }
 .perm-chip { display: inline-flex; align-items: center; gap: 5px; height: 30px; padding: 0 10px; border-radius: var(--r-ctl); border: 0; background: var(--bg-2); font-size: var(--fs-13); cursor: pointer; }
 
+
+/* 同一轮回复的后续片段：不重复头像和名称，和上一段贴近，整轮读起来是一条回复 */
+.msg.cont { margin-top: calc(var(--sp-4) * -1 + var(--sp-1)); }
+.msg.cont .thought { margin-top: 0; }
+.thought-body p { margin: 0 0 4px; }

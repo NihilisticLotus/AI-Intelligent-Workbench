@@ -97,10 +97,11 @@ function AgentMsg({ it, fallbackAgent }: { it: Extract<TimelineItem, { kind: 'ag
   // 事件里是模型 id，显示时换成 /agents 给的名称
   const modelName = useApp((s) => s.agents.find((a) => a.kind === kind)?.models.find((m) => m.id === it.model)?.name) ?? it.model;
   return (
-    <article className="msg" aria-label={`${name} 的消息`}>
-      <div className="who"><AgentBadge kind={kind} /></div>
+    // 同一轮回复的后续片段不再重复头像和名称：整轮看起来是一条回复（用户报告：分段显示和常见 Agent 软件差别太大）
+    <article className={'msg' + (it.cont ? ' cont' : '')} aria-label={it.cont ? `${name} 的回复（续）` : `${name} 的消息`}>
+      <div className="who">{it.cont ? null : <AgentBadge kind={kind} />}</div>
       <div>
-        <div className="head"><b>{name}</b>{modelName ? <span>{modelName}</span> : null}<span>{clock(it.ts)}</span></div>
+        {it.cont ? null : <div className="head"><b>{name}</b>{modelName ? <span>{modelName}</span> : null}<span>{clock(it.ts)}</span></div>}
         {it.thought ? <Thought it={it} /> : null}
         <div className="text">
           {it.text ? <RichText text={it.text} /> : null}
@@ -126,7 +127,7 @@ function Thought({ it }: { it: Extract<TimelineItem, { kind: 'agent' }> }) {
       <summary aria-label={(thinking ? '正在思考' : `思考了 ${secs ?? '一会儿'}`) + (isOpen ? '，点击折叠' : '，点击展开')}>
         <Icon name="bulb" />{thinking ? <span className="thinking">正在思考</span> : <span>思考了 {secs ?? '一会儿'}</span>}<Icon name="right" />
       </summary>
-      <div className="thought-body">{it.thought}</div>
+      <div className="thought-body"><RichText text={it.thought} /></div>
     </details>
   );
 }

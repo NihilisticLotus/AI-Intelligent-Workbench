@@ -1,6 +1,6 @@
 // AcpSession：实现 AgentConnection，三家共用（phase-1.md 6.2.1–6.2.3、6.3.2、6.5.4）。
 // 一个进程只跑一个会话（6.3.1 总表“每个进程的会话数”）。
-import type { AgentKind, PermissionLevel } from '@aic/protocol';
+import { ErrorCode, type PromptInput, type AgentKind, type PermissionLevel } from '@aic/protocol';
 import { redact } from '../redact';
 import {
   AgentError, type AgentCaps, type AgentConnection, type AgentUpdate, type AuthMethodInfo, type LogFn, type McpServerSpec, type ProbeOptions,
@@ -9,10 +9,11 @@ import {
 import { AbortError, isRecord, newId, str } from '../util';
 import { configSignature, EMPTY_CONFIG, legacyIsCombo, modelSwitchOf, parseConfigState } from './config';
 import { AcpConnection, type AcpTimeouts, type ExitInfo } from './connection';
-import { agentErrors, classifyError, invalidValue, isNotFound } from './errors';
+import { textResponseError, agentErrors, classifyError, invalidValue, isNotFound } from './errors';
 import { buildChildEnv, type LaunchSpec } from './launch';
 import { normalizePermission } from './permissions';
 import { UpdateMapper } from './updates';
+import { readFile, stat } from 'node:fs/promises';
 import { mkdirSync } from 'node:fs';
 
 /** 每家 Agent 的差异描述（adapter 提供） */
@@ -73,6 +74,8 @@ export class AcpSession implements AgentConnection {
   private lastSig = '';
   private configTimer: NodeJS.Timeout | null = null;
   private holding = true;
+  private turnMessages = new Map<string, string>();
+  private turnTools = false;
   private held: AgentUpdate[] = [];
   private replayOpen = false;
   private replayTimer: NodeJS.Timeout | null = null;
@@ -145,6 +148,8 @@ export class AcpSession implements AgentConnection {
 
   /** 发给 Gateway；建会话期间先攒着（配置在 ready() 时统一发一次） */
   emit(u: AgentUpdate) {
+    if (this.turnAbort && u.kind === 'message') this.turnMessages.set(u.messageId, (this.turnMessages.get(u.messageId) ?? '') + u.text);
+    if (this.turnAbort && u.kind === 'tool_start') this.turnTools = true;
     if (this.holding) { if (u.kind !== 'config_options') this.held.push(u); return; }
     this.opts.host.update(u);
   }
@@ -251,8 +256,20 @@ export class AcpSession implements AgentConnection {
 
   // ---------- 回合 ----------
 
-  async prompt(text: string, signal: AbortSignal): Promise<{ stopReason: StopReason }> {
+  async prompt(input: PromptInput, signal: AbortSignal): Promise<{ stopReason: StopReason }> {
     if (this.conn.isClosed) throw agentErrors.crashed(this.spec.kind, this.spec.displayName);
+    this.turnMessages.clear(); this.turnTools = false;
+    const prompt: Record<string, unknown>[] = [];
+    if (input.text) prompt.push({ type: 'text', text: input.text });
+    for (const a of input.attachments ?? []) {
+      if (a.kind === 'image') {
+        if (!this.caps.prompt.image) throw new AgentError({ code: ErrorCode.AttachmentUnsupported, message: '这个 Agent 看不了图片', actions: [] }, 'unsupported');
+        if ((await stat(a.path)).size > 5 * 1024 * 1024) throw new AgentError({ code: ErrorCode.AttachmentTooLarge, message: '图片太大，最大 5 MB', actions: [] }, 'failed');
+        prompt.push({ type: 'image', mimeType: a.mime, data: (await readFile(a.path)).toString('base64') });
+      } else if (this.caps.prompt.embeddedContext && a.mime.startsWith('text/') && (await stat(a.path)).size < 256 * 1024) {
+        prompt.push({ type: 'resource', resource: { uri: a.uri, text: await readFile(a.path, 'utf8'), mimeType: a.mime } });
+      } else prompt.push({ type: 'resource_link', uri: a.uri, name: a.name, mimeType: a.mime });
+    }
     const turn = new AbortController();
     this.turnAbort = turn;
     this.driftCancelled = false;
@@ -268,11 +285,15 @@ export class AcpSession implements AgentConnection {
     if (signal.aborted) onAbort(); else signal.addEventListener('abort', onAbort, { once: true });
     try {
       const resp = asRecord(await this.conn.request('session/prompt', {
-        sessionId: this.agentSessionId, prompt: [{ type: 'text', text }],
+        sessionId: this.agentSessionId, prompt,
       }, 0));
       const stop = this.driftCancelled ? 'cancelled' : str(resp.stopReason) ?? 'end_turn';
       if (stop === 'cancelled') { this.mapper.endTurn('cancelled'); return { stopReason: 'cancelled' }; }
       this.mapper.endTurn('end_turn');
+      if (!this.turnTools && this.turnMessages.size === 1) {
+        const failure = textResponseError([...this.turnMessages.values()][0]!, this.spec.kind, this.spec.displayName, this.secrets);
+        if (failure) throw failure;
+      }
       if (stop === 'refusal') return { stopReason: 'refusal' };
       if (stop === 'max_tokens' || stop === 'max_turn_requests') this.notice('info', MAX_TOKENS_NOTICE);
       return { stopReason: 'end_turn' };
@@ -290,6 +311,7 @@ export class AcpSession implements AgentConnection {
 
   /** session/request_permission → 工作台审批 */
   async onPermission(params: Record<string, unknown>, reqSignal: AbortSignal): Promise<unknown> {
+    this.emit({ kind: 'activity' });
     const n = normalizePermission(params, { agentName: this.spec.displayName, cwd: this.opts.cwd });
     for (const w of n.warnings) this.log('warn', `[agent:${this.spec.kind}] ${w}`);
     if (n.toolCall) this.mapper.ensureTool(n.toolCall);
@@ -668,7 +690,7 @@ export async function acpProbe(spec: AcpAgentSpec, rt: AcpRuntime, opts: ProbeOp
         session.ready();
         try {
           await session.setPermission('readonly').catch(() => {});
-          const r = await session.prompt('这是连接测试，请只回复 OK，不要做任何其他事情。', new AbortController().signal);
+          const r = await session.prompt({ text: '这是连接测试，请只回复 OK，不要做任何其他事情。' }, new AbortController().signal);
           step('发送测试消息', s, r.stopReason === 'end_turn', `回复：${text.trim().slice(0, 200) || '（空）'}`);
           if (r.stopReason !== 'end_turn') ok = false;
         } catch (e) {

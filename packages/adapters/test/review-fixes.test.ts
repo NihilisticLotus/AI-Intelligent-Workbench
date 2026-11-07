@@ -47,7 +47,7 @@ describe('第 1 条：工作区里的 Agent 设置不生效', () => {
   });
 
   it('Claude：工具子进程不继承 Anthropic 凭据（CLAUDE_CODE_SUBPROCESS_ENV_SCRUB）', () => {
-    expect(CLAUDE_SCRUB_ENV).toEqual({ CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' });
+    expect(CLAUDE_SCRUB_ENV).toEqual({ CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', CLAUDE_CODE_MAX_RETRIES: '2' });
   });
 
   it('CodeBuddy：启动参数带 --setting-sources user（不加载 .codebuddy/settings*.json）', async () => {

@@ -845,7 +845,7 @@ op('prompt', z.object({ taskId: Id, text: z.string().max(100_000), attachments: 
    - 第 1.4 步（交接）：`Composer.tsx:284`、`:285`、`:299`、`:328`、`lib/agents.ts:107`、`:117`、`packages/adapters/src/types.ts:296`、`packages/gateway/src/tasks.ts:496`、`:646`、`:673`、`:674`、`:721`、`packages/protocol/src/index.ts:159`。
    - 第 1.5 步（局域网）：`SettingsPage.tsx:59`。
    - 改法：界面和错误提示不写步号，说做完什么之后开放，例如“有了独立工作副本后开放”“换 Agent 需要交接，之后的版本提供”“局域网访问之后的版本提供”。代码注释可以写新步号（1.5 / 1.6 / 1.7）。改完 `grep -rn "第 1\.[3-5] 步" apps packages` 应该只剩注释。
-2. 配对前控制台 401（ISSUE-0005）：网页启动时先调 `GET /hello`（不需要令牌，已有），本地没有凭据时直接显示配对页，不再发需要令牌的请求。测试：`api/credentials.test.ts` 或新建的启动流程纯函数测试，覆盖“没有凭据时不发需要令牌的请求”。
+2. 配对前控制台 401（ISSUE-0005）：网页启动时先检查本地凭据；没有凭据时直接显示配对页，有凭据时再调 `GET /hello`（仍校验设备令牌、Host 和 Origin）。不再发明知缺少令牌的请求。测试：`api/credentials.test.ts` 或新建的启动流程纯函数测试，覆盖“没有凭据时不发需要令牌的请求”。
 3. 启动脚本首次运行（ISSUE-0004）：在 Windows 沙盒（如果用户电脑开着这个功能）或一个新建的空用户目录里实测两条路径：删掉 `node_modules` 后双击（应自动 `npm ci` 并打开浏览器）；PATH 里没有 Node 时双击（应弹出中文提示并打开下载页）。不能在本机删 Node；做不了沙盒就把这一项留在问题单里，验收记录写“未验证”。
 
 ### 9.11 I：真实补验（需要用户配合）

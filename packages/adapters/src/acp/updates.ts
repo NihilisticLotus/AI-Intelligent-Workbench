@@ -64,7 +64,7 @@ export interface MapperHooks {
   sessionInfo(update: Record<string, unknown>): void;
 }
 
-interface ToolState { id: string; ended: boolean; rejected: boolean }
+interface ToolState { id: string; ended: boolean; rejected: boolean; title?: string; target?: string | null; toolKind?: ToolKindT }
 
 /** 一个会话一个 mapper：维护消息段、工具 ID、被拒绝过的工具 */
 export class UpdateMapper {
@@ -106,10 +106,12 @@ export class UpdateMapper {
     if (!id || this.tools.has(id)) return;
     this.closeText();
     const t = this.tool(id);
-    this.emit({ kind: 'tool_start', toolId: t.id, toolKind: mapToolKind(toolCall.kind), title: str(toolCall.title) ?? '工具调用', target: toolTarget(toolCall) });
+    Object.assign(t, { toolKind: mapToolKind(toolCall.kind), title: str(toolCall.title) ?? '工具调用', target: toolTarget(toolCall) });
+          this.emit({ kind: 'tool_start', toolId: t.id, toolKind: t.toolKind!, title: t.title!, target: t.target ?? null });
   }
 
   handle(update: Record<string, unknown>) {
+    this.emit({ kind: 'activity' });
     const type = str(update.sessionUpdate);
     if (!type) return;
     if (type === 'session_info_update') { this.hooks.sessionInfo(update); return; }
@@ -142,7 +144,8 @@ export class UpdateMapper {
         const existed = this.tools.has(id);
         const t = this.tool(id);
         if (!existed) {
-          this.emit({ kind: 'tool_start', toolId: t.id, toolKind: mapToolKind(update.kind), title: str(update.title) ?? '工具调用', target: toolTarget(update) });
+          Object.assign(t, { toolKind: mapToolKind(update.kind), title: str(update.title) ?? '工具调用', target: toolTarget(update) });
+          this.emit({ kind: 'tool_start', toolId: t.id, toolKind: t.toolKind!, title: t.title!, target: t.target ?? null });
         }
         this.toolContent(t, update);
         this.toolStatus(t, update.status);
@@ -155,9 +158,16 @@ export class UpdateMapper {
         const t = this.tool(id);
         if (!seen) {
           this.closeText();
-          this.emit({ kind: 'tool_start', toolId: t.id, toolKind: mapToolKind(update.kind), title: str(update.title) ?? '工具调用', target: toolTarget(update) });
+          Object.assign(t, { toolKind: mapToolKind(update.kind), title: str(update.title) ?? '工具调用', target: toolTarget(update) });
+          this.emit({ kind: 'tool_start', toolId: t.id, toolKind: t.toolKind!, title: t.title!, target: t.target ?? null });
         }
-        // 只改 title 的 update 丢弃
+        if (seen) {
+          const changes: { title?: string; target?: string | null; toolKind?: ToolKindT } = {};
+          if (typeof update.title === 'string' && update.title !== t.title) changes.title = update.title;
+          if (('locations' in update || 'rawInput' in update) && toolTarget(update) !== t.target) changes.target = toolTarget(update);
+          if (typeof update.kind === 'string' && mapToolKind(update.kind) !== t.toolKind) changes.toolKind = mapToolKind(update.kind);
+          if (Object.keys(changes).length) { Object.assign(t, changes); this.emit({ kind: 'tool_update', toolId: t.id, ...changes }); }
+        }
         this.toolContent(t, update);
         this.toolStatus(t, update.status);
         return;

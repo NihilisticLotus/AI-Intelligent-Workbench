@@ -343,6 +343,7 @@ export class TaskService {
   }
 
   private onUpdate(taskId: string, sessionId: string, u: AgentUpdate, secrets: string[] = [], red?: StreamRedactor) {
+    if (u.kind === 'activity') return;
     const base = { taskId, sessionId } as const;
     // 写进事件库前按密钥原文脱敏（工具输出里可能有 env / printenv 打出来的 API Key）；流式分片扣留可能是密钥开头的尾巴
     const streamKey = u.kind === 'message' ? `m:${u.messageId}` : u.kind === 'thought' ? `t:${u.messageId}` : u.kind === 'tool_output' ? `o:${u.toolId}` : null;
@@ -566,7 +567,7 @@ export class TaskService {
       rt = await this.ensureRuntime(taskId, abort.signal);
       if (abort.signal.aborted) throw new AbortError();
       rt.lastActive = now();
-      const r = await rt.conn.prompt(text, abort.signal);
+      const r = await rt.conn.prompt({ text }, abort.signal);
       rt.lastActive = now();
       if (rt.redactor.active) this.flushRedactor(taskId, rt.sessionId, rt.redactor);
       // 审批超时：不放行，本轮结束后任务暂停（不进入待验收）

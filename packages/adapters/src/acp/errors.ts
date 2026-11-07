@@ -104,9 +104,23 @@ export function isAuthError(e: unknown): boolean {
 const safeJson = (v: unknown) => { try { return v === undefined ? '' : JSON.stringify(v); } catch { return ''; } };
 
 /** 从额度错误里尽量找出重置时间 */
-function quotaHint(text: string): string | null {
-  const m = /(?:reset[s]?|try again|retry)\s*(?:at|in|after)?\s*([^.;,\n]{2,60})/i.exec(text);
-  return m ? `额度预计在 ${m[1]!.trim()} 后恢复` : null;
+export function quotaHint(text: string): string {
+  const m = /(?:resets?|try again|retry)\s+(?:at\s+)?((?:\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d\d:\d\d)?)|(?:\d{1,2}:\d{2}(?:\s*(?:UTC|GMT)[+-]?\d*)?)|(?:in\s+\d+\s+(?:seconds?|minutes?|hours?|days?))|(?:\d+\s*[smh]\b)|(?:after\s+(?:Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday|\d{4}-\d{2}-\d{2})))/i.exec(text);
+  return m ? `额度预计在 ${m[1]!.trim()} 后恢复` : '额度或调用频率达到上限，可以稍后再试，或换个模型 / 账号';
+}
+
+/** 只接受整段以已知错误开头的短回复，避免把讨论错误的正常正文误判。 */
+export const TEXT_ERROR_PATTERNS = [
+  /^(?:The ['"][^'"\n]+['"] model is not supported|model is not supported)\b/i,
+  /^upstream_status:\s*HTTP 4\d\d\b/i,
+  /^API Error: Request rejected\b/i,
+] as const;
+export function textResponseError(text: string, kind: AgentKind, name: string, secrets: readonly string[] = []): AgentError | null {
+  if (text.length >= 600 || !TEXT_ERROR_PATTERNS.some((p) => p.test(text.trim()))) return null;
+  const error = classifyError(new Error(text.trim()), kind, name, secrets);
+  return error.reason === 'quota' ? error : new AgentError({ ...error.body,
+    actions: [{ label: '换模型', action: ErrorActionKey.SwitchModel, args: { kind } }],
+  }, 'invalid_value');
 }
 
 /** 任意错误 → AgentError（已经是 AgentError 的原样返回） */

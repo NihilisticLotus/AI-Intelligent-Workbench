@@ -46,13 +46,13 @@ describe('basic：session/update 映射', () => {
   it('消息、思考、工具、计划、用量逐条映射；未知类型只计数', async () => {
     const sc = use(scenario({ config: { models: MODELS, modes: MODES, currentMode: 'default' }, turns: [{ steps: BASIC_TURN }] }));
     const { host, conn } = await open(sc);
-    const r = await conn.prompt('看看跳跃', new AbortController().signal);
+    const r = await conn.prompt({ text: '看看跳跃' }, new AbortController().signal);
     expect(r.stopReason).toBe('end_turn');
-    const k = host.kinds().filter((x) => x !== 'config_options');
+    const k = host.kinds().filter((x) => x !== 'config_options' && x !== 'activity');
     expect(k).toEqual([
       'thought', 'message', 'message', 'message_done',
       'tool_start', 'tool_output', 'tool_end',
-      'tool_start', 'tool_output', 'tool_end',
+      'tool_start', 'tool_output', 'tool_update', 'tool_end',
       'tool_start', 'tool_end',
       'tool_start', 'tool_end',
       'plan', 'usage', 'message', 'message_done',
@@ -81,9 +81,9 @@ describe('basic：session/update 映射', () => {
   it('stopReason：max_tokens 映射为 end_turn 并提示；refusal 原样', async () => {
     const sc = use(scenario({ turns: [{ steps: [], stop: 'max_tokens' }, { steps: [], stop: 'refusal' }] }));
     const { host, conn } = await open(sc);
-    expect((await conn.prompt('a', new AbortController().signal)).stopReason).toBe('end_turn');
+    expect((await conn.prompt({ text: 'a' }, new AbortController().signal)).stopReason).toBe('end_turn');
     expect(host.of('notice').map((n) => n.text)).toContain('回复达到长度上限，可以让它继续');
-    expect((await conn.prompt('b', new AbortController().signal)).stopReason).toBe('refusal');
+    expect((await conn.prompt({ text: 'b' }, new AbortController().signal)).stopReason).toBe('refusal');
   });
 
   it('建会话后按权限级别设置模式；能力从 initialize 推导', async () => {

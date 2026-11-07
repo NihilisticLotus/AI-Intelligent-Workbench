@@ -45,7 +45,7 @@ describe('permission：审批桥接', () => {
   it('隐藏“总是”类选项；回传原始 optionId；拒绝后 tool_end rejected', async () => {
     const sc = use(scenario({ turns: [permTurn(STD_OPTIONS), permTurn(STD_OPTIONS, 'c2')] }));
     const { host, conn } = await open(sc);
-    await conn.prompt('跑测试', sig());
+    await conn.prompt({ text: '跑测试' }, sig());
     const req = host.requests[0]!;
     expect(req.options).toEqual([{ id: 'allow-once', label: '允许', kind: 'allow_once' }, { id: 'reject', label: '拒绝', kind: 'reject_once' }]);
     expect(req).toMatchObject({ title: '执行 npm test', detail: 'npm test', reason: '跑测试', cwd: sc.dir });
@@ -53,14 +53,14 @@ describe('permission：审批桥接', () => {
     expect(host.of('tool_end')[0]).toMatchObject({ ok: true });
 
     host.decide = async (r) => ({ outcome: 'selected', optionId: r.options.find((o) => o.kind === 'reject_once')!.id });
-    await conn.prompt('再来', sig());
+    await conn.prompt({ text: '再来' }, sig());
     expect(host.of('tool_end')[1]).toMatchObject({ ok: false, rejected: true });
   });
 
   it('没有 allow_once 时保留 allow_always（例如退出计划模式）', async () => {
     const sc = use(scenario({ turns: [permTurn([{ optionId: 'exit-plan-auto', kind: 'allow_always', name: 'Yes, auto' }, { optionId: 'reject', kind: 'reject_once', name: 'No' }])] }));
     const { host, conn } = await open(sc);
-    await conn.prompt('x', sig());
+    await conn.prompt({ text: 'x' }, sig());
     expect(host.requests[0]!.options.map((o) => o.id)).toEqual(['exit-plan-auto', 'reject']);
   });
 
@@ -69,7 +69,7 @@ describe('permission：审批桥接', () => {
     const host = new RecordingHost();
     host.decide = async () => ({ outcome: 'cancelled' });
     const { conn } = await open(sc, { host });
-    await conn.prompt('x', sig());
+    await conn.prompt({ text: 'x' }, sig());
     expect(sc.log().find((l) => l.event === 'permission_response')!.response).toEqual({ outcome: { outcome: 'cancelled' } });
     expect(host.of('tool_end')[0]).toMatchObject({ ok: false, rejected: true });
   });
@@ -79,7 +79,7 @@ describe('nonstandard-kinds：CodeBuddy 式的 allow / reject', () => {
   it('能接收并归一化', async () => {
     const sc = use(scenario({ turns: [permTurn([{ optionId: 'allow_once', kind: 'allow', name: 'Allow' }, { optionId: 'allow_session', kind: 'allow', name: 'Allow for session' }, { optionId: 'deny', kind: 'reject', name: 'Deny' }])] }));
     const { host, conn } = await open(sc);
-    await conn.prompt('x', sig());
+    await conn.prompt({ text: 'x' }, sig());
     expect(host.requests[0]!.options).toEqual([{ id: 'allow_once', label: '允许', kind: 'allow_once' }, { id: 'deny', label: '拒绝', kind: 'reject_once' }]);
     expect(host.requests[0]!.title).toBe('执行 npm test');
   });
@@ -88,7 +88,7 @@ describe('nonstandard-kinds：CodeBuddy 式的 allow / reject', () => {
     const sc = use(scenario({ turns: [permTurn([{ optionId: 'a', kind: 'weird', name: 'A' }, { optionId: 'b', kind: 'reject', name: 'B' }].slice(0, 1).concat([{ optionId: 'r', kind: 'reject', name: 'R' }]).map((o) => (o.kind === 'reject' ? { ...o, kind: 'nope' } : o)))] }));
     const log = new LogSink();
     const { host, conn } = await open(sc, { log });
-    await conn.prompt('x', sig());
+    await conn.prompt({ text: 'x' }, sig());
     expect(host.requests).toHaveLength(0);
     expect(sc.log().find((l) => l.event === 'permission_response')!.response).toEqual({ outcome: { outcome: 'cancelled' } });
     expect(host.of('notice').some((n) => n.text.includes('自动拒绝'))).toBe(true);
@@ -98,7 +98,7 @@ describe('nonstandard-kinds：CodeBuddy 式的 allow / reject', () => {
   it('CodeBuddy 的请求没有 title：用 _meta 里的工具名', async () => {
     const sc = use(scenario({ turns: [{ steps: [{ permission: { toolCall: { toolCallId: 'c9', rawInput: { command: 'dir' }, _meta: { 'codebuddy.ai/toolName': 'Bash' } }, options: [{ optionId: 'allow', kind: 'allow_once', name: 'Allow' }, { optionId: 'reject', kind: 'reject_once', name: 'Reject' }] } }] }] }));
     const { host, conn } = await open(sc);
-    await conn.prompt('x', sig());
+    await conn.prompt({ text: 'x' }, sig());
     expect(host.requests[0]!.title).toBe('假 Agent 请求使用工具：Bash');
     expect(host.requests[0]!.detail).toBe('dir');
     // 权限请求里的工具没见过：先补一条 tool_start
@@ -167,7 +167,7 @@ describe('mode-drift', () => {
   it('Agent 自己把模式改宽后改回', async () => {
     const sc = use(scenario({ config: { modes: MODES, currentMode: 'default' }, turns: [{ steps: [{ mode: 'bypassPermissions' }, { sleep: 200 }] }] }));
     const { host, conn } = await open(sc, { permission: 'ask' });
-    await conn.prompt('x', sig());
+    await conn.prompt({ text: 'x' }, sig());
     await waitFor(() => sc.log().filter((l) => l.method === 'session/set_config_option' && l.params.value === 'default').length >= 1);
     expect(host.of('notice').some((n) => n.text.includes('更宽松的模式'))).toBe(true);
     await waitFor(() => conn.config!().mode === 'default');
@@ -176,7 +176,7 @@ describe('mode-drift', () => {
   it('改成更严格的模式不处理', async () => {
     const sc = use(scenario({ config: { modes: MODES, currentMode: 'default' }, turns: [{ steps: [{ mode: 'plan' }, { sleep: 150 }] }] }));
     const { host, conn } = await open(sc, { permission: 'ask' });
-    await conn.prompt('x', sig());
+    await conn.prompt({ text: 'x' }, sig());
     expect(host.of('notice')).toHaveLength(0);
     expect(conn.config!().mode).toBe('plan');
   });
@@ -188,7 +188,7 @@ describe('crash', () => {
     const { conn } = await open(sc);
     const exits: { code: number | null; stderrTail: string[] }[] = [];
     conn.onExit!((i) => exits.push(i));
-    const e = await conn.prompt('x', sig()).catch((x) => x);
+    const e = await conn.prompt({ text: 'x' }, sig()).catch((x) => x);
     expect(e).toBeInstanceOf(AgentError);
     expect(e.body.code).toBe('agent.crashed');
     await waitFor(() => exits.length === 1);
@@ -230,7 +230,7 @@ describe('hang：启动超时', () => {
     const sc = use(scenario({ ignoreCancel: true, turns: [{ steps: [{ waitCancel: true }] }] }));
     const { conn } = await open(sc, { timeouts: { cancel: 500 } });
     const ac = new AbortController();
-    const p = conn.prompt('x', ac.signal);
+    const p = conn.prompt({ text: 'x' }, ac.signal);
     await waitFor(() => sc.log().some((l) => l.method === 'session/prompt'));
     ac.abort();
     expect((await p).stopReason).toBe('cancelled');
@@ -242,7 +242,7 @@ describe('hang：启动超时', () => {
     const sc = use(scenario({ turns: [{ steps: [{ update: { sessionUpdate: 'tool_call', toolCallId: 't', title: 'x', kind: 'read', status: 'in_progress' } }, { waitCancel: true }] }] }));
     const { host, conn } = await open(sc);
     const ac = new AbortController();
-    const p = conn.prompt('x', ac.signal);
+    const p = conn.prompt({ text: 'x' }, ac.signal);
     await waitFor(() => host.of('tool_start').length === 1);
     ac.abort();
     expect((await p).stopReason).toBe('cancelled');
@@ -261,7 +261,7 @@ describe('noise：stdout 杂行与 stderr 脱敏', () => {
     }));
     const log = new LogSink();
     const { host, conn } = await open(sc, { log, redact: [secret] });
-    expect((await conn.prompt('x', sig())).stopReason).toBe('end_turn');
+    expect((await conn.prompt({ text: 'x' }, sig())).stopReason).toBe('end_turn');
     expect(host.of('message')[0]!.text).toBe('OK');
     await waitFor(() => log.text().includes('now'));
     const all = log.text();
@@ -289,7 +289,7 @@ describe('auth / quota', () => {
   it('prompt 返回额度错误 → agent.quota_exceeded，带重置时间', async () => {
     const sc = use(scenario({ turns: [{ steps: [{ error: { code: -32603, message: 'Usage limit reached', data: { details: 'rate limit exceeded, resets at 14:00' } } }] }] }));
     const { conn } = await open(sc);
-    const e = await conn.prompt('x', sig()).catch((x) => x);
+    const e = await conn.prompt({ text: 'x' }, sig()).catch((x) => x);
     expect(e.body.code).toBe('agent.quota_exceeded');
     expect(e.body.hint).toContain('14:00');
   });
@@ -297,7 +297,7 @@ describe('auth / quota', () => {
   it('_auth/status_update kind=none → auth 更新', async () => {
     const sc = use(scenario({ turns: [{ steps: [{ notify: { method: '_auth/status_update', params: { kind: 'none', label: 'Not logged in' } } }, { sleep: 50 }] }] }));
     const { host, conn } = await open(sc);
-    await conn.prompt('x', sig());
+    await conn.prompt({ text: 'x' }, sig());
     expect(host.of('auth')[0]).toEqual({ kind: 'auth', loggedIn: false });
   });
 });
@@ -344,7 +344,7 @@ describe('resume：恢复', () => {
     const { host, conn } = await open(sc, { resume: 'old' });
     expect(conn.resumed).toBe(true);
     expect(sc.log().some((l) => l.method === 'session/load')).toBe(true);
-    await conn.prompt('x', sig());
+    await conn.prompt({ text: 'x' }, sig());
     expect(host.of('message').map((m) => m.text)).toEqual(['新回答']);
     expect(host.of('tool_start')).toHaveLength(0);
   });
@@ -357,7 +357,7 @@ describe('resume：恢复', () => {
       turns: [{ steps: [{ update: { sessionUpdate: 'agent_message_chunk', content: text('还是旧的') } }, { update: meta('end') }, { update: { sessionUpdate: 'agent_message_chunk', content: text('新回答') } }] }],
     }));
     const { host, conn } = await open(sc, { resume: 'old' });
-    await conn.prompt('x', sig());
+    await conn.prompt({ text: 'x' }, sig());
     expect(host.of('message').map((m) => m.text)).toEqual(['新回答']);
   });
 

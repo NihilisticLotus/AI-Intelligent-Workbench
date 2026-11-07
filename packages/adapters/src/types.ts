@@ -1,7 +1,7 @@
 // Agent 适配器接口（design.md 6.2）。1.1 时定义在 gateway/src/agents/registry.ts，1.2 起移到这里（phase-1.md 6.2）。
 // 规则：在 1.1 的接口上只增不改——已有成员不改名、不改类型；新增成员都是可选的，或者是新类型。
 // 适配器只负责“说 Agent 的话”，产生的更新统一交给 SessionHost，由 Gateway 转成协议事件。
-import type { AgentKind, ApiError, PermissionLevel } from '@aic/protocol';
+import type { AgentKind, ApiError, PermissionLevel, PromptInput } from '@aic/protocol';
 import type { z } from 'zod';
 import type { ModelInfo as ModelInfoSchema, ToolKind } from '@aic/protocol';
 
@@ -101,6 +101,8 @@ export type AgentUpdate =
   | { kind: 'message'; messageId: string; text: string }
   | { kind: 'message_done'; messageId: string }
   | { kind: 'tool_start'; toolId: string; toolKind: ToolKindT; title: string; target: string | null }
+  | { kind: 'activity' }
+  | { kind: 'tool_update'; toolId: string; title?: string; target?: string | null; toolKind?: ToolKindT }
   | { kind: 'tool_output'; toolId: string; text: string }
   /** rejected：用户在审批里拒绝，工具没有执行（不是执行出错） */
   | { kind: 'tool_end'; toolId: string; ok: boolean; summary: string | null; rejected?: boolean }
@@ -185,7 +187,7 @@ export type StopReason = 'end_turn' | 'cancelled' | 'refusal' | 'error';
 export interface AgentConnection {
   /** Agent 自己的会话 ID，用于恢复 */
   readonly agentSessionId: string;
-  prompt(text: string, signal: AbortSignal): Promise<{ stopReason: StopReason }>;
+  prompt(input: PromptInput, signal: AbortSignal): Promise<{ stopReason: StopReason }>;
   setConfig(cfg: { model?: string; effort?: string }): Promise<void>;
   /** 权限级别映射到 Agent 自己的模式（session/set_mode） */
   setPermission(level: PermissionLevel): Promise<void>;

@@ -26,7 +26,7 @@ const MODE_RANK: Record<string, number> = { plan: 0, default: 1, acceptEdits: 2,
  */
 export const CLAUDE_SESSION_META = { claudeCode: { options: { settingSources: ['user'], allowDangerouslySkipPermissions: false } } } as const;
 /** 工具子进程（Bash 等）不继承 Anthropic 凭据：Claude Code 启动子进程前清理这些环境变量 */
-export const CLAUDE_SCRUB_ENV = { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1' } as const;
+export const CLAUDE_SCRUB_ENV = { CLAUDE_CODE_SUBPROCESS_ENV_SCRUB: '1', CLAUDE_CODE_MAX_RETRIES: '2' } as const;
 /** 订阅登录时 CLI 输出里可能出现的授权链接（只推这些主机） */
 const AUTH_HOSTS = ['claude.ai', 'console.anthropic.com', 'platform.claude.com', 'anthropic.com', 'claude.com'];
 

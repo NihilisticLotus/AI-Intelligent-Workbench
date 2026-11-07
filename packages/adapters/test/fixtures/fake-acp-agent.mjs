@@ -106,7 +106,7 @@ const app = acp.agent({ name: 'fake-acp-agent' })
       agentCapabilities: {
         loadSession: sc.loadSession ?? false,
         sessionCapabilities: sc.sessionCapabilities ?? { resume: {}, close: {} },
-        promptCapabilities: { image: true, embeddedContext: true },
+        promptCapabilities: sc.promptCapabilities ?? { image: true, embeddedContext: true },
         mcpCapabilities: { http: true, sse: false },
       },
       agentInfo: { name: 'fake-acp-agent', version: '9.9.9' },

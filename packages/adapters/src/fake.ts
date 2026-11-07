@@ -1,14 +1,14 @@
 // 演示 Agent：不需要登录、不碰磁盘，按真实 Agent 的节奏产生思考、流式回复、工具调用、计划和审批。
 // 用于在没有任何真实 Agent 时走通整个界面，也用作接口契约测试的对手方。
-import type { PermissionLevel } from '@aic/protocol';
+import type { PermissionLevel, PromptInput } from '@aic/protocol';
 import { AbortError, newId, sleep } from './util';
 import type {
   AgentAdapter, AgentCaps, AgentConnection, ModelInfo, PermissionRequest, SessionHost, SpawnOptions, StopReason,
 } from './types';
 
 export const FAKE_MODELS: ModelInfo[] = [
-  { id: 'demo-fast', name: '演示-快', contextWindow: 200_000 },
-  { id: 'demo-deep', name: '演示-深思', contextWindow: 1_000_000 },
+  { id: 'demo-fast', name: '演示-快', contextWindow: 200_000, vision: true },
+  { id: 'demo-deep', name: '演示-深思', contextWindow: 1_000_000, vision: false },
 ];
 export const FAKE_EFFORTS = ['低', '中', '高'];
 
@@ -26,7 +26,7 @@ const CAPS: AgentCaps = {
   loadSession: false, resume: false, list: false, close: true, fork: false,
   modelSwitch: 'configOption', effortOptions: FAKE_EFFORTS, thoughts: true,
   modes: [{ id: 'default', name: '默认' }],
-  prompt: { image: false, audio: false, embeddedContext: false },
+  prompt: { image: true, audio: false, embeddedContext: false },
   mcp: { http: false, sse: false },
   extensions: [],
 };
@@ -108,10 +108,12 @@ class FakeConnection implements AgentConnection {
     }
   }
 
-  async prompt(text: string, signal: AbortSignal): Promise<{ stopReason: StopReason }> {
+  async prompt(input: PromptInput, signal: AbortSignal): Promise<{ stopReason: StopReason }> {
     this.turn++;
     try {
-      await this.run(text, signal);
+      const images = input.attachments?.filter((a) => a.kind === 'image') ?? [];
+      if (images.length) await this.say('收到 ' + images.length + ' 张图片：' + images.map((a) => a.name + '、' + a.width + ' × ' + a.height).join('；'), signal);
+      else await this.run(input.text, signal);
       return { stopReason: 'end_turn' };
     } catch (e) {
       if (e instanceof AbortError || signal.aborted) return { stopReason: 'cancelled' };

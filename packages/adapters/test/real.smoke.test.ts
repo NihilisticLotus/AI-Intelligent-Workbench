@@ -96,7 +96,7 @@ describe.skipIf(!ENABLED)('真实 Agent 冒烟（AIC_REAL_AGENTS=1）', () => {
 
         // ① 只回复 OK
         host.reset();
-        const [p1, p1Ms] = await timed(() => conn.prompt(OK_PROMPT, signal()));
+        const [p1, p1Ms] = await timed(() => conn.prompt({ text: OK_PROMPT }, signal()));
         Object.assign(r, { ok1Stop: p1.stopReason, ok1Ms: p1Ms, ok1Replied: /OK/i.test(host.text), ok1Tools: host.tools() });
         expect(p1.stopReason).toBe('end_turn');
         expect.soft(r.ok1Replied).toBe(true);
@@ -105,7 +105,7 @@ describe.skipIf(!ENABLED)('真实 Agent 冒烟（AIC_REAL_AGENTS=1）', () => {
         host.reset();
         host.allowWrites = true;
         const before = host.requests.length;
-        const [p2, p2Ms] = await timed(() => conn.prompt(FILE_PROMPT, signal()));
+        const [p2, p2Ms] = await timed(() => conn.prompt({ text: FILE_PROMPT }, signal()));
         host.allowWrites = false;
         const hello = path.join(work, 'hello.txt');
         const newReqs = host.requests.slice(before);
@@ -134,7 +134,7 @@ describe.skipIf(!ENABLED)('真实 Agent 冒烟（AIC_REAL_AGENTS=1）', () => {
 
         // ③ 换完再发一条“只回复 OK”
         host.reset();
-        const [p3, p3Ms] = await timed(() => conn.prompt(OK_PROMPT, signal()));
+        const [p3, p3Ms] = await timed(() => conn.prompt({ text: OK_PROMPT }, signal()));
         Object.assign(r, { ok2Stop: p3.stopReason, ok2Ms: p3Ms, ok2Replied: /OK/i.test(host.text), configAfter: { model: conn.config!().model, effort: conn.config!().effort } });
         expect.soft(p3.stopReason).toBe('end_turn');
         expect.soft(r.ok2Replied).toBe(true);

@@ -977,8 +977,13 @@ op('prompt', z.object({ taskId: Id, text: z.string().max(100_000), attachments: 
 - 工具记录绑定 task / session / turn / call 和规范化输入 SHA-256，重复身份但输入或工具不同报冲突。先 pending，再审批；执行只能原子地从 approved 进入 running。终态不可被晚到结果覆写；拒绝或取消前的操作不能执行。
 - 持久记录只保存身份、指纹、状态、进程身份和无正文的结果概要；不保存 Key、附件正文、原始 argv 或 stdout / stderr。模型上下文与工具完整结果的持久化另行整合，不能把本表当作已完成会话恢复。
 - 新迁移 v6 只追加独立工具表，旧迁移不改。恢复将遗留 pending / approved / running 标为 interrupted，保留已完成终态；不在恢复函数中启动或重放命令。待核对副作用保持未知，不自动重试。
-- Windows 命令宿主拟采用 Job Object，并先将宿主纳入带 KILL_ON_JOB_CLOSE 的作业，再启动获准命令；普通子孙由作业收尾，父链中途退出也不能仅依赖递归枚举。宿主进程登记持久化完成后才通过 stdin 发启动数据；取消、超时、输出超限和父进程断开均停止作业。行为须由本机测试证明，不能仅凭 API 设计记为通过。
+- Windows 命令宿主采用 Job Object，并先将宿主纳入带 KILL_ON_JOB_CLOSE 的作业，再启动获准命令；普通子孙由作业收尾，父链中途退出也不能仅依赖递归枚举。宿主进程登记持久化完成后才通过 stdin 发启动数据；取消、超时、输出超限和父进程断开均停止作业。行为须由本机测试证明，不能仅凭 API 设计记为通过。
+- 宿主将子进程 stdout / stderr 编码为数据帧，与 started / exit / host_error 控制帧区分；命令正文无法伪造宿主结果。正常非零退出与宿主中断、命令未启动分别表达，不能单靠宿主退出码把 125 猜成启动失败；输出上限统计解码后的原始字节，不把传输编码长度算为工具输出。
 - 工作目录、私有 HOME、环境白名单和作业对象只处理配置与进程生命周期，不是文件 / 网络沙箱；不承诺恶意命令无法访问工作区外文件。服务 Key 不进入命令环境，输出只返回工具调用方，不自动进入日志 / 事件；正式权限与内容展示仍须后续集成。
 - 验证覆盖正常 / 非零命令、参数边界、输出超限、取消与超时、真实子孙进程、命令父进程先退出、宿主被结束、登记失败前不启动、父进程断开、跨进程重开数据库与持久化故障位置。本轮阶段性通过的项目追加到 step-1.3，不开放新的真实调用。
 
 Windows 机制依据：[Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)、[CreateProcessW](https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-createprocessw)。作业不替代权限隔离，WMI 创建等绕开普通继承链的路径仍需单独处理，不能扩大进程测试的证明范围。
+
+#### 2026-11-08 基础组件实现进度
+
+已在 Gateway 落地 command-host / commands / command-tool / tool-journal 及迁移 v6；35 项新增默认测试覆盖本节所列普通进程生命周期、严格审批绑定、持久化故障与跨进程恢复。实际结果见 step-1.3 新增节。未接入正式任务 / 审批 API、模型循环、完整会话与界面，不能把这一段视为 9.16 八组门槛整体通过。正常退出尝试删除当次私有 HOME；崩溃或清理失败遗留目录的后续管理尚未接入，仍由 ISSUE-0029 跟踪。

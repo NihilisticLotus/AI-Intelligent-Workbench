@@ -118,6 +118,20 @@ const MIGRATIONS: string[] = [
   );
   ALTER TABLE task_drafts ADD COLUMN attachments_json TEXT;
   `,
+  // v6：独立工具的持久意图，不保存参数、密钥或输出正文。
+  `
+  CREATE TABLE independent_tool_calls (
+    id TEXT PRIMARY KEY,
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+    turn_id TEXT NOT NULL, call_id TEXT NOT NULL, tool_name TEXT NOT NULL, input_hash TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('pending','approved','rejected','running','succeeded','failed','cancelled','interrupted')),
+    created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+    pid INTEGER, process_started_at INTEGER, outcome_json TEXT,
+    UNIQUE(session_id, turn_id, call_id)
+  );
+  CREATE INDEX idx_independent_tools_state ON independent_tool_calls(state, session_id);
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

@@ -1,4 +1,6 @@
 // 各服务的集合，路由和 WebSocket 共用
+import type { AttachmentService } from './attachments';
+import type { Hello } from '@aic/protocol';
 import type { AuthService } from './auth';
 import type { AgentRegistry } from './agents/registry';
 import type { AgentService } from './agents/service';
@@ -12,6 +14,8 @@ import type { TaskService } from './tasks';
 
 export interface Services {
   db: Db;
+  attachments: AttachmentService;
+  lastExit: Hello['lastExit'];
   auth: AuthService;
   events: EventStore;
   agents: AgentRegistry;

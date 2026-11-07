@@ -1,6 +1,6 @@
 // 进程级的兜底错误处理：把没被捕获的错误完整写进 logs/gateway.log，并在终端里给出中文说明。
 // 背景：2026-11-07 用户遇到 Gateway 无故退出，终端窗口已关，没有留下任何错误信息（ISSUE-0015）。
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { redact } from '@aic/adapters';
 
@@ -54,4 +54,21 @@ export function installCrashHandlers(opts: CrashLogOptions) {
     process.off('unhandledRejection', onRejection);
     process.off('uncaughtException', onException);
   };
+}
+
+/** 独立生命周期记录，避免错误堆栈多行影响最后一次运行判断。 */
+export function readLastExit(dataDir: string): import('@aic/protocol').Hello['lastExit'] {
+  try {
+    const lines = readFileSync(path.join(dataDir, 'logs', GATEWAY_LOG), 'utf8').trim().split('\n');
+    const last = lines.findLast((l) => l.includes('生命周期 '));
+    if (last) {
+      const r = JSON.parse(last.slice(last.indexOf('生命周期 ') + 5)) as { phase: string; pid: number; at: number; reason: string | null };
+      return { clean: r.phase === 'exit', at: r.at, reason: r.phase === 'exit' ? r.reason : '上次运行没有正常退出（pid ' + r.pid + '）' };
+    }
+    const legacy = lines.findLast((l) => /启动|退出/.test(l));
+    return legacy ? { clean: /正常退出/.test(legacy), at: Date.parse(legacy.slice(0, 24)) || Date.now(), reason: /正常退出/.test(legacy) ? '正常退出' : '上次运行没有正常退出' } : null;
+  } catch { return null; }
+}
+export function lifecycle(dataDir: string, phase: 'start' | 'exit', startedAt: number, reason: string | null, code?: number) {
+  gatewayLog(dataDir, 'INFO', '生命周期 ' + JSON.stringify({ phase, pid: process.pid, at: Date.now(), uptimeMs: Date.now() - startedAt, reason, ...(code === undefined ? {} : { code }) }));
 }

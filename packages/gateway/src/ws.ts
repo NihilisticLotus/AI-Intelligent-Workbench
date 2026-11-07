@@ -141,7 +141,7 @@ export function attachWs(server: Server, s: Services) {
       switch (op.op) {
         case 'subscribe': return subscribe(op.data.lastSeq, op.data.taskIds);
         case 'ping': { send({ kind: 'pong', ts: Date.now() }); const r: z.infer<typeof PingResult> = {}; return r; }
-        case 'prompt': return s.tasks.prompt(op.data.taskId, op.data.text);
+        case 'prompt': return s.tasks.prompt(op.data.taskId, op.data.text, op.data.attachments);
         case 'cancel': { await s.tasks.cancel(op.data.taskId); const r: z.infer<typeof CancelResult> = { taskId: op.data.taskId }; return r; }
         case 'approve': return { approval: await s.tasks.approve(op.data.approvalId, op.data.optionId, op.data.note, deviceId) };
         case 'switch': return { task: await s.tasks.switch(op.data.taskId, op.data) };

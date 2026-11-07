@@ -3,11 +3,12 @@
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import type { HttpBindings } from '@hono/node-server';
-import { API_BASE } from '@aic/protocol';
+import { API_BASE, ErrorCode } from '@aic/protocol';
 import type { z } from 'zod';
 import { KEY_HEADER_LC, type AuthService, type DeviceRow, type RequestCredentials } from '../auth';
 import { AppError, Errors, toApiError, zodMessage } from '../util';
 import type { Services } from '../services';
+import { attachmentError } from '../attachments';
 import { systemRoutes } from './system';
 import { projectRoutes } from './projects';
 import { taskRoutes } from './tasks';
@@ -84,7 +85,12 @@ export function createApp(s: Services, opts: { webDist: string }) {
   });
 
   // 3. 请求体大小（按实际读到的字节数，不只看 Content-Length）
-  app.use(`${API_BASE}/*`, bodyLimit({ maxSize: MAX_BODY, onError: (c) => fail(c as Ctx, Errors.tooLarge('请求内容太大')) }));
+  app.use(`${API_BASE}/*`, async (c, next) => {
+    const upload = c.req.method === 'POST' && /^\/api\/v1\/tasks\/[^/]+\/attachments$/.test(c.req.path);
+    return bodyLimit({ maxSize: upload ? 20 * 1024 * 1024 : MAX_BODY,
+      onError: (ctx) => fail(ctx as Ctx, upload ? attachmentError(413, ErrorCode.AttachmentTooLarge, '附件太大，最大 20 MB') : Errors.tooLarge('请求内容太大')),
+    })(c, next);
+  });
 
   app.route(API_BASE, systemRoutes(s));
   app.route(API_BASE, projectRoutes(s));

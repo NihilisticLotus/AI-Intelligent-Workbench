@@ -1,8 +1,8 @@
 // 任务、会话与审批（1.1 版本的 TaskScheduler + SessionManager + PermissionBroker 合在这里，后续再拆）。
 // 所有状态变化都先经过 EventStore.append（先写库，再推送）。
 // 1.2：真实 Agent 的会话运行时（账号环境变量、恢复 H1、并发上限、空闲回收、进程崩溃）、切换模型（H0）、异常映射（phase-1.md 6.5）。
-import type { AgentKind, ApiError, Approval, PermissionLevel, Task, TaskStatus } from '@aic/protocol';
-import { ErrorCode } from '@aic/protocol';
+import type { AgentKind, ApiError, Approval, PermissionLevel, Task, TaskStatus, AttachmentInfo, PromptAttachment } from '@aic/protocol';
+import { ErrorCode, visionOf } from '@aic/protocol';
 import type { z } from 'zod';
 import type { CreateTaskBody, PatchTaskBody, TasksQuery } from '@aic/protocol';
 import { AgentError, redact as redactText, redactExact, StreamRedactor, type SessionConfigState } from '@aic/adapters';
@@ -10,7 +10,7 @@ import type { AgentAdapter, AgentConnection, AgentRegistry, AgentUpdate, Permiss
 import type { AgentService } from './agents/service';
 import type { Db } from './db';
 import type { EventStore } from './events';
-import { AbortError, Errors, newId, now } from './util';
+import { AppError, AbortError, Errors, newId, now } from './util';
 
 type TaskRow = {
   id: string; project_id: string; group_id: string | null; title: string; prompt: string;
@@ -60,6 +60,8 @@ export interface TaskServiceOptions {
   approvalTimeoutMs?: number;
   /** 会话空闲多久后关闭 Agent 进程（下次发消息时自动恢复），默认 30 分钟 */
   idleTimeoutMs?: number;
+  noResponseNoticeMs?: number;
+  noResponseCancelMs?: number;
   log?: (msg: string) => void;
 }
 
@@ -88,6 +90,10 @@ export class TaskService {
   /** 每个任务最近一次启动时注入的密钥（启动失败时的兜底错误也要脱敏） */
   private secretsOf = new Map<string, string[]>();
   private lastActivity = 0;
+  private activity = new Map<string, number>();
+  private noResponseNoticeMs: number;
+  private noResponseCancelMs: number;
+  attachments: import('./attachments').AttachmentService | null = null;
   private readonly approvalTimeoutMs: number;
   private readonly idleTimeoutMs: number;
   private idleTimer: NodeJS.Timeout | null = null;
@@ -96,6 +102,8 @@ export class TaskService {
   agentSvc: AgentService | null = null;
 
   constructor(private db: Db, private events: EventStore, private agents: AgentRegistry, opts: TaskServiceOptions = {}) {
+    this.noResponseNoticeMs = opts.noResponseNoticeMs ?? 60_000;
+    this.noResponseCancelMs = opts.noResponseCancelMs ?? 600_000;
     this.approvalTimeoutMs = opts.approvalTimeoutMs ?? 30 * 60_000;
     this.idleTimeoutMs = opts.idleTimeoutMs ?? 30 * 60_000;
     this.log = opts.log ?? ((m) => console.log(m));
@@ -263,6 +271,7 @@ export class TaskService {
     }
     const { model, effort } = await this.checkModel(a, body.model, body.effort, profileId);
     const id = newId('t');
+    if (body.attachments?.length) this.attachments?.resolve(id, body.attachments);
     const t = now();
     const title = (body.title?.trim() || body.prompt.trim().split(/\r?\n/)[0]!.slice(0, 40)) || '新任务';
     this.db.run(
@@ -272,7 +281,8 @@ export class TaskService {
     );
     const task = this.get(id);
     this.events.append({ type: 'task.created', taskId: id, sessionId: null, data: { task } });
-    this.startTurn(id, body.prompt);
+    if (body.deferPrompt) this.setStatus(id, 'draft');
+    else this.startTurn(id, body.prompt);
     return this.get(id);
   }
 
@@ -343,6 +353,7 @@ export class TaskService {
   }
 
   private onUpdate(taskId: string, sessionId: string, u: AgentUpdate, secrets: string[] = [], red?: StreamRedactor) {
+    this.activity.set(taskId, now());
     if (u.kind === 'activity') return;
     const base = { taskId, sessionId } as const;
     // 写进事件库前按密钥原文脱敏（工具输出里可能有 env / printenv 打出来的 API Key）；流式分片扣留可能是密钥开头的尾巴
@@ -365,6 +376,11 @@ export class TaskService {
       }
       case 'message_done': this.touch(taskId); this.events.append({ ...base, type: 'message.done', data: { messageId: u.messageId } }); break;
       case 'tool_start': this.touch(taskId); this.events.append({ ...base, type: 'tool.start', data: { toolId: u.toolId, kind: u.toolKind, title: clean(u.title), target: u.target === null ? null : clean(u.target) } }); break;
+      case 'tool_update': this.events.append({ ...base, type: 'tool.update', data: {
+        toolId: u.toolId, ...(u.title !== undefined ? { title: clean(u.title) } : {}),
+        ...(u.target !== undefined ? { target: u.target === null ? null : clean(u.target) } : {}),
+        ...(u.toolKind !== undefined ? { kind: u.toolKind } : {}),
+      } }); break;
       case 'tool_output': {
         const text = piece(`o:${u.toolId}`, u.text);
         if (text) this.events.append({ ...base, type: 'tool.output', data: { toolId: u.toolId, text } });
@@ -540,15 +556,16 @@ export class TaskService {
   }
 
   /** 发一条用户消息并在后台跑一轮 */
-  private startTurn(taskId: string, text: string): string {
+  private startTurn(taskId: string, text: string, attachments: AttachmentInfo[] = [], inputs: PromptAttachment[] = []): string {
     const messageId = newId('m');
     this.touch(taskId, true);
-    this.events.append({ type: 'message.user', taskId, sessionId: this.runtimes.get(taskId)?.sessionId ?? null, data: { messageId, text } });
+    this.events.append({ type: 'message.user', taskId, sessionId: this.runtimes.get(taskId)?.sessionId ?? null, data: { messageId, text, ...(attachments.length ? { attachments } : {}) } });
     // 同步占住“忙碌”状态：避免两条 prompt 同时进来，也让会话启动期间的 cancel 能找到这个回合
+    this.attachments?.markUsed(taskId, attachments.map((a) => a.id));
     const abort = new AbortController();
     this.turnAborts.set(taskId, abort);
     this.setStatus(taskId, 'running');
-    const turn = this.runTurn(taskId, text, abort);
+    const turn = this.runTurn(taskId, text, abort, inputs);
     this.turns.add(turn);
     void turn.finally(() => this.turns.delete(turn));
     return messageId;
@@ -560,14 +577,34 @@ export class TaskService {
     this.events.append({ type: 'error', taskId, sessionId, data: { error } });
   }
 
-  private async runTurn(taskId: string, text: string, abort: AbortController) {
+  private async runTurn(taskId: string, text: string, abort: AbortController, attachments: PromptAttachment[]) {
     let rt: Runtime | undefined;
+    let watchdog: NodeJS.Timeout | undefined;
+    let noResponse = false;
     this.approvalTimedOut.delete(taskId);
     try {
       rt = await this.ensureRuntime(taskId, abort.signal);
       if (abort.signal.aborted) throw new AbortError();
       rt.lastActive = now();
-      const r = await rt.conn.prompt({ text }, abort.signal);
+      this.activity.set(taskId, now());
+      let lastNotice = -Infinity;
+      const noticeId = newId('idle');
+      const timeout = new Promise<never>((_, reject) => {
+        watchdog = setInterval(() => {
+          if ([...this.pending.values()].some((p) => p.approval.taskId === taskId)) { this.activity.set(taskId, now()); return; }
+          const idle = now() - (this.activity.get(taskId) ?? now());
+          if (idle >= this.noResponseCancelMs) {
+            noResponse = true;
+            reject(new AppError(504, { code: ErrorCode.AgentNoResponse, message: 'Agent 10 分钟没有回应，这一轮已停止', hint: '可以重新发送，或换个模型 / 账号', actions: [{ label: '重试', action: 'task.retry' }, { label: '换模型', action: 'task.switch_model' }] }));
+            abort.abort();
+          } else if (idle >= this.noResponseNoticeMs && now() - lastNotice >= 120_000) {
+            lastNotice = now();
+            this.events.append({ type: 'session.notice', taskId, sessionId: rt!.sessionId, data: { id: noticeId, level: 'warn', text: 'Agent 已经 ' + Math.max(1, Math.floor(idle / 60_000)) + ' 分钟没有回应，可能在重试或网络不稳定。可以继续等，也可以停止这一轮。' } });
+          }
+        }, Math.min(1000, this.noResponseNoticeMs, this.noResponseCancelMs));
+        watchdog.unref?.();
+      });
+      const r = await Promise.race([rt.conn.prompt({ text, attachments }, abort.signal), timeout]);
       rt.lastActive = now();
       if (rt.redactor.active) this.flushRedactor(taskId, rt.sessionId, rt.redactor);
       // 审批超时：不放行，本轮结束后任务暂停（不进入待验收）
@@ -579,7 +616,10 @@ export class TaskService {
     } catch (e) {
       if (rt?.redactor.active) this.flushRedactor(taskId, rt.sessionId, rt.redactor);
       // 用户点了 [停止]：不管启动阶段抛的是什么（取消、或进程被结束导致的错误），都按暂停处理
-      if (e instanceof AbortError || abort.signal.aborted) {
+      if (noResponse) {
+        this.emitError(taskId, rt?.sessionId ?? null, (e as AppError).body);
+        this.setStatus(taskId, 'paused');
+      } else if (e instanceof AbortError || abort.signal.aborted) {
         this.setStatus(taskId, 'paused');
       } else if (e instanceof SlotBusyError) {
         this.setStatus(taskId, 'paused');
@@ -597,6 +637,8 @@ export class TaskService {
         this.setStatus(taskId, 'failed');
       }
     } finally {
+      if (watchdog) clearInterval(watchdog);
+      this.activity.delete(taskId);
       if (this.turnAborts.get(taskId) === abort) this.turnAborts.delete(taskId);
       this.approvalTimedOut.delete(taskId);
       if (rt) rt.lastActive = now();
@@ -617,17 +659,28 @@ export class TaskService {
         this.setStatus(taskId, 'paused');
         break;
       }
+      case 'invalid_value':
+        this.db.run('INSERT INTO model_failures (agent,profile_id,model,reason,at) VALUES (?,?,?,?,?) ON CONFLICT(agent,profile_id,model) DO UPDATE SET reason=excluded.reason,at=excluded.at', row.agent, rt?.profileId ?? row.profile_id ?? '', row.model ?? '', e.body.message, now());
+        this.agentSvc?.pushStatus(row.agent);
+        this.setStatus(taskId, 'paused'); break;
       case 'quota': this.setStatus(taskId, 'paused'); break;
       case 'crashed': this.setStatus(taskId, 'interrupted'); break;
       default: this.setStatus(taskId, 'failed');
     }
   }
 
-  async prompt(taskId: string, text: string): Promise<{ taskId: string; messageId: string }> {
+  async prompt(taskId: string, text: string, attachmentIds: string[] = []): Promise<{ taskId: string; messageId: string }> {
     const row = this.getRow(taskId);
     if (FINAL.includes(row.status)) throw Errors.invalidState('任务已经结束，不能继续发送消息');
     if (this.isBusy(taskId)) throw Errors.invalidState('任务正在执行', '请等这一轮结束，或先点 [停止]', [{ label: '停止', action: 'task.cancel', args: { taskId } }]);
-    return { taskId, messageId: this.startTurn(taskId, text) };
+    const a = this.attachments?.resolve(taskId, attachmentIds) ?? { infos: [], inputs: [] };
+    const agent = this.agents.get(row.agent);
+    const info = agent ? this.agentSvc?.info(agent) : undefined;
+    const configModels = this.runtimes.get(taskId)?.conn.config?.().models;
+    if (a.infos.some((x) => x.kind === 'image') && visionOf(info ? { ...info, models: configModels ?? info.models } : undefined, row.model) === false) {
+      throw new AppError(415, { code: ErrorCode.AttachmentUnsupported, message: (info?.displayName ?? row.agent) + ' · ' + (row.model ?? '当前模型') + ' 看不了图片', actions: [{ label: '换模型', action: 'task.switch_model', args: { taskId } }] });
+    }
+    return { taskId, messageId: this.startTurn(taskId, text, a.infos, a.inputs) };
   }
 
   async cancel(taskId: string): Promise<void> {
@@ -770,6 +823,7 @@ export class TaskService {
   // ---------- 审批 ----------
 
   private onPermission(taskId: string, sessionId: string, req: PermissionRequest, signal: AbortSignal): Promise<PermissionOutcome> {
+    this.activity.set(taskId, now());
     const row = this.getRow(taskId);
     const pick = (kinds: string[]) => req.options.find((o) => kinds.includes(o.kind));
     // 权限级别（9.1）：只读一律拒绝；工作区内自动 / 全自动直接放行；需审批时出卡片
@@ -821,6 +875,7 @@ export class TaskService {
         clearTimeout(timer);
         signal.removeEventListener('abort', onAbort);
         this.pending.delete(approval.id);
+        this.activity.set(taskId, now());
       };
       signal.addEventListener('abort', onAbort, { once: true });
       this.pending.set(approval.id, { approval, resolve, reject, timer, cleanup });

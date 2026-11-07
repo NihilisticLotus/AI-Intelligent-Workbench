@@ -265,6 +265,7 @@ export class AgentService {
       version: d?.engineVersion ?? d?.version ?? null,
       verified: d?.verified ?? true,
       models: cat.models, efforts: cat.efforts,
+      modelFailures: this.db.all<{ profile_id: string; model: string; reason: string; at: number }>('SELECT profile_id,model,reason,at FROM model_failures WHERE agent = ?', a.id).map((r) => ({ profileId: r.profile_id || null, model: r.model, reason: r.reason, at: r.at })),
       message: d ? d.message : '还没有检测',
       adapterVersion: d?.adapterVersion ?? null,
       engineVersion: d?.engineVersion ?? null,

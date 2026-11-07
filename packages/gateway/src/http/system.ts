@@ -38,6 +38,7 @@ export function systemRoutes(s: Services) {
       device: { id: d.id, name: d.name, kind: d.kind },
       lastSeq: s.events.lastSeq(),
       bootId: s.bootId,
+      lastExit: s.lastExit,
     };
     return c.json(body);
   });

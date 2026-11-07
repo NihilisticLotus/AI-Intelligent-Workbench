@@ -21,12 +21,13 @@ import { EventBus, EventStore } from './events';
 import { createApp } from './http/app';
 import { GroupService, ProjectService } from './projects';
 import type { Services } from './services';
+import { AttachmentService } from './attachments';
 import { TaskService } from './tasks';
 import { newId } from './util';
 
 const delay = (ms: number) => new Promise<void>((r) => { const t = setTimeout(r, ms); t.unref?.(); });
 import { attachWs } from './ws';
-import { gatewayLog, installCrashHandlers } from './crash-log';
+import { gatewayLog, installCrashHandlers, readLastExit, lifecycle } from './crash-log';
 
 export const VERSION = '0.1.0';
 
@@ -83,6 +84,8 @@ export interface GatewayOptions {
   secretStore?: SecretStore;
   /** 会话空闲多久后关闭 Agent 进程，默认 30 分钟 */
   idleTimeoutMs?: number;
+  noResponseNoticeMs?: number;
+  noResponseCancelMs?: number;
   /** ACP 各阶段超时（测试里改小） */
   agentTimeouts?: Partial<AcpTimeouts>;
   log?: (msg: string) => void;
@@ -96,7 +99,7 @@ export interface Gateway {
    * 关闭。deadlineMs：给“正常收尾”（停止回合、关闭会话）的时间上限，到点后先同步结束所有 Agent 进程树，
    * 再写库收尾。关闭控制台窗口（SIGHUP）时系统约 10 秒后强制结束 Node，必须先保证进程树被结束。
    */
-  close(opts?: { deadlineMs?: number }): Promise<void>;
+  close(opts?: { deadlineMs?: number; reason?: string }): Promise<void>;
 }
 
 export const DEV_CODE_FILE = 'dev-pairing-code.txt';
@@ -150,6 +153,10 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   const dataDir = opts.dataDir ?? defaultDataDir();
   // 单实例：必须在打开数据库、恢复任务状态之前确认没有别的实例在用这个数据目录
   const lock = await acquireInstanceLock(dataDir);
+  const lastExit = readLastExit(dataDir);
+  const startedAt = Date.now();
+  if (lastExit?.clean === false) gatewayLog(dataDir, 'WARN', lastExit.reason ?? '上次运行没有正常退出');
+  lifecycle(dataDir, 'start', startedAt, '启动');
   const db = (() => {
     try { return openDb(path.join(dataDir, 'data.db')); } catch (e) { lock.release(); throw e; }
   })();
@@ -193,8 +200,15 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   const tasks = new TaskService(db, events, agents, {
     ...(opts.approvalTimeoutMs !== undefined ? { approvalTimeoutMs: opts.approvalTimeoutMs } : {}),
     ...(opts.idleTimeoutMs !== undefined ? { idleTimeoutMs: opts.idleTimeoutMs } : {}),
+    ...(opts.noResponseNoticeMs !== undefined ? { noResponseNoticeMs: opts.noResponseNoticeMs } : {}),
+    ...(opts.noResponseCancelMs !== undefined ? { noResponseCancelMs: opts.noResponseCancelMs } : {}),
     log,
   });
+  const attachments = new AttachmentService(db, dataDir);
+  attachments.cleanup();
+  const cleanupTimer = setInterval(() => { try { attachments.cleanup(); } catch (e) { log('附件清理失败：' + String(e)); } }, 60 * 60_000);
+  cleanupTimer.unref?.();
+  tasks.attachments = attachments;
   tasks.agentSvc = agentSvc;
   tasks.recoverOnStartup();
   // 上次遗留的 Agent 进程（核对启动时间后结束进程树）；不在启动时预先拉起 Agent
@@ -203,7 +217,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   const groups = new GroupService(db, tasks);
 
   const services: Services = {
-    db, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks,
+    db, attachments, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks,
     port: () => port,
     machine: { id: machineId, name: hostname(), os: process.platform === 'win32' ? 'windows' : process.platform },
     version: VERSION,
@@ -241,9 +255,10 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   let closed = false;
   return {
     port, url, services,
-    async close(opts: { deadlineMs?: number } = {}) {
+    async close(opts: { deadlineMs?: number; reason?: string } = {}) {
       if (closed) return;
       closed = true;
+      clearInterval(cleanupTimer);
       ws.close();
       agentSvc.shutdown();
       const graceful = tasks.shutdown();
@@ -260,6 +275,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
       await new Promise<void>((r) => { server.close(() => r()); server.closeAllConnections?.(); });
       db.close();
       if (dev) rmSync(devCodeFile, { force: true });
+      lifecycle(dataDir, 'exit', startedAt, opts.reason ?? '正常退出', 0);
       lock.release();
     },
   };
@@ -289,6 +305,8 @@ async function openExisting(port: number) {
 
 async function main() {
   const dataDir = defaultDataDir();
+  const startedAt = Date.now();
+  process.on('exit', (code) => gatewayLog(dataDir, 'INFO', '进程退出 ' + JSON.stringify({ code, pid: process.pid, uptimeMs: Date.now() - startedAt })));
   let gwRef: Gateway | null = null;
   // 兜底：没接住的错误写进 logs/gateway.log（ISSUE-0015）；致命错误时尽量收尾，最多等 3 秒
   installCrashHandlers({
@@ -320,20 +338,21 @@ async function main() {
   console.log(`AI Console 已启动：${gw.url}`);
   console.log('浏览器没有自动打开的话，请手动打开上面的地址。关闭这个窗口即可退出。');
   let stopping = false;
-  const stop = async (deadlineMs: number) => {
+  const stop = async (deadlineMs: number, reason: string) => {
     if (stopping) return;
     stopping = true;
     console.log('正在退出……');
-    gatewayLog(dataDir, 'INFO', '正常退出');
-    await gw.close({ deadlineMs });
+    gatewayLog(dataDir, 'INFO', reason + ' ' + JSON.stringify({ pid: process.pid, uptimeMs: Date.now() - startedAt }));
+    await gw.close({ deadlineMs, reason });
     process.exit(0);
   };
   // 都设上限：Agent 卡在启动或取消无响应时，先结束进程树，不至于等很久
-  process.on('SIGINT', () => void stop(8000));
-  process.on('SIGTERM', () => void stop(5000));
+  process.on('SIGINT', () => void stop(8000, '按了 Ctrl+C'));
+  process.on('SIGBREAK', () => void stop(8000, '按了 Ctrl+Break'));
+  process.on('SIGTERM', () => void stop(5000, '收到结束信号'));
   // Windows 上关闭控制台窗口时 Node 收到的是 SIGHUP，约 10 秒后进程会被强制结束：
   // 先在 3 秒内结束所有 Agent 进程树（否则孙进程 claude.exe / codex app-server 会留下来），再写库收尾
-  process.on('SIGHUP', () => void stop(3000));
+  process.on('SIGHUP', () => void stop(3000, '控制台窗口被关闭'));
 }
 
 const isEntry = (() => {

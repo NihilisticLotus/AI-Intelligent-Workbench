@@ -104,6 +104,20 @@ const MIGRATIONS: string[] = [
     text TEXT NOT NULL, annotations_json TEXT NOT NULL, updated_at INTEGER NOT NULL
   );
   `,
+  // v5：附件与账号下的模型失败记录，旧迁移保持不变。
+  `
+  CREATE TABLE attachments (
+    id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    name TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL, kind TEXT NOT NULL,
+    width INTEGER, height INTEGER, sha256 TEXT NOT NULL, created_at INTEGER NOT NULL, used_at INTEGER
+  );
+  CREATE INDEX idx_attachments_task ON attachments(task_id);
+  CREATE TABLE model_failures (
+    agent TEXT NOT NULL, profile_id TEXT NOT NULL, model TEXT NOT NULL, reason TEXT NOT NULL, at INTEGER NOT NULL,
+    PRIMARY KEY (agent, profile_id, model)
+  );
+  ALTER TABLE task_drafts ADD COLUMN attachments_json TEXT;
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

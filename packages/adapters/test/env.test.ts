@@ -31,7 +31,7 @@ describe('官方 API Key', () => {
   it('Claude：ANTHROPIC_API_KEY，配置目录不变', () => {
     expect(claude.buildEnv(prof(claude, { kind: 'apiKey', authMethod: 'apiKey' }), KEY)).toEqual({ ANTHROPIC_API_KEY: KEY });
   });
-  it('Codex：独立 CODEX_HOME + 会话级 provider，密钥只走环境变量', () => {
+  it('Codex：独立 CODEX_HOME + 会话级 provider，登录请求从环境读取密钥', () => {
     const env = codex.buildEnv(prof(codex, { kind: 'apiKey', authMethod: 'apiKey' }), KEY);
     expect(env.CODEX_HOME).toBe(path.join(DIR, 'codex'));
     expect(env[CODEX_KEY_ENV]).toBe(KEY);
@@ -39,6 +39,9 @@ describe('官方 API Key', () => {
     expect(cfg).toMatchObject({ model_provider: 'aic', model_providers: { aic: { base_url: 'https://api.openai.com/v1', env_key: CODEX_KEY_ENV, wire_api: 'responses' } } });
     // 密钥不出现在 CODEX_CONFIG 里（CODEX_CONFIG 可能被 Agent 写进日志）
     expect(env.CODEX_CONFIG).not.toContain(KEY);
+    expect(JSON.parse(env.DEFAULT_AUTH_REQUEST!)).toEqual({ methodId: 'api-key' });
+    expect(env.CODEX_API_KEY).toBe(KEY);
+    expect(env.DEFAULT_AUTH_REQUEST).not.toContain(KEY);
   });
   it('CodeBuddy：CODEBUDDY_API_KEY（实验）', () => {
     expect(codebuddy.buildEnv(prof(codebuddy, { kind: 'apiKey', authMethod: 'apiKey' }), KEY)).toMatchObject({ CODEBUDDY_API_KEY: KEY });
@@ -74,5 +77,8 @@ describe('与删除清单配合', () => {
     const parent = { PATH: 'p', ANTHROPIC_API_KEY: 'parent-key', CODEX_HOME: 'C:/other', CODEBUDDY_CONFIG_DIR: 'C:/x', OPENAI_API_KEY: 'o' };
     const env = buildChildEnv(claude.buildEnv(prof(claude, { kind: 'apiKey', authMethod: 'apiKey' }), KEY), parent);
     expect(env).toEqual({ PATH: 'p', ANTHROPIC_API_KEY: KEY });
+  });
+  it('不继承宿主的 ACP 默认认证和 provider 设置', () => {
+    expect(buildChildEnv({}, { PATH: 'p', DEFAULT_AUTH_REQUEST: 'private', MODEL_PROVIDER: 'other', AIC_PROVIDER_KEY: 'private' })).toEqual({ PATH: 'p' });
   });
 });

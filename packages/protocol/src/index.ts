@@ -166,6 +166,11 @@ export const ProfileSummary = z.object({
    * 和任务当前账号的值相同 → 换账号后能恢复原来的会话；不同 → 需要交接（之后的版本），Gateway 会拒绝
    */
   sessionStore: z.string().optional(),
+  /** 当前账号的模型与能力缓存；旧服务端没有这些字段时，客户端继续兼容 Agent 级列表。 */
+  models: z.array(ModelInfo).optional(),
+  efforts: z.array(z.string()).nullable().optional(),
+  caps: AgentCaps.optional(),
+  modelsSource: z.enum(['session', 'cache', 'manual', 'none']).optional(),
 });
 export type ProfileSummary = z.infer<typeof ProfileSummary>;
 

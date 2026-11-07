@@ -27,3 +27,8 @@
 | [ISSUE-0021](ISSUE-0021-quota-hint-garbled.md) | 额度错误的提示把英文原文截了一段拼进中文 | fixed | bug | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0022](ISSUE-0022-turn-hang-no-timeout.md) | Claude 回合卡住两分钟以上没有任何输出，也没有超时 | fixed | bug | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0023](ISSUE-0023-step-1.3-real-input-unverified.md) | 第 1.3 步真实截图和选择器仍待补验 | open | 验收未通过（未验证） | 2026-11-08 | |
+| [ISSUE-0024](ISSUE-0024-profile-model-catalog.md) | 切换账号仍显示另一账号的模型 | investigating | bug | 2026-11-08 | |
+| [ISSUE-0025](ISSUE-0025-codex-api-auth-required.md) | Codex API 账号建会话前误要求登录 | investigating | bug | 2026-11-08 | |
+| [ISSUE-0026](ISSUE-0026-claude-profile-settings-routing.md) | Claude 用户设置可能覆盖 API 账号路由 | investigating | bug | 2026-11-08 | |
+| [ISSUE-0027](ISSUE-0027-codebuddy-auto-label.md) | CodeBuddy 自动强度在提示和面板中显示 enabled | investigating | bug | 2026-11-08 | |
+| [ISSUE-0028](ISSUE-0028-api-profile-delete-policy.md) | API 账号删除时的目录与凭据清理规则冲突 | investigating | 验收未通过 | 2026-11-08 | |

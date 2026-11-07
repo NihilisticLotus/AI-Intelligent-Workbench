@@ -36,6 +36,21 @@ async function setup() {
 }
 
 describe('账号 REST', () => {
+  it('自定义账号的手填模型不被其他账号或通用 ACP 缓存覆盖，未探测账号不借用默认目录', async () => {
+    const { token } = await setup();
+    const models=[{id:'glm',name:'GLM',contextWindow:null,vision:false}];
+    const custom=(await t!.api('POST','/profiles',{token,body:{agent:'claude',name:'自定义',kind:'customEndpoint',apiKey:KEY,baseUrl:'https://example.test/api',models}})).json as AgentProfile;
+    const isolated=(await t!.api('POST','/profiles',{token,body:{agent:'claude',name:'隔离订阅',kind:'subscription',configDir:'isolated'}})).json as AgentProfile;
+    const local=t!.gw.services.profiles.defaultRow('claude');
+    const native={model:'native',effort:null,models:[{id:'native',name:'订阅模型',contextWindow:null}],efforts:['high'],modes:[],mode:null,ids:{model:null,effort:null,mode:null},source:'legacy' as const};
+    t!.gw.services.agentSvc.saveCatalog('claude',local.id,native);
+    t!.gw.services.agentSvc.saveCatalog('claude',custom.id,native);
+    expect(t!.gw.services.agentSvc.catalog('claude',custom.id)).toMatchObject({models,efforts:null,source:'manual'});
+    expect(t!.gw.services.agentSvc.catalog('claude',isolated.id)).toMatchObject({models:[],source:'none'});
+    const infos=(await t!.api('GET','/agents',{token})).json.items;
+    const summaries=infos.find((a: {kind:string})=>a.kind==='claude').profiles;
+    expect(summaries.find((p: {id:string})=>p.id===custom.id)).toMatchObject({models,efforts:null,modelsSource:'manual'});
+  });
   it('建 API Key 账号：响应里只有 hasSecret 和结尾 4 位；数据库、审计、事件里都没有明文', async () => {
     const { token } = await setup();
     // 默认账号“本机登录”自动建好，不能删除

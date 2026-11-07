@@ -9,6 +9,7 @@ import { Icon } from './Icon';
 import { useAgentName } from './ui';
 import type { SessionCfg } from '../state/core';
 import { isRealAgent } from '../lib/agents';
+import { effortLabel } from '../lib/picker';
 
 const MIN_W = 320;
 const maxW = () => Math.round(window.innerWidth * 0.62);
@@ -78,7 +79,7 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
         <dl className="ctx">
           <dt>项目</dt><dd title={project?.path}>{project?.name ?? '—'}</dd>
           <dt>Agent</dt><dd>{agentName}</dd>
-          <dt>模型</dt><dd>{modelName ?? '默认'}{config.effort ? `，思考强度 ${config.effort}` : ''}</dd>
+          <dt>模型</dt><dd>{modelName ?? '默认'}{config.effort ? `，思考强度 ${effortLabel(config.effort)}` : ''}</dd>
           {profileName ? <><dt>账号</dt><dd>{profileName}</dd></> : null}
           {config.usage && config.usage.size > 0 ? (
             <><dt>上下文</dt><dd>已用 {Math.round((config.usage.used / config.usage.size) * 100)}%（{fmtTokens(config.usage.used)} / {fmtTokens(config.usage.size)}）

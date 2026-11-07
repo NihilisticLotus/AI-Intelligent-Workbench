@@ -8,6 +8,7 @@ import path from 'node:path';
 const STRIP_EXACT = new Set([
   'CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_EXECUTABLE', 'NO_BROWSER', 'SSH_CONNECTION', 'SSH_CLIENT', 'SSH_TTY',
   'CLAUDE_CODE_REMOTE', 'APP_SERVER_LOGS',
+  'DEFAULT_AUTH_REQUEST', 'MODEL_PROVIDER', 'AIC_PROVIDER_KEY',
   // Gateway 自己跑在 Claude Code / Claude 桌面端里时（开发预览）继承的宿主变量：可能让子进程沿用宿主的登录、
   // 把自己当成子会话。联调时排查登录状态发现这些变量会传进 Agent，预防性删掉。
   'CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_EFFORT', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_REFRESH_TOKEN', 'CLAUDE_CODE_OAUTH_SCOPES',

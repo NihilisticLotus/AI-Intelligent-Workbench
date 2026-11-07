@@ -5,7 +5,7 @@ import { createFlusher } from '../state/flush';
 import { buildTimeline } from '../state/core';
 import { authenticatedStartup } from '../api/credentials';
 import { attachmentLimit, clipboardFiles, screenshotName, visionWarning } from './attachments';
-import { effortLabel, pickerAction, pickerItems, pickerRows } from './picker';
+import { effortLabel, pickerAction, pickerItems, pickerRows, profileDefaults, profileInfo } from './picker';
 
 const agent = (over: Partial<AgentInfo> = {}): AgentInfo => ({
   kind:'fake', displayName:'演示 Agent', status:'ready', version:null, verified:true, message:null,
@@ -23,6 +23,17 @@ describe('事件调度',()=>{
   });
 });
 describe('选择器与附件',()=>{
+  it('新任务换自定义账号后只列该账号模型，清除旧模型和思考强度；旧服务端仍兼容',()=>{
+    const profiles=[{id:'local',isDefault:true,models:[{id:'native',name:'订阅模型',contextWindow:null}],efforts:['high']},
+      {id:'api',models:[{id:'glm',name:'GLM',contextWindow:null,vision:false}],efforts:null}] as ProfileSummary[];
+    const a=agent({profiles});const cfg={model:'native',effort:'high',models:profiles[0]!.models};
+    expect(pickerItems(a,'fake',cfg,'api','new').models.map((m)=>m.id)).toEqual(['glm']);
+    expect(pickerItems(a,'fake',cfg,'api','new').efforts).toBe(null);
+    expect(profileDefaults(a,'api','native','high')).toEqual({model:'glm',effort:''});
+    expect(profileInfo(a,'api')?.models[0]?.vision).toBe(false);
+    expect(pickerItems(agent(),'fake',{model:null,effort:null},null,'new').models).toHaveLength(2);
+    expect(pickerItems(a,'fake',cfg,'local','task').models.map((m)=>m.id)).toEqual(['native']);
+  });
   it('只列启用的和当前 Agent，显示会话模型与状态',()=>{
     const a=agent({enabled:false});const b=agent({kind:'codex',enabled:true,status:'needs_login'});const c=agent({kind:'claude',enabled:false});
     const rows=pickerRows([a,b,c],'fake',{model:'yes',effort:'enabled'});expect(rows.map((r)=>r.info.kind)).toEqual(['fake','codex']);expect(rows[0]!.meta).toBe('能看图 · 思考 自动 ✓');expect(rows[1]!.meta).toContain('登录');

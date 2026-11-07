@@ -10,6 +10,7 @@ import { usePref } from '../state/prefs';
 import { useStore } from '../state/store';
 import { clock, durationText, permInfo, toolVerb } from '../lib/format';
 import { modelSwitchKind, switchKindText, withDefaultActions } from '../lib/agents';
+import { effortLabel } from '../lib/picker';
 import { AgentBadge, ErrorNotice, actionNeedsIdle, toastErrorOf, useAgentName } from './ui';
 import { Icon } from './Icon';
 import { useNow } from './hooks';
@@ -80,7 +81,7 @@ function ConfigNote({ it, fallbackAgent }: { it: Extract<TimelineItem, { kind: '
   const kind = it.agent ?? fallbackAgent;
   const modelName = useApp((s) => s.agents.find((a) => a.kind === kind)?.models.find((m) => m.id === it.model)?.name) ?? it.model;
   const caps = useApp((s) => s.agents.find((a) => a.kind === kind)?.caps);
-  const parts = [modelName ? `模型 ${modelName}` : null, it.effort ? `思考强度 ${it.effort}` : null].filter(Boolean);
+  const parts = [modelName ? `模型 ${modelName}` : null, it.effort ? `思考强度 ${effortLabel(it.effort)}` : null].filter(Boolean);
   // 只换思考强度总是会话内完成；换模型按 Agent 的能力：会话内切换或恢复会话
   const how = it.model ? switchKindText[modelSwitchKind(caps)] : switchKindText.in_session;
   return <div className="sysnote" role="note"><span>已切换为{parts.join('，')}（{how.replace('（', '，').replace('）', '')}），从下一条消息生效</span></div>;

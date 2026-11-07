@@ -1,7 +1,7 @@
 // 账号配置（phase-1.md 6.4）。接口永远不返回密钥明文：只有 hasSecret 和结尾 4 位。
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
-import type { AgentKind, AgentProfile, CreateProfileBody, ModelInfo, PatchProfileBody, ProfileKind, ProfileSummary } from '@aic/protocol';
+import { ModelInfo, type AgentKind, type AgentProfile, type CreateProfileBody, type PatchProfileBody, type ProfileKind, type ProfileSummary } from '@aic/protocol';
 import type { AccountProfile, AgentAdapter } from '@aic/adapters';
 import type { Db } from './db';
 import type { SecretService } from './secrets';
@@ -222,6 +222,10 @@ function parseModels(json: string | null): ModelInfo[] {
   if (!json) return [];
   try {
     const v = JSON.parse(json) as unknown;
-    return Array.isArray(v) ? v.filter((m): m is ModelInfo => !!m && typeof m.id === 'string').map((m) => ({ id: m.id, name: m.name ?? m.id, contextWindow: m.contextWindow ?? null })) : [];
+    return Array.isArray(v) ? v.flatMap((m) => {
+      if (!m || typeof m.id !== 'string') return [];
+      const result = ModelInfo.safeParse({ ...m, name: m.name ?? m.id, contextWindow: m.contextWindow ?? null });
+      return result.success ? [result.data] : [];
+    }) : [];
   } catch { return []; }
 }

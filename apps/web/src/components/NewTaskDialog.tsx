@@ -12,6 +12,7 @@ import { Dialog, ErrorNotice, asApiError, confirmDialog } from './ui';
 import { Attachments, useAttachments, useAttachmentInput } from './Attachments';
 import { AgentPicker } from './AgentPicker';
 import { visionWarning } from '../lib/attachments';
+import { profileDefaults, profileInfo } from '../lib/picker';
 import { Icon } from './Icon';
 /** 默认选中的模型和思考强度（见 lib/agents.ts 的 taskDefaults：真实 Agent 优先用 Agent 设置里的默认值） */
 const defaultModel = (a: AgentInfo | undefined) => taskDefaults(a).model;
@@ -37,10 +38,11 @@ export function NewTaskDialog({ close, preset, onAddProject }: {
   const attachments=useAttachments(created), attachmentInput=useAttachmentInput(attachments.add);
   const firstAgent = usable.find((a) => a.kind === projects.find((p) => p.id === projectId)?.defaultAgent) ?? usable[0] ?? agents[0];
   const [agent, setAgent] = useState<AgentKind | ''>(preset.agent ?? firstAgent?.kind ?? '');
-  const info = agents.find((a) => a.kind === agent);
+  const baseInfo = agents.find((a) => a.kind === agent);
+  const [profileId, setProfileId] = useState<string>('');
+  const info = profileInfo(baseInfo, profileId || null);
   const [model, setModel] = useState<string>(preset.model??defaultModel(info));
   const [effort, setEffort] = useState<string>(defaultEffort(info));
-  const [profileId, setProfileId] = useState<string>('');
   const [perm, setPerm] = useState<PermissionLevel>('ask');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<ApiError | null>(null);
@@ -142,7 +144,7 @@ export function NewTaskDialog({ close, preset, onAddProject }: {
       </div>
       <div className="form-row"><span className="lbl">Agent · 模型 · 思考强度</span>
         <AgentPicker agents={agents} agent={agent||'fake'} config={{model:model||null,effort:effort||null}} profileId={profileId||info?.profiles?.find((p)=>p.isDefault)?.id||null} mode="new" disabled={busy||!!created}
-          onPick={(p)=>{if(p.agent!==agent)changeAgent(p.agent);if(p.model!==undefined)setModel(p.model);if(p.effort!==undefined)setEffort(p.effort);if(p.profileId)setProfileId(p.profileId);}}/>
+          onPick={(p)=>{if(p.agent!==agent)changeAgent(p.agent);if(p.model!==undefined)setModel(p.model);if(p.effort!==undefined)setEffort(p.effort);if(p.profileId){setProfileId(p.profileId);const next=profileDefaults(baseInfo,p.profileId,model,effort);setModel(next.model);setEffort(next.effort);}}}/>
       </div>
       {agent && !readiness.ready ? (
         <div className="alert attn" id="nt-a-why" style={{ margin: '0 0 var(--sp-3)' }}>

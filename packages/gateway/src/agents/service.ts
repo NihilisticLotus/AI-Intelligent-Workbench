@@ -218,7 +218,7 @@ export class AgentService {
     } catch { /* 忽略 */ }
   }
 
-  /** 模型列表：账号的缓存 → 默认账号的缓存 → 自定义地址手填的列表 → 适配器静态列表（演示 Agent） */
+  /** 模型列表按账号隔离；自定义地址明确填写的模型不能被 Agent 通用模型目录覆盖。 */
   catalog(kind: AgentKind, profileId: string | null): Catalog & { source: 'cache' | 'manual' | 'none' | 'session' } {
     const a = this.registry.get(kind);
     if (!a?.real) {
@@ -227,11 +227,12 @@ export class AgentService {
     }
     const def = this.profiles.defaultRow(kind);
     const pid = profileId ?? def.id;
-    const row = this.capsRow(kind, pid) ?? this.capsRow(kind, def.id);
+    const p = this.profiles.toApi(this.profiles.resolve(kind, pid));
+    if (p.kind === 'customEndpoint' && p.models.length) return { models: p.models, efforts: null, modes: [], source: 'manual' };
+    const row = this.capsRow(kind, pid);
     if (row?.catalog_json) {
       try { return { ...(JSON.parse(row.catalog_json) as Catalog), source: 'cache' }; } catch { /* 下面 */ }
     }
-    const p = this.profiles.toApi(this.profiles.resolve(kind, pid));
     if (p.models.length) return { models: p.models, efforts: null, modes: [], source: 'manual' };
     return { models: [], efforts: null, modes: [], source: 'none' };
   }
@@ -282,7 +283,13 @@ export class AgentService {
       defaultModel: this.settings(a.id).defaultModel ?? null,
       defaultEffort: this.settings(a.id).defaultEffort ?? null,
       ...(a.workspaceConfig ? { workspaceConfig: a.workspaceConfig } : {}),
-      ...(a.real ? { profiles: this.profiles.summary(a.id) } : {}),
+      ...(a.real ? { profiles: this.profiles.summary(a.id).map((p) => {
+        const catalog = this.catalog(a.id, p.id);
+        const row = this.capsRow(a.id, p.id);
+        let profileCaps: AgentInfo['caps'] | undefined;
+        try { if (row?.caps_json) profileCaps = JSON.parse(row.caps_json) as AgentInfo['caps']; } catch { /* 损坏的缓存不影响其他账号 */ }
+        return { ...p, models: catalog.models, efforts: catalog.efforts, modelsSource: catalog.source, ...(profileCaps ? { caps: profileCaps } : {}) };
+      }) } : {}),
       enabled: true,
       ...(d?.unsupported ? { unsupported: true } : {}),
     };

@@ -17,6 +17,7 @@ import { useStore } from '../state/store';
 import { ApiRequestError } from '../api/http';
 import { platform } from '../platform';
 import { clock } from '../lib/format';
+import { effortLabel } from '../lib/picker';
 import {
   LOGIN_TERMINAL, agentStatusView, capsSummary, emptyModelsText, engineSourceText, formatTestLog, isEnabled, isLocalLogin, isRealAgent,
   loginAnnounceText, loginMethods, loginStep, profileDesc, profileKindText, safeAuthUrl, taskDefaults, workspaceConfigNote,
@@ -592,12 +593,12 @@ function SettingsSection({ a }: { a: AgentInfo }) {
       {real && a.efforts?.length ? (
         <div className="field"><label htmlFor={'de-' + a.kind}>默认思考强度</label>
           <select id={'de-' + a.kind} className="select" value={def.effort} disabled={saving}
-            onChange={(e) => void save({ defaultEffort: e.target.value || null }, e.target.value ? `新任务默认思考强度：${e.target.value}` : '新任务默认用 Agent 自己的思考强度')}>
+            onChange={(e) => void save({ defaultEffort: e.target.value || null }, e.target.value ? `新任务默认思考强度：${effortLabel(e.target.value)}` : '新任务默认用 Agent 自己的思考强度')}>
             <option value="">Agent 默认</option>
-            {a.efforts.map((x) => <option key={x} value={x}>{x}</option>)}
+            {a.efforts.map((x) => <option key={x} value={x}>{effortLabel(x)}</option>)}
           </select></div>
       ) : (
-        <div className="field"><span className="lbl">思考强度</span><span>{a.efforts?.length ? a.efforts.join(' / ') : '由模型自己决定'}</span></div>
+        <div className="field"><span className="lbl">思考强度</span><span>{a.efforts?.length ? a.efforts.map(effortLabel).join(' / ') : '由模型自己决定'}</span></div>
       )}
       {ws ? <div className="field"><span className="lbl">工作区设置</span><span className={ws.warn ? 'note unverified' : undefined}>{ws.text}</span></div> : null}
       {real && a.concurrencyLimit !== undefined ? (

@@ -29,6 +29,6 @@
 | 目录 | 说明 |
 |---|---|
 | [acceptance/](acceptance/) | 每一步的验收记录 |
-| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 稳定、补验与输入框：实现与演示验收通过，真实补验待确认 |
+| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 稳定、补验与输入框：真实补验进行中，Codex / CodeBuddy 看图及切换、Codex API 已通过，其余见记录 |
 | [devlog/](devlog/) | 开发笔记，每月一个文件，只追加 |
 | [issues/](issues/README.md) | 问题收纳：总表 + 每个问题一个文件 |

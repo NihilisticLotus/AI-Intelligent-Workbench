@@ -131,6 +131,7 @@ export function ProfileDialog({ agent, kind, existing, close, loginMethods, onCr
           </div>
         ) : null}
         {kind !== 'subscription' ? <p className="form-note"><Icon name="shield" size={13} /> {SECRET_STORE_TEXT}。保存后只显示结尾 4 位，任何接口都不会再返回完整密钥。</p> : null}
+        {kind !== 'subscription' && agent.kind === 'codex' ? <p className="form-note">Codex 还会在这个账号的独立目录里保存自己的 API 登录凭据。删除账号会移除工作台保存的密钥，Agent 的历史与独立目录会保留。</p> : null}
         {kind === 'customEndpoint' ? (
           <div className="form-row top"><label htmlFor="pf-models">模型（可选）</label>
             <textarea id="pf-models" className="textarea mono" rows={3} value={d.models} spellCheck={false}

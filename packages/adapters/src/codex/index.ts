@@ -15,7 +15,7 @@ const NAME = 'Codex';
 const MODE_RANK: Record<string, number> = { 'read-only': 0, 'workspace-write': 1, agent: 2, 'agent-full-access': 3 };
 /** 官方地址（API Key 账号用） */
 const OPENAI_BASE = 'https://api.openai.com/v1';
-/** API Key 账号：provider 从这个环境变量读密钥，密钥不落盘 */
+/** API Key 账号：provider 从这个环境变量读密钥；ACP 登录另用独立目录 */
 export const CODEX_KEY_ENV = 'AIC_PROVIDER_KEY';
 
 export const CODEX_AUTH_METHODS: AuthMethodInfo[] = [
@@ -101,7 +101,7 @@ export function createCodexAdapter(rt: AcpRuntime): AgentAdapter {
         if (profile.configDir === 'isolated' && home) env.CODEX_HOME = home;
         return env;
       }
-      // API Key / 自定义地址：独立的 CODEX_HOME + 会话级 provider，密钥经环境变量传入（6.4.2，待实测）
+      // codex-acp 2.5.0 在应用会话 provider 前检查登录；按 6.4.2 的后备方案在独立目录认证。
       if (home) env.CODEX_HOME = home;
       const provider: Record<string, unknown> = {
         name: 'AI Console', base_url: kind === 'apiKey' ? OPENAI_BASE : profile.baseUrl ?? OPENAI_BASE,
@@ -111,7 +111,12 @@ export function createCodexAdapter(rt: AcpRuntime): AgentAdapter {
       const first = profile.models?.[0]?.id;
       if (kind === 'customEndpoint' && first) cfg.model = first;
       env.CODEX_CONFIG = JSON.stringify(cfg);
-      if (secret) env[CODEX_KEY_ENV] = secret;
+      if (secret) {
+        env[CODEX_KEY_ENV] = secret;
+        env.CODEX_API_KEY = secret;
+        // 不把密钥放进 DEFAULT_AUTH_REQUEST：上游会把这个对象写入启动日志。
+        env.DEFAULT_AUTH_REQUEST = JSON.stringify({ methodId: 'api-key' });
+      }
       return env;
     },
 

@@ -3,6 +3,18 @@ import { visionOf, type AgentInfo, type AgentKind } from '@aic/protocol';
 import { agentStatusText, isEnabled, pickEfforts, pickModels, profileSwitchKind } from './agents';
 import type { SessionCfg } from '../state/core';
 export const effortLabel = (value: string) => value === 'enabled' ? '自动' : value;
+export function profileInfo(info: AgentInfo | undefined, profileId: string | null): AgentInfo | undefined {
+  if (!info) return info;
+  const profile = info.profiles?.find((p) => p.id === profileId) ?? info.profiles?.find((p) => p.isDefault);
+  return profile ? { ...info, ...(profile.models !== undefined ? { models: profile.models } : {}),
+    ...(profile.efforts !== undefined ? { efforts: profile.efforts } : {}), ...(profile.caps ? { caps: profile.caps } : {}),
+    ...(profile.modelsSource ? { modelsSource: profile.modelsSource } : {}) } : info;
+}
+export function profileDefaults(info: AgentInfo | undefined, profileId: string, model: string, effort: string) {
+  const next = profileInfo(info, profileId);
+  return { model: next?.models.some((m) => m.id === model) ? model : next?.models[0]?.id ?? '',
+    effort: next?.efforts?.includes(effort) ? effort : '' };
+}
 export function pickerRows(agents: AgentInfo[], current: AgentKind, cfg: SessionCfg) {
   return agents.filter((a) => isEnabled(a) || a.kind === current).map((a) => ({ info: a,
     meta: a.kind === current ? `${pickModels(a,cfg).find((m)=>m.id===cfg.model)?.name ?? cfg.model ?? 'Agent 默认模型'}${pickEfforts(a,cfg) && cfg.effort ? ' · 思考 '+effortLabel(cfg.effort) : ''} ✓`
@@ -10,7 +22,8 @@ export function pickerRows(agents: AgentInfo[], current: AgentKind, cfg: Session
   }));
 }
 export function pickerItems(info: AgentInfo, current: AgentKind, cfg: SessionCfg, profileId: string | null, mode: 'task' | 'new') {
-  const session = info.kind === current ? cfg : undefined;
+  info = profileInfo(info, info.kind === current ? profileId : null)!;
+  const session = info.kind === current && mode === 'task' ? cfg : undefined;
   const models = pickModels(info,session).map((m) => ({ ...m, cannotSee: visionOf({...info,models:pickModels(info,session)},m.id) === false,
     failure: info.modelFailures?.find((f)=>f.model===m.id && f.profileId===(profileId ?? info.profiles?.find((p)=>p.isDefault)?.id ?? null))?.reason ?? null,
   }));

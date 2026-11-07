@@ -2,7 +2,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from 'react';
 import type { AgentInfo, AgentKind } from '@aic/protocol';
 import type { SessionCfg } from '../state/core';
-import { effortLabel, pickerAction, pickerItems, pickerRows } from '../lib/picker';
+import { effortLabel, pickerAction, pickerItems, pickerRows, profileInfo } from '../lib/picker';
 import { AgentBadge, choiceDialog } from './ui';
 import { openNewTask } from './dialogs';
 import { Icon } from './Icon';
@@ -15,7 +15,8 @@ export function AgentPicker({ agents, agent, config, profileId, mode, disabled, 
   const [position,setPosition]=useState({left:8,top:8,subLeft:8,subTop:8});
   const anchor=useRef<HTMLButtonElement>(null), root=useRef<HTMLDivElement>(null), submenu=useRef<HTMLDivElement>(null);
   const [pendingEffort,setPendingEffort]=useState<Record<string,string>>({});
-  const rows=pickerRows(agents,agent,config), info=agents.find((a)=>a.kind===sub), current=agents.find((a)=>a.kind===agent);
+  const current=profileInfo(agents.find((a)=>a.kind===agent),profileId);
+  const rows=pickerRows(agents.map((a)=>a.kind===agent&&current?current:a),agent,config), info=agents.find((a)=>a.kind===sub);
   const items=info?pickerItems(info,agent,config,profileId,mode):null;
   const curProfile=current?.profiles?.find((p)=>p.id===profileId)??current?.profiles?.find((p)=>p.isDefault);
   const close=()=>{setOpen(false);anchor.current?.focus();};

@@ -1,8 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { AttachmentInfo, ClientOp, CreateTaskBody, EventEnvelope, ModelInfo, visionOf, type AgentInfo } from './index';
+import { AttachmentInfo, ClientOp, CreateTaskBody, EventEnvelope, ModelInfo, ProfileSummary, visionOf, type AgentInfo } from './index';
 const base = { seq: 1, ts: 1, taskId: 't', sessionId: null };
 const att = { id: 'att_1', name: '截图.png', mime: 'image/png', size: 10, kind: 'image', width: 1, height: 1, createdAt: 1 };
 describe('1.3 协议兼容', () => {
+  it('账号目录字段可选，旧账号兼容，新目录校验模型能力与思考强度',()=>{
+    const p={id:'p',name:'账号',kind:'subscription',isDefault:true,loggedIn:true};
+    expect(ProfileSummary.parse(p)).toEqual(p);
+    expect(ProfileSummary.safeParse({...p,models:[{id:'glm',name:'GLM',contextWindow:null,vision:false}],efforts:null,modelsSource:'manual'}).success).toBe(true);
+    expect(ProfileSummary.safeParse({...p,models:[{id:'glm',name:'GLM',contextWindow:null,vision:'false'}]}).success).toBe(false);
+  });
   it.each([{ text: '文字' }, { text: '', attachments: ['att_1'] }, { text: '文字', attachments: ['att_1'] }])('接受文字或附件 %j', (data) => {
     expect(ClientOp.safeParse({ id: 'c', op: 'prompt', data: { taskId: 't', ...data } }).success).toBe(true);
   });

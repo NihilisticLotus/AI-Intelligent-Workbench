@@ -38,6 +38,8 @@ function runPs(op: 'Protect' | 'Unprotect', entropy: Buffer, data: Buffer): Prom
       if (!out) return reject(new Error('DPAPI 没有返回结果'));
       resolve(Buffer.from(out, 'base64'));
     });
+    // PowerShell 提前退出时写 stdin 会 EPIPE；没有监听会让整个 Gateway 退出（ISSUE-0052）。结果由上面的回调处理。
+    child.stdin?.on('error', () => {});
     child.stdin?.end(`${entropy.toString('base64')}\n${data.toString('base64')}\n`);
   });
 }

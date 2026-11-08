@@ -8,7 +8,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
 import type { PermissionLevel } from '@aic/protocol';
-import { buildNativeEnv, killTree, runCli } from '../acp/launch';
+import { buildNativeEnv, guardStdio, killTree, runCli } from '../acp/launch';
 import { agentErrors } from '../acp/errors';
 import type { AgentAdapter, DetectResult, LogFn, ProbeResult, ProbeStep } from '../types';
 import { isVerified } from '../verified';
@@ -42,6 +42,7 @@ export function pingAppServer(js: string, timeoutMs = 15_000): Promise<{ ok: boo
       resolve(r);
     };
     const child = spawn(process.execPath, [js, 'app-server'], { cwd, env: buildNativeEnv(), stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true });
+    guardStdio(child);
     let buf = '';
     child.stdout.on('data', (d: Buffer) => {
       buf += d.toString('utf8');

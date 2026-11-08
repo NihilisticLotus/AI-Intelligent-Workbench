@@ -115,7 +115,10 @@ export class AcpConnection {
         done(null, null);
       });
     });
+    // 三条管道的 error 由 spawnAgent 统一兜底（ISSUE-0052）；这里再记一条日志便于排查，不影响收尾
     this.child.stdin.on('error', () => { /* 进程退出后写入会 EPIPE，忽略 */ });
+    this.child.stdout.on('error', (e) => opts.log('warn', `${this.prefix} stdout 管道出错：${redact(e.message, this.secrets)}`));
+    this.child.stderr.on('error', (e) => opts.log('warn', `${this.prefix} stderr 管道出错：${redact(e.message, this.secrets)}`));
     this.readStderr();
     this.conn = this.connect();
   }

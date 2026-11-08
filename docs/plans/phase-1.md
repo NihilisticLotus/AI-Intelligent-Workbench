@@ -708,6 +708,7 @@ ErrorCode 增加：`agent.auth_required`、`agent.quota_exceeded`、`agent.crash
    - “一键重启”：浏览器页面没法拉起本机进程（接口规则 7：不绕过接口），所以本步只做提示和自动恢复；真正的一键重启放在桌面软件（Tauri 托盘）里，`Platform` 增加可选方法 `restartGateway?(): Promise<boolean>`，浏览器版不提供，界面有这个方法时才显示 [重新启动] 按钮。
 4. 测试：Gateway 测试里起一个 Gateway、停掉，检查 `gateway.log` 有退出记录；再起一个，`/hello` 的 `lastExit.clean` 为 true。人为写入一条没有退出记录的日志后启动，`clean` 为 false。网页：`ws.ts` 的状态机测试（已有 `api/ws.test.ts`），连续失败 + 探测失败进入 `down`，探测成功回到 `connecting`。
 5. 真实复测：开发预览里停止 Gateway，网页 3 秒内显示“工作台服务已停止”；重新启动后自动恢复，对话完整。
+6. 子进程管道兜底（2026-11-09，ISSUE-0052）：所有用 `stdio: 'pipe'` 启动的子进程，三条管道都要挂 `error` 监听（`launch.ts` 的 `guardStdio`，`spawnAgent` 自动调用）。子进程被外部结束时写 stdin 会 EPIPE，没有监听会变成未捕获异常、整个 Gateway 退出。新增子进程时同样处理；只修已复现的机制，不据此宣称 ISSUE-0015 的原始根因已查明。
 
 ### 9.5 C：回合长时间没有事件（ISSUE-0022）
 

@@ -79,6 +79,8 @@ export class IndependentCommandExecutor {
     if (options.signal?.aborted) abort();
     const timer = setTimeout(() => stop('timed_out'), spec.timeoutMs);
     child.stdin.on('error', () => { /* 宿主提前退出时管道可能关闭；以 close 事件收尾。 */ });
+    // stdout / stderr 管道出错同样不能变成未捕获异常（ISSUE-0052）；以 close 事件收尾。
+    child.stdout.on('error', () => {}); child.stderr.on('error', () => {});
     const capture = (target: 'stdout' | 'stderr', chunk: Buffer) => {
       if (settled) return;
       observed += chunk.length;

@@ -66,11 +66,24 @@ export function assertLaunchable(spec: LaunchSpec) {
   if (spec.entry && !existsSync(spec.entry)) throw new Error(`找不到 Agent 入口文件：${spec.entry}`);
 }
 
+/**
+ * 给子进程三条管道都挂上 error 监听。子进程被外部结束（更新程序替换、任务管理器、taskkill）时，
+ * 父进程正在写的 stdin 会触发 EPIPE；没有监听的流错误会变成未捕获异常，整个 Gateway 随之退出
+ * （2026-11-09 本机复现，ISSUE-0052）。进程本身的结束由 exit / close 事件处理，这里只吞掉管道错误。
+ */
+export function guardStdio(child: { stdin?: NodeJS.EventEmitter | null; stdout?: NodeJS.EventEmitter | null; stderr?: NodeJS.EventEmitter | null }, onError?: (stream: 'stdin' | 'stdout' | 'stderr', e: Error) => void) {
+  for (const name of ['stdin', 'stdout', 'stderr'] as const) {
+    child[name]?.on('error', (e: Error) => { try { onError?.(name, e); } catch { /* 记录失败不影响收尾 */ } });
+  }
+}
+
 export function spawnAgent(spec: LaunchSpec, opts: { cwd: string; env: Record<string, string> }): ChildProcessWithoutNullStreams {
   assertLaunchable(spec);
   const cmd = spec.command ?? process.execPath;
   const args = spec.entry ? [spec.entry, ...spec.args] : spec.args;
-  return spawn(cmd, args, { shell: false, windowsHide: true, stdio: 'pipe', cwd: opts.cwd, env: opts.env });
+  const child = spawn(cmd, args, { shell: false, windowsHide: true, stdio: 'pipe', cwd: opts.cwd, env: opts.env });
+  guardStdio(child);
+  return child;
 }
 
 /** 进程是否还在 */

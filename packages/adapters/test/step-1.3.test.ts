@@ -98,3 +98,43 @@ describe('1.3 适配器', () => {
     expect(host.of('message').map((m) => m.text).join('')).toBe('收到 1 张图片：图.png、12 × 34');
   });
 });
+
+// ISSUE-0052：子进程被外部结束时，父进程还在写 stdin 会 EPIPE。没有监听时 Node 把流错误当未捕获异常，整个 Gateway 退出。
+describe('子进程管道错误不会让宿主退出', () => {
+  // 用独立 Node 进程模拟 Gateway：子进程被结束后持续写入 stdin；未处理的错误会让它非零退出
+  const script = (guard: string) => `
+    const { spawn, execFileSync } = require('node:child_process');
+    const child = spawn(process.execPath, ['-e', 'setTimeout(()=>{},60000)'], { stdio: 'pipe', windowsHide: true });
+    ${guard}
+    child.stdout.on('data', () => {}); child.stderr.on('data', () => {});
+    setTimeout(() => { if (process.platform === 'win32') execFileSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], { stdio: 'ignore' }); else child.kill('SIGKILL'); }, 200);
+    let n = 0; const w = () => { if (n++ > 120) { console.log('ALIVE'); process.exit(0); } child.stdin.write('y'.repeat(65536), () => {}); setTimeout(w, 5); }; w();
+  `;
+  const run = async (guard: string) => {
+    const { spawn } = await import('node:child_process');
+    return new Promise<{ code: number | null; out: string }>((resolve) => {
+      const p = spawn(process.execPath, ['-e', script(guard)], { stdio: 'pipe', windowsHide: true });
+      let out = ''; p.stdout.on('data', (d: Buffer) => { out += d; }); p.stderr.on('data', (d: Buffer) => { out += d; });
+      p.on('close', (code) => resolve({ code, out }));
+    });
+  };
+  it('对照：没有监听时持续写入已结束的子进程，宿主因 EPIPE 退出', async () => {
+    const r = await run('');
+    expect(r.code).not.toBe(0); expect(r.out).toContain('EPIPE');
+  }, 30_000);
+  it('与 guardStdio 相同的监听下，宿主保持运行', async () => {
+    const r = await run("for (const s of ['stdin','stdout','stderr']) child[s].on('error', () => {});");
+    expect(r.code).toBe(0); expect(r.out).toContain('ALIVE');
+  }, 30_000);
+  it('spawnAgent 返回的子进程三条管道都已有 error 监听；guardStdio 把错误交给回调', async () => {
+    const { spawnAgent, guardStdio } = await import('../src/acp/launch');
+    const child = spawnAgent({ args: ['-e', 'process.exit(0)'] }, { cwd: process.cwd(), env: { ...process.env } as Record<string, string> });
+    for (const s of ['stdin', 'stdout', 'stderr'] as const) expect(child[s].listenerCount('error')).toBeGreaterThan(0);
+    await new Promise((r) => child.on('close', r));
+    const { EventEmitter } = await import('node:events'); const seen: string[] = [];
+    const fake = { stdin: new EventEmitter(), stdout: new EventEmitter(), stderr: new EventEmitter() };
+    guardStdio(fake, (name, e) => seen.push(`${name}:${e.message}`));
+    fake.stdin.emit('error', new Error('write EPIPE'));
+    expect(seen).toEqual(['stdin:write EPIPE']);
+  });
+});

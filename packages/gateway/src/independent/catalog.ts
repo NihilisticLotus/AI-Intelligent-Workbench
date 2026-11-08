@@ -222,6 +222,9 @@ export class IndependentCatalog {
       if (!old || old.service_id !== expected.serviceId || old.model_id !== expected.modelId || old.config_revision !== expected.configRevision
         || old.model_revision !== expected.modelRevision || old.created_at !== expected.createdAt || expected.taskId !== taskId) throw Errors.conflict('任务绑定已变化，请重新核对');
       const { service, model } = this.usable(selection);
+      // 仅调整任务控制值时保持同一绑定，不能仅因保存时间变化使私有续传失效。
+      if (old.service_id === service.id && old.model_id === model.id && old.config_revision === service.configRevision
+        && old.model_revision === model.revision) return this.bound(taskId);
       this.db.run('UPDATE independent_task_models SET service_id=?,model_id=?,config_revision=?,model_revision=?,created_at=? WHERE task_id=?',
         service.id, model.id, service.configRevision, model.revision, now(), taskId);
       return this.bound(taskId);

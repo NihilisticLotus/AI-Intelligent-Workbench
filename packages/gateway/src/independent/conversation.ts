@@ -107,7 +107,7 @@ export class IndependentConversationStore {
         if (message.role !== 'assistant' || !message.continuation) return message;
         const old = this.get(e.turnId).binding;
         if (old.serviceId === turn.binding.serviceId && old.modelId === turn.binding.modelId && old.configRevision === turn.binding.configRevision
-          && old.modelRevision === turn.binding.modelRevision) return message;
+            && old.modelRevision === turn.binding.modelRevision && old.createdAt === turn.binding.createdAt) return message;
         const { continuation: _private, ...portable } = message; return portable;
       }) };
   }

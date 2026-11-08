@@ -32,6 +32,17 @@ afterEach(async () => {
 });
 
 describe('独立服务与模型目录', () => {
+  it('同配置重新绑定保留完整身份，修订变化仍建立新绑定并拒绝旧快照', async () => {
+    const { catalog, db } = setup(); seed(db);
+    const service = await catalog.createService(config()); const model = catalog.createModel(service.id, { remoteModelId: 'fixture', name: '模型' });
+    const selection = { serviceId: service.id, modelId: model.id }, before = catalog.bind('task', selection);
+    vi.spyOn(Date, 'now').mockReturnValue(before.createdAt + 100);
+    expect(catalog.rebind('task', selection, before)).toEqual(before);
+    const revised = catalog.patchModel(service.id, model.id, { expectedRevision: model.revision, name: '新显示名' });
+    const after = catalog.rebind('task', selection, before);
+    expect(after).toMatchObject({ ...selection, modelRevision: revised.revision, createdAt: before.createdAt + 100 });
+    expect(() => catalog.rebind('task', selection, before)).toThrow('绑定已变化');
+  });
   it('v7 增量升级只加发现缓存，不丢服务、模型或人工来源', async () => {
     const {catalog,db,file}=setup();const s=await catalog.createService(config());const m=catalog.createModel(s.id,{remoteModelId:'m',name:'保留模型'});
     catalog.overrides(s.id,m.id,{expectedRevision:m.revision,values:{imageInput:false}});

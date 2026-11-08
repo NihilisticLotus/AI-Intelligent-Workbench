@@ -39,6 +39,16 @@ afterEach(async () => {
 });
 
 describe('完整独立会话与循环', () => {
+  it.each([false, true])('完整绑定时间变化 %s 时按实际身份决定私有续传，原始记录不变', (changed) => {
+    const { store, create } = setup(); const first = create(), owner = store.acquire(first.id);
+    store.claimModel(first.id, owner); store.assistant(first.id, owner, { ...finalReply, continuation: '合成私有续传' }); store.finish(first.id, owner, 'completed');
+    const original = store.entries('session');
+    const next = store.create({ ...binding, createdAt: binding.createdAt + (changed ? 1 : 0) }, 'session', user, limits);
+    const reply = store.context(next.id).messages.find((m) => m.role === 'assistant');
+    expect(reply).toMatchObject({ text: finalReply.text });
+    if (changed) expect(reply).not.toHaveProperty('continuation'); else expect(reply).toHaveProperty('continuation', '合成私有续传');
+    expect(store.entries('session').slice(0, original.length)).toEqual(original);
+  });
   it('换模型必须核对旧绑定与历史尾摘要，原始续传保留但不交给新模型', () => {
     const { store, create } = setup(); const first = create(), owner = store.acquire(first.id);
     store.claimModel(first.id, owner); store.assistant(first.id, owner, { ...finalReply, continuation: '旧模型专用续传资料' }); store.finish(first.id, owner, 'completed');

@@ -45,6 +45,18 @@ async function setup(respond: (n: number, body: any) => unknown = () => done('�
 }
 
 describe('正式独立任务的离线接口与闭环', () => {
+  it('同模型补预算保留绑定与私有续传，下一回合实际 HTTP 成功且账本不重置', async () => {
+    const f = await setup(() => ({ choices: [{ index: 0, message: { role: 'assistant', content: '已完成', reasoning_content: '合成思考资料' }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 2 } }));
+    await f.s.tasks.prompt(f.task.id, '第一轮'); await f.wait();
+    const before = f.state(); const sessionId = before.lastTurn!.sessionId; const original = f.s.independentRuntime.store.entries(sessionId);
+    expect(original.some((e) => e.message.role === 'assistant' && e.message.continuation)).toBe(true);
+    await f.s.tasks.updateIndependent(f.task.id, 'configure', { ...before.options, requestBudget: { ...before.options.requestBudget, maxRequests: 11 } }, before.revision);
+    expect(f.state().binding).toEqual(before.binding); expect(f.state().budget.attemptedRequests).toBe(1);
+    await f.s.tasks.prompt(f.task.id, '继续'); await f.wait();
+    expect(f.count()).toBe(2); expect(f.state().requests.map((r) => r.status)).toEqual(['succeeded', 'succeeded']);
+    expect(f.bodies[1].messages.find((m: any) => m.role === 'assistant').reasoning_content).toBe('合成思考资料');
+    expect(f.s.independentRuntime.store.entries(sessionId).slice(0, original.length)).toEqual(original);
+  }, 60_000);
   it('新任务缺省持久化分开工具；历史无版本配置保持合并，旧客户端更新不降级新版本', async () => {
     const f = await setup(); const { fileToolVersion: _version, ...oldOptions } = f.options;
     const fresh = await gateway!.api('POST', '/tasks', { token: f.token, body: { projectId: f.task.projectId, prompt: '新任务', agent: 'independent', permission: 'ask', deferPrompt: true, independent: oldOptions } });

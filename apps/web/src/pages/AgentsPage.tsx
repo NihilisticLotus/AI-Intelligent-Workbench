@@ -8,7 +8,7 @@ import {
   type AgentInfo, type AgentKind, type AgentProfile, type AgentTestResult, type ApiError, type AuthMethod,
 } from '@aic/protocol';
 import {
-  cancelLogin, deleteProfile, loadProfiles, patchAgent, patchProfile, redetectAgents, refreshProfileModels, sendLoginCode,
+  cancelLogin, clearRetiredProfileSecret, deleteProfile, loadProfiles, patchAgent, patchProfile, redetectAgents, refreshProfileModels, sendLoginCode,
   startLogin, testAgent, useApp,
 } from '../state/app';
 import type { LoginInfo } from '../state/core';
@@ -305,13 +305,22 @@ function AgentDetail({ a, focusProfileId, my, onLogin, onRedetect, redetecting, 
   );
 }
 
-/** 第三方认证只读；旧测试配置不提供编辑、测试或删除，避免历史任务换用其他认证。 */
+/** 第三方认证只读；旧测试配置仅可清理工作台密钥，历史绑定继续保留。 */
 function NativeConfigSection({ a, onRedetect, redetecting }: { a: AgentInfo; onRedetect: () => void; redetecting: boolean }) {
   const list = useApp((s) => s.profiles[a.kind]);
   const [err, setErr] = useState<ApiError | null>(null);
+  const [clearing, setClearing] = useState<string | null>(null);
   const load = () => { setErr(null); loadProfiles(a.kind).catch((e) => setErr(asApiError(e))); };
   useEffect(load, [a.kind]); // eslint-disable-line react-hooks/exhaustive-deps
   const retired = list?.filter((p) => p.retired) ?? [];
+  const clearSecret = async (p: AgentProfile) => {
+    if (!await confirmDialog({ title: '清理工作台保存的旧密钥？', ok: '清理密钥', danger: true,
+      body: <p>仅删除“{p.name}”在工作台中保存的加密密钥，此操作无法撤销。保留历史任务和停用配置，旧任务仍不能恢复；不会读取或清理 Agent 自己的目录、登录和设置。</p> })) return;
+    setClearing(p.id); setErr(null);
+    try { await clearRetiredProfileSecret(p.id); toast('工作台密钥已清理，历史记录已保留'); }
+    catch (e) { setErr(asApiError(e)); }
+    finally { setClearing(null); }
+  };
   return <>
     <h3>软件自身配置</h3>
     <p className="muted-note">API、登录和模型由 {a.displayName} 自己管理，工作台沿用这些设置。完成配置后，回到这里重新检测。</p>
@@ -321,9 +330,10 @@ function NativeConfigSection({ a, onRedetect, redetecting }: { a: AgentInfo; onR
     {!list && !err ? <p className="muted-note" role="status">正在读取旧测试配置状态…</p> : null}
     {retired.length ? <>
       <h3>已停用的工作台测试配置</h3>
-      <p className="muted-note">这些配置来自旧版工作台，已停止使用。原有加密密钥和历史记录暂时保留，清理功能尚未开放。</p>
+      <p className="muted-note">这些配置来自旧版工作台，已停止使用。可单独清理工作台保存的密钥；配置身份、历史任务和目录保留，旧任务不会改用本机登录。此操作不清理 Agent 自己的凭据。</p>
       {retired.map((p) => <div className="acct" key={p.id}>
         <Icon name="key" /><div className="info"><b>{p.name}<span className="tag attn">已停用</span></b><span>{profileKindText[p.kind]} · {p.hasSecret ? '加密密钥已保留，不再使用' : '历史配置已保留'}</span></div>
+        {p.hasSecret ? <button type="button" className="btn sm" aria-label={`清理 ${p.name} 的工作台密钥`} disabled={!!clearing} aria-busy={clearing === p.id} onClick={() => void clearSecret(p)}>清理工作台密钥</button> : null}
       </div>)}
     </> : null}
     <p className="muted-note">AI Console 自有 API 服务归本页上方的独立 Agent 管理，可在新建任务中选择独立 Agent。</p>

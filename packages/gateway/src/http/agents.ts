@@ -70,6 +70,11 @@ export function agentRoutes(s: Services) {
 
   r.get('/profiles/:id', (c) => c.json(s.profiles.get(c.req.param('id'))));
 
+  r.delete('/profiles/:id/secret', (c) => {
+    const p = s.profiles.clearRetiredSecret(c.req.param('id'), (id) => s.tasks.profileInUse(id), c.get('device').id);
+    return c.json(p);
+  });
+
   r.patch('/profiles/:id', async (c) => {
     const id = c.req.param('id');
     const before = s.profiles.row(id);

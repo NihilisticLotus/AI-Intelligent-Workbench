@@ -1536,6 +1536,17 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
   });
 
   // 第三方认证由软件自己管理，工作台不提供添加账号或代登录。
+  const clearRetiredSecret = $('[data-retired-secret-clear]');
+  wire(clearRetiredSecret)?.addEventListener('click', () => modal({
+    title: '清理工作台保存的旧密钥？',
+    onOpen: (d) => $('.dlg-foot button', d).focus(),
+    body: '<p>仅删除该配置在工作台中保存的加密密钥，此操作无法撤销。保留历史任务和停用配置，旧任务仍不能恢复；不会读取或清理 Agent 自己的目录、登录和设置。</p><p class="muted">原型仅演示状态，不保存或删除真实密钥；刷新恢复示例。</p>',
+    actions: [{ label: '取消' }, { label: '清理密钥', kind: 'danger', onClick: () => {
+      $('[data-retired-secret-state]').textContent = '旧测试配置（虚构示例） · 历史配置已保留';
+      clearRetiredSecret.hidden = true;
+      toast('原型：工作台密钥已清理，历史记录已保留', 'demo');
+    } }],
+  }));
   // 再测一次
   const retest = $$('.detail h3 .btn').find((b) => b.textContent.includes('再测'));
   wire(retest)?.addEventListener('click', () => runTest($('.agent-card[aria-current="true"]').dataset.agent));

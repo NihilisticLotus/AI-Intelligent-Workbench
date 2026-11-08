@@ -398,6 +398,11 @@ export async function refreshProfileModels(id: string) {
   putProfile(p);
   return p;
 }
+export async function clearRetiredProfileSecret(id: string) {
+  const p = await api.clearRetiredProfileSecret(id);
+  putProfile(p);
+  return p;
+}
 export const startLogin = (kind: AgentKind, body: AgentLoginBody) => api.startLogin(kind, body);
 export const cancelLogin = (kind: AgentKind, loginId: string) => api.cancelLogin(kind, loginId);
 export const sendLoginCode = (kind: AgentKind, loginId: string, code: string) => api.sendLoginCode(kind, loginId, code);

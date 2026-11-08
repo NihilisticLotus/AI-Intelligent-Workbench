@@ -112,6 +112,27 @@ export class ProfileService {
 
   get(id: string): AgentProfile { return this.toApi(this.row(id)); }
 
+  /** 只清理已停用配置的工作台密钥；保留身份与历史绑定，不接触 Agent 目录。 */
+  clearRetiredSecret(id: string, inUse: (id: string) => boolean, deviceId: string | null): AgentProfile {
+    this.db.tx(() => {
+      const r = this.row(id);
+      if (!this.o.adapter(r.agent)?.usesNativeConfig || r.id === localProfileId(r.agent)) {
+        throw Errors.badRequest('只能清理已停用的工作台测试配置密钥');
+      }
+      if (inUse(id)) throw Errors.profileInUse('这个配置还有正在运行的会话', '请先停止相关任务');
+      if (!r.secret_id) return;
+      // 不能因异常共享引用而删除其他配置仍在使用的密钥。
+      if (this.db.get('SELECT id FROM agent_profiles WHERE secret_id = ? AND id <> ?', r.secret_id, id)
+        || this.db.get('SELECT id FROM independent_services WHERE secret_id = ?', r.secret_id)) {
+        throw Errors.badRequest('密钥仍被其他配置引用，请先核对配置归属');
+      }
+      this.secrets.delete(r.secret_id);
+      this.db.run('UPDATE agent_profiles SET secret_id = NULL, updated_at = ? WHERE id = ?', now(), id);
+      this.o.audit(deviceId, 'profile.secret.clear', id);
+    });
+    return this.get(id);
+  }
+
   /** 账号专属目录：.aic-data/profiles/<id>/ */
   dirOf(id: string) { return path.join(this.o.dataDir, 'profiles', id); }
 

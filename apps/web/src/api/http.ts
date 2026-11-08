@@ -281,6 +281,7 @@ export class HttpClient {
   patchProfile(id: string, body: PatchProfileBody) { return this.request('PATCH', `/profiles/${encodeURIComponent(id)}`, { body, parse: oneOf(AgentProfile) }); }
   /** keptDir：账号的独立配置目录（登录信息）保留在磁盘上，界面据此提示 */
   deleteProfile(id: string) { return this.request('DELETE', `/profiles/${encodeURIComponent(id)}`, { parse: DeleteProfileResult }); }
+  clearRetiredProfileSecret(id: string) { return this.request('DELETE', `/profiles/${encodeURIComponent(id)}/secret`, { parse: oneOf(AgentProfile) }); }
   refreshProfileModels(id: string) { return this.request('POST', `/profiles/${encodeURIComponent(id)}/models/refresh`, { body: {}, parse: oneOf(AgentProfile) }); }
   pendingApprovals() { return this.request('GET', '/approvals', { query: { status: 'pending' }, parse: listOf(Approval) }).then((r) => r.items); }
   independentTask(id: string) { return this.request('GET', `/tasks/${encodeURIComponent(id)}/independent`, { parse: IndependentTaskState }); }

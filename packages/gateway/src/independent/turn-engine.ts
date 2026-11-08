@@ -88,7 +88,13 @@ export class IndependentTurnEngine {
       try {
         reply = IndependentAssistantMessage.parse(await abortable(this.model.complete({ binding: turn.binding, ...context,
           maxOutputTokens: turn.limits.maxOutputTokens - turn.outputTokens! }, signal), signal));
-      } catch { return finish(signal.aborted ? stopped() : 'model_error'); }
+      } catch {
+        // 正式传输可等待实际连接收尾，不能在 abortable 先返回时释放会话运行资格。
+        await this.model.waitForIdle?.(turn.binding);
+        if (signal.aborted) return finish(stopped());
+        try { await this.model.checkBinding(turn.binding); } catch { return finish('configuration_changed'); }
+        return finish('model_error');
+      }
       if (isStopped()) return finish(stopped());
       // DB 错误必须向宿主传播；不能被网络异常处理吞掉后标为成功。
       turn = this.store.assistant(id, owner, reply);

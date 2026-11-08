@@ -1,7 +1,7 @@
 # 第一阶段开发计划：本机浏览器版
 
 > 2026-11-06 · 依据 `docs/design/design.md` v0.4、`docs/design/ui-design.md`、`docs/prototype/`
-> 2026-11-08 用户澄清认证归属：第三方 Agent 沿用自身配置；AI Console 独立 Agent 使用工作台自定义 API 与模型。最新规则见 9.15～9.21，覆盖第 6 节及 9.11 中代登录、API 账号替换的旧要求；设计已同步为 v0.4.11。第三方边界整改已提交 0abbda6，命令基础、多服务模型、配置网页、发现导入、内部持久循环及项目文本工具已分段实现；正式独立运行时接入、完整真实补验与旧配置清理仍未完成（ISSUE-0029、0028）。
+> 2026-11-08 用户澄清认证归属：第三方 Agent 沿用自身配置；AI Console 独立 Agent 使用工作台自定义 API 与模型。最新规则见 9.15～9.22，覆盖第 6 节及 9.11 中代登录、API 账号替换的旧要求；设计已同步为 v0.4.12。第三方边界整改已提交 0abbda6，命令基础、多服务模型、配置网页、发现导入、内部持久循环、项目文本工具及三协议传输已分段实现；正式独立运行时接入、完整真实补验与旧配置清理仍未完成（ISSUE-0029、0028）。
 > 2026-11-08 重新规划（用户要求：原型和设计改动较多，1.1 不动，从 1.2 起按现在的进度重新排）：1.2 判定为已通过，遗留项并入新的 1.3；原型 2026-11-07 的改动（轻量化、上下文与 token 统计、“详细”面板、新建任务起始页、对话导航条、统一的模型选择器、附件与图片）拆成新的 1.3、1.4；原来的 1.3～1.5 顺延为 1.5～1.7。进度盘点见第 7 节，原因见 devlog 2026-11-08。
 > 范围：在本机浏览器里使用的完整工作台。桌面软件（Tauri）、手机应用、外网访问放到后续阶段，但从第一行代码开始就按“多端共用同一套接口”来写，以后接入不需要返工。
 
@@ -1069,3 +1069,19 @@ conversation / turn-engine 与迁移 v9 已实现，新增 42 项默认测试通
 #### 并发硬链接整改与开放边界（ISSUE-0035）
 
 本机反例确认原位写入加共享锁不能覆盖新增别名，因此改为上述正文封存与两阶段发布。旧文件在校验后出现外部别名时仍保留原文，暂存屏障前已有别名则拒绝写，屏障中低权限与文件 ID 旁路须实际拒绝，清除屏障后新增别名不再遭后续正文写入。恢复和目标抢占明确留在未定状态，不用自动覆盖来凑成功。逐项实际验证与修复提交记录到 step-1.3 / ISSUE-0035；当前 driver 仍仅内部，independent.runtime=false 且没有正式文件接口 / 任务入口，系统级命令隔离及正式恢复界面继续由 ISSUE-0029 跟踪。
+
+### 9.22 独立模型三协议传输与私有续传（2026-11-08）
+
+在已验证的自有循环与文件工具之上实现正式传输组件；不因回环假接口通过就开放独立任务。Pi 继续只作调研候选，不引入发行包或认证发现。采用 Node 内置 HTTP 和各协议编码，避免 SDK 默认参数转换、默认零用量和 beta 查询改变已保存路由；无新运行依赖。正式任务、权限、事件和附件服务另行接入，independent.runtime 保持 false。
+
+- protocol 只追加生成选项、工具定义、请求、宿主附件与文本增量类型；旧模型 driver 的 request 既有字段不变，新 tools / generation 可选，新增 waitForIdle 可选。生成选项区分 effort、Messages thinking 模式 / token 预算、流开关及 Chat token 限额字段，不互相转换。工具 schema 必须为有界 JSON 对象，不携带实现、环境或自动放行。
+- 每次 complete 至多一个 POST，严格保留基础路径后追加 chat/completions、responses 或 messages。服务 Key 只来自固定任务绑定，发送前后及流回调核对修订，停用 / 改配置停止；不读环境 Key、不用全局代理池、Cookie、目录认证模板或其他服务。Messages 必须有明确日期版本，仅 x-api-key / anthropic-version，无隐含 beta 查询或 Header；另两协议仅用该服务 Bearer。HTTP 状态、连接和解析错误使用固定摘要，不保留上游错误正文。
+- 沿用元数据请求的连接时 DNS 全候选检查和固定解析结果；本地例外只来自用户明确保存的 IP / localhost。无重定向、重试或额外能力探测。请求 JSON 最多 24 MiB、响应最多 16 MiB、头部 16 KiB；要求 identity 编码、JSON 或 SSE。默认整体连接时限 120 秒、宿主可选 1～600000 毫秒，仍受回合总时限控制；超时涵盖等响应头和整个响应体。
+- SSE 严格 UTF-8，支持 CR / LF、跨片 CRLF、多行 data 和注释；单事件 1 MiB、最多 100000 事件。Chat 必须 finish_reason 加 [DONE]，Messages 必须完成块生命周期、停止原因及 message_stop，Responses 必须完整终态事件且外层类型与内层状态一致，completed 不得同时含 error；EOF 不算成功，不把半截参数交给工具。响应未来无关事件可忽略，未知内容类型 / 工具类型、错误事件、错序或坏 JSON 拒绝。实际工具授权仍由 Gateway driver 和审批决定。
+- Chat 使用单一 choice 0 和标准函数工具，逐 index 拼接 name / arguments，原始参数严格解析且不转换类型；流末 usage 单列接纳。标准输出上限字段为 max_completion_tokens，兼容服务可明确选择 max_tokens，不依据模型名猜测。仅在有据 streamUsage=true 时默认开启带 include_usage 的流；无流用量证据则默认完整 JSON，用户明确选流仍可保留缺 usage 的未知结果，不把兼容默认或一次成功写成能力证据。返回的 reasoning_content 仅作为同服务私有续传，不据此自动开启思考。
+- Responses 使用 store=false、显式请求 reasoning.encrypted_content，回传原始 reasoning / function_call / message output item 与 function_call_output，不使用 previous_response_id 或托管工具。完整终态输出为参数依据，流中的片段不能授权工具；带工具且 reasoning 缺加密内容拒绝续传。Messages 保留 thinking / redacted_thinking / text / tool_use 的原顺序和签名，工具结果转换为 user tool_result、拒绝 / 错误保留 is_error。预算 enabled 至少 1024 且小于本次 max_tokens，adaptive / disabled 不夹带预算；effort 放 output_config，工具 JSON schema 放 input_schema，不发送 OpenAI 字段。
+- 能力检查按当前修订的非冲突 / 未过期值：工具与图片必须明确 true，档位必须有据且原样匹配，预算遵守已知边界。模型 outputLimit 与本轮剩余输出预算取较小上限；不能把本地 JSON 字节限制当模型 token 窗口。实际 token 输入估算、图片成本 / 总窗口核验和货币预算在正式任务层继续实现，本段不宣称完成。
+- 宿主附件 callback 必须按 taskId / attachmentId 取值，传输不接受本机路径或远程 URL。图片只发已验证的四种 MIME / 文件头，单张 5 MiB；文本附件严格 UTF-8、无 NUL、单个 512 KiB。能力未知 / 不符、身份错配、坏内容和总请求超限在 POST 前拒绝；内容只进当前上游请求，原始会话只留引用。正式 AttachmentService 的受限读取和任务归属联通尚未验收，夹具内容不是实际用户图片能力证明。
+- 私有 continuation 以有界信封保存原始必要块，绑定服务 / 模型修订、原始消息前缀、系统 / checkpoint、工具定义与可见内容身份；不跨服务发送，不因旧签名不符就偷偷删块续传。哈希只作一致性检查，不是对本机数据库篡改的认证。普通长文本不为保存不必要 output 副本而受 256 KiB 续传限额约束。变更提示或压缩导致原始前缀改变时停止，正式任务层须提供明确上下文切换策略，不能自动修补供应商签名。
+- usage 的每字段缺失为 null，实际零为零；Messages 的累计输出取最后一次，不相加，原始 input_tokens 与缓存计数分列，不跨协议直接当作同一计费口径。取消 / 流错误未得到完整用量时仍为未知；完整回复先交持久循环，工具仅在原文落盘后执行。公开增量只有文本 / 思考摘要，不含原始工具参数、签名或附件编码；已知服务 Key 跨片脱敏，若上游最终回显 Key 则整次拒绝进入工具或持久会话，不能静默篡改签名内容。
+- 实际 driver 必须在连接 close 后 settle，循环取消后调用 waitForIdle 等待其收尾再保存终态和释放会话；旧 driver 没有该可选方法仍保留原迟到隔离，不宣称它获得实际网络收尾保证。改配置导致的请求停止在循环记录 configuration_changed。默认验证包括真实回环 HTTP、逐字节 SSE、三协议工具 / 续传 / 用量、坏流与体积 / DNS / 认证边界、取消 / 超时、参数不转换、HTTP 假模型接持久循环与取消所有权反例。正式 UI、真实服务、真实图片和实际货币用量仍单列未验证。

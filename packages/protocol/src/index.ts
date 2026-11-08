@@ -861,13 +861,44 @@ export const IndependentContextCheckpoint = z.object({
   summary: IndependentText, createdAt: Ts,
 }).strict();
 export type IndependentContextCheckpoint = z.infer<typeof IndependentContextCheckpoint>;
+/** 内部模型传输参数；不猜测档位或将一种协议的预算转换成另一种。 */
+export const IndependentGenerationOptions = z.object({
+  effort: z.string().min(1).max(100).optional(), stream: z.boolean().optional(),
+  thinking: z.object({ mode: z.enum(['enabled', 'disabled', 'adaptive']), budgetTokens: z.number().int().min(1024).max(10_000_000).optional() }).strict().optional(),
+  chatTokenLimitField: z.enum(['max_completion_tokens', 'max_tokens']).optional(),
+}).strict();
+export type IndependentGenerationOptions = z.infer<typeof IndependentGenerationOptions>;
+export const IndependentModelToolDefinition = z.object({
+  name: IndependentToolCall.shape.name, description: z.string().min(1).max(4000),
+  parameters: IndependentToolArguments.refine((v) => v.type === 'object', '工具参数 schema 必须为 object'),
+}).strict();
+export type IndependentModelToolDefinition = z.infer<typeof IndependentModelToolDefinition>;
+export const IndependentModelRequest = z.object({
+  binding: IndependentModelBinding, systemPrompt: IndependentText, checkpoint: IndependentContextCheckpoint.nullable(),
+  messages: z.array(IndependentConversationMessage).min(1).max(2000), maxOutputTokens: z.number().int().positive().max(10_000_000),
+  tools: z.array(IndependentModelToolDefinition).max(64).optional(), generation: IndependentGenerationOptions.optional(),
+}).strict();
+export type IndependentModelRequest = z.infer<typeof IndependentModelRequest>;
+/** 附件解析由宿主按任务归属提供，传输层不接受路径或远程图片 URL。 */
+export const IndependentModelAttachment = z.object({
+  attachmentId: Id, name: z.string().max(255), kind: z.enum(['image', 'text']), mime: z.string().max(100),
+  base64: z.string().max(28 * 1024 * 1024).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+}).strict();
+export type IndependentModelAttachment = z.infer<typeof IndependentModelAttachment>;
+export const IndependentModelDelta = z.object({ type: z.enum(['text_delta', 'thinking_delta']), text: z.string().max(1024 * 1024) }).strict();
+export type IndependentModelDelta = z.infer<typeof IndependentModelDelta>;
+export interface IndependentModelDriverConfig {
+  tools?: IndependentModelToolDefinition[]; generation?: IndependentGenerationOptions;
+  loadAttachment?: (taskId: string, attachmentId: string, signal: AbortSignal) => Promise<IndependentModelAttachment>;
+  onDelta?: (binding: IndependentModelBinding, delta: IndependentModelDelta) => void;
+  timeoutMs?: number;
+}
 /** 仅供 Gateway 内部传输 / 工具适配器使用；没有凭据和网络默认值。 */
 export interface IndependentModelDriver {
   checkBinding(binding: IndependentModelBinding): void | Promise<void>;
-  complete(request: {
-    binding: IndependentModelBinding; systemPrompt: string; checkpoint: IndependentContextCheckpoint | null;
-    messages: IndependentConversationMessage[]; maxOutputTokens: number;
-  }, signal: AbortSignal): Promise<IndependentAssistantMessage>;
+  complete(request: IndependentModelRequest, signal: AbortSignal): Promise<IndependentAssistantMessage>;
+  /** 实际网络 driver 用于取消后等待资源收尾；旧 driver 可不提供。 */
+  waitForIdle?(binding: IndependentModelBinding): Promise<void>;
 }
 export interface IndependentToolDriver {
   /** 收到取消后实际关闭工具资源再 settle；循环等待该 promise，不将信号当作收尾。 */

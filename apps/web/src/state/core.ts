@@ -220,6 +220,10 @@ export function buildTimeline(events: readonly EventEnvelope[]): TimelineItem[] 
 
   for (const ev of events) {
     switch (ev.type) {
+      case 'task.updated':
+        // 回合失败或停止时可能没有 message.done；结束进度显示，不把片段当作正式会话记录。
+        if (['review', 'paused', 'interrupted', 'failed', 'merged', 'discarded'].includes(ev.data.task.status)) closeOpen(ev.ts);
+        break;
       case 'session.started':
         agent = ev.data.agent; model = ev.data.model;
         // 1.2：恢复原来的会话（H1）时留一行提示；恢复失败、新建会话由 Gateway 发 session.notice 说明

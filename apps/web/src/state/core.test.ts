@@ -100,6 +100,28 @@ describe('applyEvent', () => {
 });
 
 describe('buildTimeline 合并', () => {
+  it('任务结束后关闭没有确认事件的文字与思考进度，保留可见片段', () => {
+    for (const status of ['review', 'paused', 'interrupted', 'failed', 'merged', 'discarded'] as const) {
+      const result = buildTimeline([
+        { seq: 1, ts: 1, taskId: 't1', sessionId: 's1', type: 'thought.delta', data: { messageId: 'm1', text: '准备操作' } },
+        E.delta(2, '尚未确认的片段'),
+        E.updated(3, task({ status })),
+      ]).filter((item) => item.kind === 'agent');
+      expect(result).toHaveLength(1);
+      expect(result[0]).toMatchObject({ done: true, text: '尚未确认的片段', thought: '准备操作' });
+    }
+  });
+  it('排队、运行和等待审批仍显示进度，失败后新回合可以继续', () => {
+    for (const status of ['queued', 'running', 'waiting'] as const) {
+      const result = buildTimeline([E.delta(1, '处理中'), E.updated(2, task({ status }))]);
+      expect(result[0]).toMatchObject({ done: false });
+    }
+    const result = buildTimeline([
+      E.delta(1, '旧片段'), E.updated(2, task({ status: 'failed' })),
+      E.user(3, '继续'), E.updated(4, task({ status: 'running' })), E.delta(5, '新片段', 'm2'),
+    ]).filter((item) => item.kind === 'agent');
+    expect(result.map((item) => [item.text, item.done])).toEqual([['旧片段', true], ['新片段', false]]);
+  });
   it('消息确认可携带已提交的完整正文，替换暂存流片段且兼容非流响应', () => {
     let seq = 0;
     const event = (type: string, data: unknown) => ({ seq: ++seq, ts: seq, taskId: 't1', sessionId: 's1', type, data } as EventEnvelope);

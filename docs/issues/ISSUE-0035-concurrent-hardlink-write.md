@@ -2,12 +2,12 @@
 
 | 项 | 值 |
 |---|---|
-| 状态 | investigating |
+| 状态 | fixed |
 | 类型 | 安全边界 |
 | 严重程度 | 高 |
 | 发现于 | [独立文件工具内部验收](../acceptance/step-1.3.md) |
 | 开启 | 2026-11-08 |
-| 关闭 | |
+| 关闭 | 2026-11-08 |
 
 ## 现象
 
@@ -45,3 +45,4 @@ Windows 文件用只允许读取共享的句柄打开且已核对单链接后，
 - 2026-11-08 [FSCTL_REQUEST_OPLOCK](https://learn.microsoft.com/en-us/windows/win32/api/winioctl/ni-winioctl-fsctl_request_oplock) 要求重叠句柄与异步生命周期；[CancelIoEx](https://learn.microsoft.com/en-us/windows/win32/api/ioapiset/nf-ioapiset-cancelioex) 本身不等待请求完成。后续若选用必须验证申请失败即拒绝、事件 / 内存收尾与对端解除阻塞。替换文件也须保留审批后目标身份 / 摘要的冲突检查，尚未证明可靠的比较交换，当前不采用未经验证的快速补丁。
 - 2026-11-08 实现正文封存与两阶段发布：旧目标只读校验 / 移名，新暂存先设 delete-pending，再校验可访问链接零、含 pending 的总链接一，全部写入并刷盘后才清除屏障；此后不再写新 inode。依据 [MS-FSA 删除标记](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/386d9ec5-e0f6-4853-b175-c05be01419e0)、[新增链接算法](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fsa/891bb8eb-89f8-46ca-80b7-9f5d4e8b5583) 和 [总链接信息](https://learn.microsoft.com/en-us/openspecs/windows_protocols/ms-fscc/a459c580-db65-4e49-bbb5-562268ae271a)。旧目标移走后目标若被占名，不覆盖竞争者或自动回滚，返回 interrupted、保留旧旁路和私有备份；不是原子替换承诺。
 - 2026-11-08 新增实际宿主源码临时副本的并发夹具：旧目标外部别名不变、屏障前别名拒绝、屏障中四种预开句柄 / 原生普通及扩展 POSIX 链接拒绝、路径与文件 ID 打开拒绝、封存后别名不再被写、目标抢占保留、实际取消部分暂存写入及 ACL / 只读 / ADS 边界。原生调用先有有效阳性对照，生产代码没有暂停开关；完整结果及提交哈希待检查完成后追加。本机 NTFS 以外、断电及正式恢复 UI 未验证，不扩展为系统级沙箱结论，运行时仍关闭。
+- 2026-11-08 修复提交 `5cf6c10`：最终类型检查、487 项默认测试通过（3 项真实冒烟跳过）及构建通过，10 项新增原生并发 / 元数据用例均通过；首轮夹具错误与修正、逐项结果及未验证边界见 step-1.3 最新补验节。状态改 fixed，仅关闭本单的宿主写入影响外部别名原文问题；正式独立运行时、恢复 GUI、其他文件系统 / 断电和任意命令系统沙箱仍不按完成验收，整体由 ISSUE-0029 跟踪。

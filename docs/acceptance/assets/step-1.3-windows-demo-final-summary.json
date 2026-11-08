@@ -1,0 +1,58 @@
+{
+  "task": {
+    "id": "t_ILbtDCFqfxhx",
+    "agent": "fake",
+    "status": "review",
+    "model": "demo-fast",
+    "permission": "ask"
+  },
+  "elapsedBeforeSendMs": 610025,
+  "firstApprovalAfterTimerMs": 611993,
+  "userMessages": 1,
+  "approvalRequests": 2,
+  "approvals": [
+    {
+      "id": "a_BVk-uW3hQYdv",
+      "status": "allowed",
+      "created_at": 1794122980038,
+      "decided_at": 1794122988973
+    },
+    {
+      "id": "a_UAeWoeJJfhxP",
+      "status": "rejected",
+      "created_at": 1794122989958,
+      "decided_at": 1794123295253
+    }
+  ],
+  "decisions": [
+    {
+      "at": 1794122988974,
+      "status": "allowed",
+      "optionId": "allow",
+      "deviceName": "Chrome 浏览器（本机）"
+    },
+    {
+      "at": 1794123295254,
+      "status": "rejected",
+      "optionId": "reject",
+      "deviceName": "Chrome 浏览器（本机）"
+    }
+  ],
+  "toolStarts": 4,
+  "errors": 0,
+  "usageEvents": 0,
+  "realGenerations": 0,
+  "scope": "内置演示完成；Windows 观察按用户人工反馈记录，不能替代真实 Agent 审批",
+  "workspaceFiles": [
+    "AGENTS.md",
+    "CLAUDE.md"
+  ],
+  "userObservation": {
+    "minimizedUntilNotification": true,
+    "windowsNotificationSeen": true,
+    "cardSeenWithoutRefresh": true,
+    "firstAllowConfirmed": true,
+    "notificationClickedToRestore": null
+  },
+  "pendingApprovals": 0
+}

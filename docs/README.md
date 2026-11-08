@@ -34,6 +34,6 @@
 | 目录 | 说明 |
 |---|---|
 | [acceptance/](acceptance/) | 每一步的验收记录 |
-| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 稳定、补验与输入框：部分通过；独立 Agent 真实文本、创建审批、流式替换、Flash 图片 / 换模型续接及 HTTP 取消 / 重启恢复通过，旧工具失败原因仍调查；[ISSUE-0042](issues/ISSUE-0042-bigmodel-responses-tool-failure.md)、[ISSUE-0043](issues/ISSUE-0043-terminal-fragment-progress.md) 记录本轮发现，两份旧工作台密钥已按授权清理，目录和历史保留（ISSUE-0028 fixed） |
+| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 稳定、补验与输入框：部分通过；独立 Agent 真实文本、创建审批、流式替换、Flash 图片 / 换模型续接及 HTTP 取消 / 重启恢复通过，一次真实目录预览结构失败、原配置保留，自动识别未通过，旧工具失败原因仍调查；[ISSUE-0042](issues/ISSUE-0042-bigmodel-responses-tool-failure.md)、[ISSUE-0043](issues/ISSUE-0043-terminal-fragment-progress.md) 记录本轮发现，两份旧工作台密钥已按授权清理，目录和历史保留（ISSUE-0028 fixed） |
 | [devlog/](devlog/) | 开发笔记，每月一个文件，只追加 |
 | [issues/](issues/README.md) | 问题收纳：总表 + 每个问题一个文件 |

@@ -59,4 +59,4 @@
 
 | [ISSUE-0048](ISSUE-0048-codex-proxy-text-error.md) | Codex 代理模型拒绝正文在自动压缩后仍显示待验收 | fixed | bug | 2026-11-08 | 2026-11-08 |
 
-| [ISSUE-0049](ISSUE-0049-terminal-error-redaction.md) | Gateway 兜底终端错误输出绕过脱敏 | investigating | bug | 2026-11-08 | |
+| [ISSUE-0049](ISSUE-0049-terminal-error-redaction.md) | Gateway 兜底终端错误输出绕过脱敏 | fixed | bug | 2026-11-08 | 2026-11-08 |

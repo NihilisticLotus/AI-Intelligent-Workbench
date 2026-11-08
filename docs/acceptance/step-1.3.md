@@ -2021,3 +2021,23 @@ protocol 只新增可选 parseFailure 与五项枚举：data_not_array / data_li
 证据：[实际页面文字摘录](assets/step-1.3-classified-directory-page.txt)、[前后只读核对摘要](assets/step-1.3-classified-directory-summary.json)。本轮未新增截图；上轮浏览器截图接口失败、随后原生捕获因无法确认 URL 被工具停止，均不作为本次截图通过证据。没有用旧图或合成画面替代。
 
 源码仍为 **f6df24d**、执行基线 **b9c9e79**，本轮仅追加真实结果和文档，没有源码改动；744 项默认测试 / 类型 / 构建沿用该源码的既有通过结果，**本轮未重跑**。ISSUE-0050 的固定分类获得真实证据，ISSUE-0029 仍 investigating，其他未完成门槛不变，整体 **部分通过**。本轮授权已用完，累计人工预留 **24.6 元**、实扣未知；后续真实请求需新的明确确认。
+
+## 零调用审计：子进程管道 EPIPE（2026-11-09，ISSUE-0052）
+
+基线 **6a5a846**，继续原 main。本轮先核对剩余门槛：ISSUE-0029 / 0023 / 0042 都需要新的带 Key 或收费请求，没有新授权，不执行；ISSUE-0004 的干净 Windows 环境按约定不在本机创建；ISSUE-0015 只做零调用审计。
+
+### 发现与修正
+
+- 本机合成脚本（Node v24.14.0）：子进程运行中被 `taskkill /T /F` 结束，父进程继续写 stdin，没有 `error` 监听时父进程以 **退出码 1** 结束（Unhandled 'error' event / EPIPE）；三条管道都挂监听后父进程继续运行。
+- 代码审计列出 5 处缺失：ACP 连接的 stderr、`runCli` 三条管道、ZCode 探测三条管道、DPAPI 的 stdin、独立命令宿主的 stdout / stderr。修复提交 **67b9d1e**：新增 `guardStdio`，`spawnAgent` 自动调用，其他位置逐个补齐。
+- 这个机制和 ISSUE-0015 原始故障的时间线吻合（CodeBuddy 探测期间 WorkBuddy 自动更新替换引擎），但当时没有异常堆栈，**不能确认**就是原因；ISSUE-0015 保持 investigating。
+
+### 验证
+
+- 新增 3 项测试：对照组复现 EPIPE 退出、同样监听下宿主保持运行、`spawnAgent` 三条管道有监听且回调收到错误。去掉 `spawnAgent` 里的 `guardStdio` 后监听测试失败，恢复后通过。
+- 本轮重跑：`npm run typecheck` 通过；`npm test` **747 项通过 / 3 项真实冒烟默认跳过**（adapters 86 / gateway 502 / protocol 55 / web 104）；`npm run build` 通过（保留原有单块超过 500 kB 提示）。
+- 没有界面改动，没有启动 17890 预览；真实 Agent、模型消息、目录请求、远端计数均为 **0**；没有结束任何用户正在使用的 Agent 进程，真实会话中被外部结束的完整表现**未验证**。
+
+### 当前门槛（不变）
+
+ISSUE-0029 真实目录识别、ISSUE-0023 修正后的真实失败模型标记、ISSUE-0042 旧联合工具失败根因、ISSUE-0015 原始退出根因、ISSUE-0004 干净 Windows 首启，仍未通过或未验证。1.3 整体 **部分通过**。累计人工预留仍 24.6 元，实际账单未知。

@@ -64,4 +64,4 @@
 | [ISSUE-0050](ISSUE-0050-discovery-parse-failure-diagnostics.md) | 目录解析失败缺少固定校验分类 | fixed | 技术债 | 2026-11-08 | 2026-11-08 |
 
 | [ISSUE-0051](ISSUE-0051-model-pagination-null-cursor.md) | Messages 模型分页的空游标被当作列表结束 | fixed | bug | 2026-11-08 | 2026-11-08 |
-| [ISSUE-0052](ISSUE-0052-child-pipe-epipe-crash.md) | 子进程被外部结束时，写管道的 EPIPE 会让整个 Gateway 退出 | open | bug | 2026-11-09 | |
+| [ISSUE-0052](ISSUE-0052-child-pipe-epipe-crash.md) | 子进程被外部结束时，写管道的 EPIPE 会让整个 Gateway 退出 | fixed | bug | 2026-11-09 | 2026-11-09 |

@@ -730,6 +730,7 @@ ErrorCode 增加：`agent.auth_required`、`agent.quota_exceeded`、`agent.crash
    - 适配器在回合结束时，如果这一轮只有一段消息、没有工具调用，并且文本匹配已知的上游错误模式（`model is not supported`、`upstream_status: HTTP 4\d\d`、`API Error: Request rejected`），把它当成错误：发 `error`（`agent.failed`，或额度类的 `agent.quota_exceeded`），任务暂停而不是“待验收”；原文保留在消息里。
    - 这个“文本里的错误”规则放在一个表里（`errors.ts` 的 `TEXT_ERROR_PATTERNS`），每条都有测试，避免误判正常回复：只在整段回复以这些前缀开头、长度小于 600 字时才判定。
    - 会话内切换被上游明确拒绝也写入失败记录：仅当请求另一模型、返回 invalid_value、实际模型没有切过去时，归到运行会话账号并发布状态；模型已生效后的思考强度失败、额度错误不标记模型不支持。保留原配置和错误，不自动重发（2026-11-08 完成审计，ISSUE-0046）。
+   - 2026-11-08 实际补验更正（ISSUE-0048）：原生 Codex 会先发 `kind=think`、标题恰为 `Compact conversation`、无目标的自动压缩，再把 CC Switch 的代理拒绝作为普通正文返回。新增完整封套规则：整段以固定 `CC Switch local proxy failed while handling Codex endpoint /responses.` 开头，HTTP 400、固定 ChatGPT 账号模型不支持原因，前后模型一致且等于当前模型，长度仍小于 600。仅这条 Codex 封套可豁免该种自动压缩；有其他工具、压缩后类型 / 标题 / 目标变化、多段消息、引用解释或其他 HTTP 状态均不扩大识别。旧模式仍要求零工具，保留原文、暂停与实际账号失败标记，不重试、不改第三方代理或认证。
    - 模型列表：不做按账号过滤（ACP 拿不到账号能用哪些模型）。选了一次失败的模型后，在这个账号下记住“上次失败：不支持”，切换器里这个模型后面标灰字“上次失败”，鼠标悬停显示原因。存在 `agent_caps.catalog_json` 旁边的新列不划算，用新表 `model_failures(agent, profile_id, model, reason, at)`（和 9.9.2 的 `attachments` 表放在同一个迁移 v5 里，只追加）。
 
 ### 9.7 E：工具行标题更新（ISSUE-0011）

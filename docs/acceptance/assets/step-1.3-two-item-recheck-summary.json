@@ -1,0 +1,90 @@
+{
+  "checkedAt": "2026-11-08T14:01:07.339Z",
+  "sourceCommit": "0654be7",
+  "task": {
+    "id": "t_CMvlR_PVBM1m",
+    "agent": "codex",
+    "status": "review",
+    "permission_level": "readonly",
+    "model": "gpt-5.5",
+    "effort": "low",
+    "profile_id": null
+  },
+  "userMessages": 2,
+  "allPromptsMatch": true,
+  "assistantMessages": [
+    "OK",
+    "CC Switch local proxy failed while handling Codex endpoint /responses. Provider: OpenAI Official; model: gpt-5.5; upstream_status: HTTP 400; cause: The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.\n\n"
+  ],
+  "sessionStarts": 1,
+  "configs": [
+    {
+      "model": "gpt-6-luna",
+      "effort": "low"
+    },
+    {
+      "model": "gpt-5.5",
+      "effort": "low"
+    }
+  ],
+  "reportedModels": [
+    "gpt-6.1-sol",
+    "gpt-6-astra",
+    "gpt-6-sol",
+    "gpt-6-luna",
+    "gpt-5.6-sol",
+    "gpt-6.1-terra",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5"
+  ],
+  "tools": 1,
+  "approvals": 0,
+  "errors": [],
+  "modelFailures": [],
+  "syntheticFiles": [
+    "AGENTS.md",
+    "CLAUDE.md"
+  ],
+  "otherGenerationMessages": 0,
+  "independentV2RequestCount": 11,
+  "activeTasks": [],
+  "directory": {
+    "attemptedAt": 1794117081262,
+    "hasSnapshot": false,
+    "error": {
+      "message": "元数据结构无法识别，未替换上次预览",
+      "diagnostics": null
+    },
+    "snapshot": null
+  },
+  "hashes": {
+    "services": "d061ac8cfa4231e84be5e2d2293ffcf518337c557233c09d56dc6f4623ea03c4",
+    "models": "e9df7679eea500e98596b2afb9c0cc9fdf7fe24fb346411b495428cbb8eed724",
+    "bindings": "69b9d546dda1527b03c370dddb250af8086f37910853b18c9538a59f573da4c5",
+    "requests": "c583e9126c14f60a5e7ee4176e2edf96a3030bbeddfc236cde48d6e4aae11b3c",
+    "budgets": "50221a38164240c854bbae2294009171eb6ecbc12f4650b348917754a834d472",
+    "defaultValue": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "oldDirectory": {
+    "attemptedAt": 1794117081262,
+    "hasSnapshot": false,
+    "error": {
+      "message": "元数据结构无法识别，未替换上次预览",
+      "diagnostics": null
+    },
+    "snapshot": null
+  },
+  "unchanged": {
+    "services": true,
+    "models": true,
+    "bindings": true,
+    "requests": true,
+    "budgets": true,
+    "defaultValue": true
+  },
+  "additionalManualReserveCny": 2.2,
+  "cumulativeManualReserveCny": 22.2,
+  "actualCost": null,
+  "internalRequests": null
+}

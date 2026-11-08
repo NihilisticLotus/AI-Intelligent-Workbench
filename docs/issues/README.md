@@ -56,3 +56,5 @@
 | [ISSUE-0046](ISSUE-0046-switch-model-failure-marker.md) | 会话内切换被拒绝后缺少失败模型标记 | fixed | bug | 2026-11-08 | 2026-11-08 |
 
 | [ISSUE-0047](ISSUE-0047-native-default-model-picker.md) | 新任务选择第三方时无法保留软件默认模型 | fixed | bug | 2026-11-08 | 2026-11-08 |
+
+| [ISSUE-0048](ISSUE-0048-codex-proxy-text-error.md) | Codex 代理模型拒绝正文在自动压缩后仍显示待验收 | investigating | bug | 2026-11-08 | |

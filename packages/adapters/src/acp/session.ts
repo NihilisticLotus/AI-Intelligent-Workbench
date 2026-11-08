@@ -9,7 +9,7 @@ import {
 import { AbortError, isRecord, newId, str } from '../util';
 import { configSignature, EMPTY_CONFIG, legacyIsCombo, modelSwitchOf, parseConfigState } from './config';
 import { AcpConnection, type AcpTimeouts, type ExitInfo } from './connection';
-import { textResponseError, agentErrors, classifyError, invalidValue, isNotFound } from './errors';
+import { textResponseError, isCodexProxyModelError, agentErrors, classifyError, invalidValue, isNotFound } from './errors';
 import { buildChildEnv, buildNativeEnv, type LaunchSpec } from './launch';
 import { normalizePermission } from './permissions';
 import { UpdateMapper } from './updates';
@@ -77,6 +77,7 @@ export class AcpSession implements AgentConnection {
   private holding = true;
   private turnMessages = new Map<string, string>();
   private turnTools = false;
+  private turnCompactions = new Set<string>();
   private held: AgentUpdate[] = [];
   private replayOpen = false;
   private replayTimer: NodeJS.Timeout | null = null;
@@ -150,7 +151,12 @@ export class AcpSession implements AgentConnection {
   /** 发给 Gateway；建会话期间先攒着（配置在 ready() 时统一发一次） */
   emit(u: AgentUpdate) {
     if (this.turnAbort && u.kind === 'message') this.turnMessages.set(u.messageId, (this.turnMessages.get(u.messageId) ?? '') + u.text);
-    if (this.turnAbort && u.kind === 'tool_start') this.turnTools = true;
+    if (this.turnAbort && u.kind === 'tool_start') {
+      if (this.spec.kind === 'codex' && u.toolKind === 'think' && u.title === 'Compact conversation' && u.target === null) this.turnCompactions.add(u.toolId);
+      else this.turnTools = true;
+    }
+    if (this.turnAbort && u.kind === 'tool_update' && this.turnCompactions.has(u.toolId)
+      && ((u.toolKind !== undefined && u.toolKind !== 'think') || (u.title !== undefined && u.title !== 'Compact conversation') || (u.target !== undefined && u.target !== null))) this.turnTools = true;
     if (this.holding) { if (u.kind !== 'config_options') this.held.push(u); return; }
     this.opts.host.update(u);
   }
@@ -259,7 +265,7 @@ export class AcpSession implements AgentConnection {
 
   async prompt(input: PromptInput, signal: AbortSignal): Promise<{ stopReason: StopReason }> {
     if (this.conn.isClosed) throw agentErrors.crashed(this.spec.kind, this.spec.displayName);
-    this.turnMessages.clear(); this.turnTools = false;
+    this.turnMessages.clear(); this.turnTools = false; this.turnCompactions.clear();
     const prompt: Record<string, unknown>[] = [];
     if (input.text) prompt.push({ type: 'text', text: input.text });
     for (const a of input.attachments ?? []) {
@@ -292,7 +298,11 @@ export class AcpSession implements AgentConnection {
       if (stop === 'cancelled') { this.mapper.endTurn('cancelled'); return { stopReason: 'cancelled' }; }
       this.mapper.endTurn('end_turn');
       if (!this.turnTools && this.turnMessages.size === 1) {
-        const failure = textResponseError([...this.turnMessages.values()][0]!, this.spec.kind, this.spec.displayName, this.secrets);
+        const text = [...this.turnMessages.values()][0]!;
+        // 自动压缩只豁免当前模型的固定代理封套；原有错误模式仍要求完全没有工具。
+        const proxyEnvelope = text.trim().startsWith('CC Switch local proxy failed');
+        const failure = (this.turnCompactions.size || proxyEnvelope) && !isCodexProxyModelError(text, this.state.model) ? null
+          : textResponseError(text, this.spec.kind, this.spec.displayName, this.secrets);
         if (failure) throw failure;
       }
       if (stop === 'refusal') return { stopReason: 'refusal' };

@@ -109,14 +109,23 @@ export function quotaHint(text: string): string {
   return m ? `额度预计在 ${m[1]!.trim()} 后恢复` : '额度或调用频率达到上限，可以稍后再试，或换个模型 / 账号';
 }
 
+/** 固定代理错误封套必须完整匹配，模型前后相同，不从普通解释正文中搜索错误。 */
+const CODEX_PROXY_MODEL_ERROR = /^CC Switch local proxy failed while handling Codex endpoint \/responses\. Provider: [^;\r\n]{1,80}; model: ([A-Za-z0-9._:/-]{1,100}); upstream_status: HTTP 400; cause: The '\1' model is not supported when using Codex with a ChatGPT account\.$/;
+export function isCodexProxyModelError(text: string, model: string | null): boolean {
+  const match = text.length < 600 ? CODEX_PROXY_MODEL_ERROR.exec(text.trim()) : null;
+  return !!match && model !== null && match[1] === model;
+}
+
 /** 只接受整段以已知错误开头的短回复，避免把讨论错误的正常正文误判。 */
 export const TEXT_ERROR_PATTERNS = [
   /^(?:The ['"][^'"\n]+['"] model is not supported|model is not supported)\b/i,
   /^upstream_status:\s*HTTP 4\d\d\b/i,
   /^API Error: Request rejected\b/i,
+  CODEX_PROXY_MODEL_ERROR,
 ] as const;
 export function textResponseError(text: string, kind: AgentKind, name: string, secrets: readonly string[] = []): AgentError | null {
   if (text.length >= 600 || !TEXT_ERROR_PATTERNS.some((p) => p.test(text.trim()))) return null;
+  if (CODEX_PROXY_MODEL_ERROR.test(text.trim()) && kind !== 'codex') return null;
   const error = classifyError(new Error(text.trim()), kind, name, secrets);
   return error.reason === 'quota' ? error : new AgentError({ ...error.body,
     actions: [{ label: '换模型', action: ErrorActionKey.SwitchModel, args: { kind } }],

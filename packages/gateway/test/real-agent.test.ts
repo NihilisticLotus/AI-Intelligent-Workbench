@@ -75,6 +75,25 @@ const PERM = (id: string) => ({
 });
 
 describe('真实形态的 Agent（假 ACP 进程）', () => {
+  it('Codex 压缩后代理拒绝正文：暂停、保留原文并发布实际账号失败标记', async () => {
+    const upstream = "CC Switch local proxy failed while handling Codex endpoint /responses. Provider: OpenAI Official; model: alpha; upstream_status: HTTP 400; cause: The 'alpha' model is not supported when using Codex with a ChatGPT account.";
+    const sc = scenario({ config: CONFIG, turns: [{ steps: [
+      { update: { sessionUpdate: 'tool_call', toolCallId: 'compact', kind: 'think', title: 'Compact conversation' } },
+      { update: { sessionUpdate: 'agent_message_chunk', content: text(upstream) } },
+    ] }] });
+    const { token, projectId, ws } = await setup(sc, { adapters: rt => [createSpecAdapter({ kind: 'codex', displayName: '假 Codex', entry: FIXTURE, env: sc.env }, rt)] });
+    const task = (await t!.api('POST', '/tasks', { token, body: { projectId, prompt: '合成代理拒绝回归', agent: 'codex', permission: 'readonly' } })).json as Task;
+    await ws.waitEvent(statusIs(task.id, 'paused'), 10_000);
+    const events = ws.events().filter(e => e.taskId === task.id);
+    expect(events.some(e => e.type === 'task.updated' && e.data.task.status === 'review')).toBe(false);
+    expect(events.filter(e => e.type === 'message.delta').map(e => e.data.text).join('')).toBe(upstream);
+    expect(events.find(e => e.type === 'error')?.data.error.code).toBe(ErrorCode.AgentFailed);
+    const profileId = t!.gw.services.profiles.defaultRow('codex').id;
+    expect(t!.gw.services.db.get('SELECT profile_id,model FROM model_failures WHERE agent=?', 'codex')).toEqual({ profile_id: profileId, model: 'alpha' });
+    const info = (await t!.api('GET', '/agents', { token })).json.items.find((a: { kind: string }) => a.kind === 'codex');
+    expect(info.modelFailures).toEqual([expect.objectContaining({ profileId, model: 'alpha' })]);
+    expect(sc.log().filter(l => l.method === 'session/prompt')).toHaveLength(1);
+  });
   it('上游正文拒绝默认模型：暂停、保留原文，并按实际模型和账号发布失败标记', async () => {
     const upstream = "The 'alpha' model is not supported when using Codex with a ChatGPT account";
     const sc = scenario({ config: CONFIG, turns: [{ steps: [{ update: { sessionUpdate: 'agent_message_chunk', content: text(upstream) } }] }] });

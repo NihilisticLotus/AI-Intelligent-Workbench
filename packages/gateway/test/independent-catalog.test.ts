@@ -35,7 +35,7 @@ describe('独立服务与模型目录', () => {
   it('v7 增量升级只加发现缓存，不丢服务、模型或人工来源', async () => {
     const {catalog,db,file}=setup();const s=await catalog.createService(config());const m=catalog.createModel(s.id,{remoteModelId:'m',name:'保留模型'});
     catalog.overrides(s.id,m.id,{expectedRevision:m.revision,values:{imageInput:false}});
-    dbs.splice(dbs.indexOf(db),1);db.close();const old=new DatabaseSync(file);old.exec('DROP TABLE independent_file_receipts; ALTER TABLE independent_tool_calls DROP COLUMN file_outcome_json; DROP TABLE independent_checkpoints; DROP TABLE independent_messages; DROP TABLE independent_turns; DROP TABLE independent_discoveries; PRAGMA user_version=7;');old.close();
+    dbs.splice(dbs.indexOf(db),1);db.close();const old=new DatabaseSync(file);old.exec('DROP TABLE independent_request_attempts; DROP TABLE independent_request_budgets; DROP TABLE independent_file_receipts; ALTER TABLE independent_tool_calls DROP COLUMN file_outcome_json; DROP TABLE independent_checkpoints; DROP TABLE independent_messages; DROP TABLE independent_turns; DROP TABLE independent_discoveries; PRAGMA user_version=7;');old.close();
     const reopened=openDb(file);dbs.push(reopened);const migrated=new IndependentCatalog(reopened,new SecretService(reopened,new MemorySecretStore()),new EventStore(reopened,new EventBus()));
     expect(migrated.getService(s.id).name).toBe(s.name);expect(value(migrated.getModel(s.id,m.id),'imageInput').value).toBe(false);expect(reopened.all('SELECT * FROM independent_discoveries')).toEqual([]);
   });
@@ -240,7 +240,7 @@ describe('独立服务与模型目录', () => {
 
   it('v6 升级保留旧工具记录和草稿，目录重开保留模型与人工值', async () => {
     const { db, file } = setup(); seed(db); db.run("INSERT INTO task_drafts(task_id,text,annotations_json,updated_at) VALUES ('task','原草稿','[]',1)");
-    dbs.splice(dbs.indexOf(db), 1); db.close(); const old = new DatabaseSync(file); old.exec('DROP TABLE independent_file_receipts; ALTER TABLE independent_tool_calls DROP COLUMN file_outcome_json; DROP TABLE independent_checkpoints; DROP TABLE independent_messages; DROP TABLE independent_turns; DROP TABLE independent_discoveries; DROP TABLE independent_task_models; DROP TABLE independent_models; DROP TABLE independent_services; PRAGMA user_version=6;'); old.close();
+    dbs.splice(dbs.indexOf(db), 1); db.close(); const old = new DatabaseSync(file); old.exec('DROP TABLE independent_request_attempts; DROP TABLE independent_request_budgets; DROP TABLE independent_file_receipts; ALTER TABLE independent_tool_calls DROP COLUMN file_outcome_json; DROP TABLE independent_checkpoints; DROP TABLE independent_messages; DROP TABLE independent_turns; DROP TABLE independent_discoveries; DROP TABLE independent_task_models; DROP TABLE independent_models; DROP TABLE independent_services; PRAGMA user_version=6;'); old.close();
     const current = openDb(file); dbs.push(current); const secrets = new SecretService(current, new MemorySecretStore()); const reopened = new IndependentCatalog(current, secrets, new EventStore(current, new EventBus()));
     const s = await reopened.createService(config()); let m = reopened.createModel(s.id, { remoteModelId: 'm', name: '模型' }); m = reopened.overrides(s.id, m.id, { expectedRevision: m.revision, values: { tools: false } });
     expect(current.get('SELECT text FROM task_drafts')).toEqual({ text: '原草稿' }); expect(current.all('PRAGMA table_info(independent_tool_calls)')).not.toHaveLength(0);

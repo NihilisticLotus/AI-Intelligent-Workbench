@@ -6,7 +6,7 @@
 
 | 文档 | 说明 |
 |---|---|
-| [design/design.md](design/design.md) | 架构设计 v0.4.14：多服务模型、内部循环与会话、项目工具 / 审批备份、三协议传输、受限附件与输入预检 |
+| [design/design.md](design/design.md) | 架构设计 v0.4.15：多服务模型、内部循环、项目工具、三协议传输、附件、输入预检与逐请求预算 |
 | [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.5：多服务模型、发现预览与来源核对、批量导入、人工修订及冲突处理 |
 | [prototype/index.html](prototype/index.html) | 可点击原型（双击打开）：工作台、看板、Agent、资产、生成、自动化、监控、能力 |
 

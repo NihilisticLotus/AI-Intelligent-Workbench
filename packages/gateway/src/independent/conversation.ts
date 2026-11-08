@@ -178,7 +178,7 @@ export class IndependentConversationStore {
     if (stop === 'completed' && (turn.phase !== 'ready' || pending.length)) throw Errors.invalidState('模型与工具尚未完成');
     for (const call of pending) this.toolAppend(this.get(id), { role: 'tool', callId: call.id, name: call.name,
       text: '本回合已停止；本次工具没有可靠完成记录，不可自动重放，请核对实际副作用。',
-      outcome: stop === 'cancelled' ? 'cancelled' : ['tool_limit', 'model_limit', 'output_limit', 'usage_unknown', 'context_limit'].includes(stop) ? 'budget_exceeded' : 'interrupted' });
+      outcome: stop === 'cancelled' ? 'cancelled' : ['tool_limit', 'model_limit', 'output_limit', 'usage_unknown', 'context_limit', 'request_budget'].includes(stop) ? 'budget_exceeded' : 'interrupted' });
     const status = stop === 'completed' ? 'completed' : stop === 'cancelled' ? 'cancelled' : stop === 'interrupted' ? 'interrupted' : 'failed';
     this.db.run('UPDATE independent_turns SET status=?,stop=?,owner=NULL,active_call_id=NULL,output_tokens=?,phase=? WHERE id=?',
       status, stop, turn.phase === 'model' ? null : turn.outputTokens, 'ready', id);

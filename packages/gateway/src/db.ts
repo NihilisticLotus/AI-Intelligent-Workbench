@@ -200,6 +200,20 @@ const MIGRATIONS: string[] = [
     CHECK(original IS NULL OR length(original)<=524288)
   );
   `,
+  // v11：任务级请求上限与逐 POST 预留；不保存正文、Key 或供应商账单猜测。
+  `
+  CREATE TABLE independent_request_budgets (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    binding_json TEXT NOT NULL, policy_json TEXT NOT NULL, created_at INTEGER NOT NULL
+  );
+  CREATE TABLE independent_request_attempts (
+    id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES independent_request_budgets(task_id) ON DELETE CASCADE,
+    ordinal INTEGER NOT NULL, attempt_json TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('reserved','succeeded','failed','interrupted')),
+    settlement_json TEXT, reserved_micros INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+    UNIQUE(task_id,ordinal)
+  );
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

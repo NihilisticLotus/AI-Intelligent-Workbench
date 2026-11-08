@@ -7,10 +7,10 @@ import { IndependentBaseUrl } from '@aic/protocol';
 import { metadataAddressAllowed, parseMetadataJson } from './metadata-http';
 
 export class ModelTransportError extends Error {
-  constructor(readonly reason: 'request' | 'network' | 'cancelled' | 'timed_out' | 'limit' | 'context' | 'protocol' | 'authentication' | 'quota' | 'upstream', readonly status: number | null = null) {
+  constructor(readonly reason: 'request' | 'network' | 'cancelled' | 'timed_out' | 'limit' | 'context' | 'protocol' | 'authentication' | 'quota' | 'upstream' | 'budget', readonly status: number | null = null) {
     const messages = { request: '模型请求参数或能力不满足条件', network: '模型服务连接失败', cancelled: '模型连接已取消', timed_out: '模型连接已超时',
       limit: '模型传输内容超过本地限制', context: '输入量未知或超过上下文预算，请核对输入限制或整理会话', protocol: '模型服务返回不完整或无法识别的协议内容', authentication: '模型服务拒绝认证，请核对该服务设置',
-      quota: '模型服务额度或请求频率受限', upstream: '模型服务暂时无法完成请求' };
+      quota: '模型服务额度或请求频率受限', upstream: '模型服务暂时无法完成请求', budget: '本任务的请求次数或人工金额预留不足，请核对预算后再继续' };
     super(messages[reason]);
   }
 }

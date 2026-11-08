@@ -1,6 +1,8 @@
 // 独立模型驱动只使用固定任务目录凭据；没有 SDK 认证发现、环境 Key 或其他服务兜底。
 import type { lookup } from 'node:dns';
+import { createHash } from 'node:crypto';
 import { IndependentModelRequest, IndependentModelAttachment, IndependentGenerationOptions, IndependentModelToolDefinition, IndependentContextPolicy,
+  IndependentRequestFailure, type IndependentRequestAttempt, type IndependentRequestSettlement,
   type IndependentModelDriver, type IndependentModelDriverConfig, type IndependentModelBinding, type IndependentCapabilityField } from '@aic/protocol';
 import { StreamRedactor } from '@aic/adapters';
 import { sniffAttachment } from '../attachments';
@@ -83,15 +85,36 @@ export class IndependentApiDriver implements IndependentModelDriver {
     } else if (key) headers.Authorization = `Bearer ${key}`;
     const deadline = performance.now() + (this.config.timeoutMs ?? 120_000);
     const remaining = () => { check(); const ms = Math.ceil(deadline - performance.now()); if (ms < 1) throw new ModelTransportError('timed_out'); return ms; };
+    const recorded = async <T>(kind: IndependentRequestAttempt['kind'], payload: string, run: () => Promise<{ value: T; settlement: IndependentRequestSettlement }>) => {
+      remaining();
+      const accounting = this.config.accounting;
+      // 同步持久化成功后才允许 run 接触网络；相同正文的下一次调用仍是独立收费尝试。
+      const id = accounting?.reserve(structuredClone(request.binding), { kind, requestHash: createHash('sha256').update(payload).digest('hex') });
+      let result: { value: T; settlement: IndependentRequestSettlement };
+      try { check(); result = await run(); }
+      catch (error) {
+        const reason = error instanceof ModelTransportError ? IndependentRequestFailure.safeParse(error.reason) : undefined;
+        if (id !== undefined) accounting!.settle(id, { outcome: 'failed', failure: reason?.success ? reason.data : 'protocol', usage: null, countedInputTokens: null });
+        throw error;
+      }
+      // 结算落盘失败不能再伪造 failed 或重发；遗留 reserved 交给显式恢复处理。
+      if (id !== undefined) accounting!.settle(id, result.settlement);
+      return result.value;
+    };
     try {
       if (this.config.context) {
         const policy = this.config.context; let counted: number | undefined;
         if (policy.mode === 'endpoint') {
           const endpoint = contextCounter(service.protocol);
           if (contextReport(service.protocol, wire.body, model, policy).status !== 'limits_unknown') {
-            await postModel({ base: new URL(service.baseUrl), endpoint, headers,
-              body: modelBody(contextInput(service.protocol, wire.body)), signal, timeoutMs: remaining(),
-              onEvent: () => { throw new ModelTransportError('protocol'); }, onJson: (value) => { counted = contextCountReply(service.protocol, value); }, lookup: this.resolver });
+            const countBody = modelBody(contextInput(service.protocol, wire.body));
+            counted = await recorded('counter', countBody, async () => {
+              let count: number | undefined;
+              await postModel({ base: new URL(service.baseUrl), endpoint, headers, body: countBody, signal, timeoutMs: remaining(),
+                onEvent: () => { throw new ModelTransportError('protocol'); }, onJson: (value) => { count = contextCountReply(service.protocol, value); }, lookup: this.resolver });
+              check(); if (count === undefined) throw new ModelTransportError('protocol');
+              return { value: count, settlement: { outcome: 'succeeded', failure: null, usage: null, countedInputTokens: count } };
+            });
             check();
           }
         }
@@ -99,14 +122,17 @@ export class IndependentApiDriver implements IndependentModelDriver {
         this.config.onContext?.(structuredClone(request.binding), structuredClone(report)); check();
         if (report.status !== 'ready') throw new ModelTransportError('context');
       }
-      await postModel({ base: new URL(service.baseUrl), endpoint: wire.endpoint, headers, body, signal,
-        timeoutMs: remaining(), onEvent: wire.event, onJson: wire.json, lookup: this.resolver });
-      check(); const reply = wire.result();
-      if (reply.toolCalls.some((call) => !request.tools!.some((definition) => definition.name === call.name))) throw new ModelTransportError('protocol');
-      // 若不可信上游回显服务 Key，不让其进入工具参数、持久会话或界面；不能静默篡改签名续传。
-      const containsKey = (value: unknown): boolean => typeof value === 'string' ? !!key && value.includes(key)
-        : value !== null && typeof value === 'object' && Object.values(value).some(containsKey);
-      if (key && (containsKey(reply) || reply.continuation && containsKey(JSON.parse(reply.continuation)))) throw new ModelTransportError('protocol');
+      const reply = await recorded('model', body, async () => {
+        await postModel({ base: new URL(service.baseUrl), endpoint: wire.endpoint, headers, body, signal,
+          timeoutMs: remaining(), onEvent: wire.event, onJson: wire.json, lookup: this.resolver });
+        check(); const reply = wire.result();
+        if (reply.toolCalls.some((call) => !request.tools!.some((definition) => definition.name === call.name))) throw new ModelTransportError('protocol');
+        // 若不可信上游回显服务 Key，不让其进入工具参数、持久会话或界面；不能静默篡改签名续传。
+        const containsKey = (value: unknown): boolean => typeof value === 'string' ? !!key && value.includes(key)
+          : value !== null && typeof value === 'object' && Object.values(value).some(containsKey);
+        if (key && (containsKey(reply) || reply.continuation && containsKey(JSON.parse(reply.continuation)))) throw new ModelTransportError('protocol');
+        return { value: reply, settlement: { outcome: 'succeeded', failure: null, usage: reply.usage, countedInputTokens: null } };
+      });
       for (const type of ['text_delta', 'thinking_delta'] as const) { const text = redactor.flush(type); if (text) this.config.onDelta?.(request.binding, { type, text }); }
       return reply;
     } catch (error) { throw error instanceof ModelTransportError ? error : new ModelTransportError('protocol'); }

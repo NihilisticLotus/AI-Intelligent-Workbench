@@ -273,8 +273,8 @@ describe('原始记录、压缩和跨进程恢复', () => {
   it('v8 升至当前版本保留旧草稿、会话与发现表，重开不重复迁移', () => {
     const file = path.join(temporary(), 'migration.db'); const current = openDb(file); seed(current);
     current.run("INSERT INTO task_drafts(task_id,text,annotations_json,updated_at) VALUES ('task','原草稿','[]',1)"); current.close();
-    const old = new DatabaseSync(file); old.exec('DROP TABLE independent_file_receipts; ALTER TABLE independent_tool_calls DROP COLUMN file_outcome_json; DROP TABLE independent_checkpoints; DROP TABLE independent_messages; DROP TABLE independent_turns; PRAGMA user_version=8;'); old.close();
-    for (let i = 0; i < 2; i++) { const db = openDb(file); expect(db.get('PRAGMA user_version')).toEqual({ user_version: 10 });
+    const old = new DatabaseSync(file); old.exec('DROP TABLE independent_request_attempts; DROP TABLE independent_request_budgets; DROP TABLE independent_file_receipts; ALTER TABLE independent_tool_calls DROP COLUMN file_outcome_json; DROP TABLE independent_checkpoints; DROP TABLE independent_messages; DROP TABLE independent_turns; PRAGMA user_version=8;'); old.close();
+    for (let i = 0; i < 2; i++) { const db = openDb(file); expect(db.get('PRAGMA user_version')).toEqual({ user_version: 11 });
       expect(db.get('SELECT text FROM task_drafts')).toEqual({ text: '原草稿' }); expect(db.all('SELECT * FROM independent_discoveries')).toEqual([]);
       expect(db.get('SELECT id FROM sessions')).toEqual({ id: 'session' });
       expect(new IndependentConversationStore(db).entries('session')).toEqual([]); db.close(); }

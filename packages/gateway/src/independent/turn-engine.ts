@@ -95,6 +95,7 @@ export class IndependentTurnEngine {
         if (signal.aborted) return finish(stopped());
         try { await this.model.checkBinding(turn.binding); } catch { return finish('configuration_changed'); }
         if (error instanceof ModelTransportError && error.reason === 'context') return finish('context_limit');
+        if (error instanceof ModelTransportError && error.reason === 'budget') return finish('request_budget');
         return finish('model_error');
       }
       if (isStopped()) return finish(stopped());

@@ -847,7 +847,7 @@ export const IndependentRunLimits = z.object({
 }).strict();
 export type IndependentRunLimits = z.infer<typeof IndependentRunLimits>;
 export const IndependentTurnStop = z.enum(['completed', 'model_error', 'tool_error', 'model_limit', 'tool_limit',
-  'output_limit', 'usage_unknown', 'context_limit', 'configuration_changed', 'cancelled', 'timed_out', 'interrupted']);
+  'output_limit', 'usage_unknown', 'context_limit', 'configuration_changed', 'cancelled', 'timed_out', 'interrupted', 'request_budget']);
 export type IndependentTurnStop = z.infer<typeof IndependentTurnStop>;
 export const IndependentTurnRecord = z.object({
   id: Id, taskId: Id, sessionId: Id, binding: IndependentModelBinding, limits: IndependentRunLimits,
@@ -886,6 +886,50 @@ export const IndependentContextReport = z.object({
   status: z.enum(['ready', 'input_unknown', 'limits_unknown', 'input_exceeded', 'window_exceeded']),
 }).strict();
 export type IndependentContextReport = z.infer<typeof IndependentContextReport>;
+/** 本地预算按每次 POST 保守预留；人工金额不代表供应商账单或计费上限。 */
+const IndependentMoneyMicros = z.number().int().min(0).max(1_000_000_000_000);
+export const IndependentRequestBudget = z.object({
+  maxRequests: z.number().int().min(1).max(1000),
+  money: z.object({
+    currency: z.string().regex(/^[A-Z]{3}$/), maxReservedMicros: IndependentMoneyMicros,
+    modelCeilingMicros: IndependentMoneyMicros.nullable(), counterCeilingMicros: IndependentMoneyMicros.nullable(),
+  }).strict().nullable(),
+}).strict();
+export type IndependentRequestBudget = z.infer<typeof IndependentRequestBudget>;
+export const IndependentRequestAttempt = z.object({
+  kind: z.enum(['model', 'counter']), requestHash: z.string().regex(/^[a-f0-9]{64}$/),
+}).strict();
+export type IndependentRequestAttempt = z.infer<typeof IndependentRequestAttempt>;
+export const IndependentRequestFailure = z.enum(['request', 'network', 'cancelled', 'timed_out', 'limit', 'context',
+  'protocol', 'authentication', 'quota', 'upstream', 'interrupted']);
+export type IndependentRequestFailure = z.infer<typeof IndependentRequestFailure>;
+export const IndependentRequestSettlement = z.object({
+  outcome: z.enum(['succeeded', 'failed', 'interrupted']), failure: IndependentRequestFailure.nullable(),
+  usage: IndependentUsage.nullable(), countedInputTokens: z.number().int().min(0).max(1_000_000_000_000).nullable(),
+}).strict().refine((v) => v.outcome === 'succeeded' ? v.failure === null : v.failure !== null && v.usage === null && v.countedInputTokens === null,
+  '失败或中断请求不能伪造用量');
+export type IndependentRequestSettlement = z.infer<typeof IndependentRequestSettlement>;
+export const IndependentRequestRecord = z.object({
+  id: Id, taskId: Id, ordinal: z.number().int().min(1).max(1000), binding: IndependentModelBinding,
+  attempt: IndependentRequestAttempt, status: z.enum(['reserved', 'succeeded', 'failed', 'interrupted']),
+  settlement: IndependentRequestSettlement.nullable(), reservedMicros: IndependentMoneyMicros.nullable(),
+  currency: z.string().regex(/^[A-Z]{3}$/).nullable(), createdAt: Ts, updatedAt: Ts,
+}).strict();
+export type IndependentRequestRecord = z.infer<typeof IndependentRequestRecord>;
+export const IndependentRequestBudgetSnapshot = z.object({
+  binding: IndependentModelBinding, policy: IndependentRequestBudget,
+  attemptedRequests: z.number().int().min(0).max(1000), pendingRequests: z.number().int().min(0).max(1000),
+  remainingRequests: z.number().int().min(0).max(1000), reservedMicros: IndependentMoneyMicros.nullable(),
+  remainingMicros: IndependentMoneyMicros.nullable(),
+  // 目前不接供应商账单；usage 与人工预留均不能冒充实际金额。
+  actualCostMicros: z.null(),
+}).strict();
+export type IndependentRequestBudgetSnapshot = z.infer<typeof IndependentRequestBudgetSnapshot>;
+/** 可信宿主必须同步落盘后才允许 POST；不能在回调里另发模型请求。 */
+export interface IndependentRequestAccounting {
+  reserve(binding: IndependentModelBinding, attempt: IndependentRequestAttempt): string;
+  settle(id: string, result: IndependentRequestSettlement): void;
+}
 /** 内部模型传输参数；不猜测档位或将一种协议的预算转换成另一种。 */
 export const IndependentGenerationOptions = z.object({
   effort: z.string().min(1).max(100).optional(), stream: z.boolean().optional(),
@@ -930,6 +974,7 @@ export type IndependentModelDelta = z.infer<typeof IndependentModelDelta>;
 export interface IndependentModelDriverConfig {
   tools?: IndependentModelToolDefinition[]; generation?: IndependentGenerationOptions;
   context?: IndependentContextPolicy;
+  accounting?: IndependentRequestAccounting;
   /** 同步交给可信宿主持久化；失败时不能继续生成，不作为公开内容事件。 */
   onContext?: (binding: IndependentModelBinding, report: IndependentContextReport) => void;
   loadAttachment?: (taskId: string, attachmentId: string, signal: AbortSignal) => Promise<IndependentModelAttachment>;

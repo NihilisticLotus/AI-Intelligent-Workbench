@@ -6,7 +6,7 @@
 
 | 文档 | 说明 |
 |---|---|
-| [design/design.md](design/design.md) | 架构设计 v0.4.16：第三方设置归属、独立任务、自有循环、三协议、附件、预检、持久预算、审批和恢复 |
+| [design/design.md](design/design.md) | 架构设计 v0.4.17：第三方设置归属、独立任务、自有循环、三协议、预算与恢复；加入 DeepSeek Harness 参考及采用边界 |
 | [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.7：统一选择器、附件、独立服务与模型、能力来源、任务策略 / 预算、私有审批、恢复及失败片段收尾 |
 | [prototype/index.html](prototype/index.html) | 可点击原型（双击打开）：工作台、看板、Agent、资产、生成、自动化、监控、能力 |
 
@@ -21,6 +21,7 @@
 | [research/cc-switch-model-metadata.md](research/cc-switch-model-metadata.md) | 2026-11-08 | CCSwitch 固定源码：模型列表、预设与 models.dev 补全的真实边界 |
 | [research/model-capability-detection.md](research/model-capability-detection.md) | 2026-11-08 | 各协议模型元数据、上下文语义、图片与思考参数、来源及未知状态 |
 | [research/independent-agent-engines.md](research/independent-agent-engines.md) | 2026-11-08 | Pi、Cline、OpenCode、Goose 的能力矩阵、认证风险与离线选型门槛 |
+| [research/deepseek-harness.md](research/deepseek-harness.md) | 2026-11-08 | DeepSeek Harness 固定源码：服务与循环、工具 schema、失败尝试、上下文与能力声明；对照现有宿主及后续采用门槛 |
 
 ## 计划
 

@@ -39,3 +39,6 @@ claude-agent-acp 0.100.0 先发 `tool_call`（标题是占位的“Preparing fil
 - 2026-11-06 开启：第 1.2 步浏览器验收时发现。
 - 2026-11-08 重新规划（plans/phase-1.md 第 1 节）：目标步改为 1.3。
 - 2026-11-08 第 1.3 步：协议 `7d06af2` 追加 tool.update，适配器 `e6b6ac9` 保留工具元数据并发送变化，网页 `726e7ef` 更新原工具行。假 ACP 占位标题到真实标题的契约测试、网页保留输出和状态测试通过，关闭为 fixed；真实 Claude 再次操作仍未验证。 验收见 [step-1.3](../acceptance/step-1.3.md)。
+
+
+- 2026-11-08 在用户批准 1e0325a 的原生 Claude 补验中，唯一真实 Write 产生 tool.update，原工具行由占位标题更新为合成目标 STEP13_CLAUDE_REJECT.txt 的路径；随后拒绝，输出 / 终态保留。补齐真实验证，既有修复 7d06af2 / e6b6ac9 / 726e7ef 不变；截图与计数见 step-1.3 最新节。

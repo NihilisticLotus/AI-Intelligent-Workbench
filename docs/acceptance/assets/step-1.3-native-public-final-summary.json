@@ -1,0 +1,93 @@
+{
+  "日期": "2026-11-08",
+  "授权提案": "1e0325a",
+  "源码基线": "4e9d197",
+  "公共目录": {
+    "匿名读取次数": 1,
+    "服务目录读取次数": 0,
+    "source": "configured",
+    "pageCount": 0,
+    "requestCount": 1,
+    "导入": false,
+    "测试服务停用": true,
+    "密钥": false,
+    "候选": [
+      {
+        "来源": [
+          "official",
+          "catalog"
+        ],
+        "上下文": [
+          {
+            "value": 1000000,
+            "kind": "catalog"
+          }
+        ],
+        "id": "glm-5.3"
+      },
+      {
+        "来源": [
+          "official",
+          "catalog"
+        ],
+        "上下文": [
+          {
+            "value": 1000000,
+            "kind": "catalog"
+          }
+        ],
+        "id": "glm-5.3-flash"
+      }
+    ]
+  },
+  "Claude": {
+    "任务": "t_3Pv1Mj5Twgzk",
+    "状态": "review",
+    "事件计数": {
+      "approval.requested": 1,
+      "approval.resolved": 1,
+      "message.delta": 50,
+      "message.done": 4,
+      "message.user": 4,
+      "session.config": 4,
+      "session.started": 2,
+      "session.usage": 13,
+      "task.created": 1,
+      "task.updated": 18,
+      "tool.end": 1,
+      "tool.output": 2,
+      "tool.start": 1,
+      "tool.update": 1
+    },
+    "审批结果": "rejected",
+    "恢复标记": true,
+    "同一原生会话及父链": true,
+    "最终配置": {
+      "model": "sonnet",
+      "effort": "low",
+      "permission": "ask"
+    },
+    "图片与暗号回复": "左红色正方形、右蓝色圆形；港灯84",
+    "重启续接回复": "正确复述图形、暗号及拒绝后未创建文件；由浏览器实际观察",
+    "目标文件存在": false,
+    "合成目录文件": [
+      "AGENTS.md",
+      "CLAUDE.md"
+    ]
+  },
+  "既有独立数据摘要不变": {
+    "services": true,
+    "models": true,
+    "bindings": true,
+    "requests": true,
+    "budgets": true,
+    "defaultValue": true
+  },
+  "原真实目录失败记录不变": true,
+  "新增独立生成": 0,
+  "新增远端计数": 0,
+  "新增人工预留元": 5.2,
+  "累计人工预留元": 18,
+  "实际账单": "未知；人工预留不是供应商硬限额",
+  "第三方内部请求数": "未知；不以用量事件数推算"
+}

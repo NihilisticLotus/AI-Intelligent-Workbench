@@ -3,6 +3,7 @@
 import { appendFileSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { redact } from '@aic/adapters';
+import { errorLogText } from './error-log';
 
 export interface CrashLogOptions {
   dataDir: string;
@@ -13,8 +14,6 @@ export interface CrashLogOptions {
 }
 
 export const GATEWAY_LOG = 'gateway.log';
-
-const describe = (e: unknown) => (e instanceof Error ? `${e.name}: ${e.message}\n${e.stack ?? ''}` : String(e));
 
 /** 写一条到 logs/gateway.log；写不进去不影响运行 */
 export function gatewayLog(dataDir: string, level: 'INFO' | 'WARN' | 'ERROR' | 'FATAL', msg: string) {
@@ -28,23 +27,24 @@ export function gatewayLog(dataDir: string, level: 'INFO' | 'WARN' | 'ERROR' | '
 /**
  * - uncaughtException：程序状态已不可信，记录后调用 onFatal（收尾退出）。
  * - unhandledRejection：多半是某个后台 Promise 没有接住错误，记录并继续运行，避免一个边缘错误让整个工作台停掉。
- *   Node 默认会把它当成致命错误直接退出，这正是这次“意外停止”最可能的来源。
+ *   Node 默认可能因此退出；记录此类错误不能反推 ISSUE-0015 原始退出的原因。
  */
 export function installCrashHandlers(opts: CrashLogOptions) {
-  const print = opts.print ?? ((m: string) => console.error(m));
+  const output = opts.print ?? ((m: string) => console.error(m));
+  const print = (message: string) => output(redact(message));
   const logFile = path.join(opts.dataDir, 'logs', GATEWAY_LOG);
   let fatal = false;
 
   const onRejection = (reason: unknown) => {
-    gatewayLog(opts.dataDir, 'ERROR', `未处理的 Promise 拒绝（已忽略，服务继续运行）：${describe(reason)}`);
+    gatewayLog(opts.dataDir, 'ERROR', `未处理的 Promise 拒绝（已忽略，服务继续运行）：${errorLogText(reason)}`);
     print(`[警告] 后台出现一个未处理的错误，已记录到 ${logFile}，服务继续运行。`);
   };
   const onException = (err: unknown) => {
-    gatewayLog(opts.dataDir, 'FATAL', `未捕获的异常，服务即将退出：${describe(err)}`);
+    gatewayLog(opts.dataDir, 'FATAL', `未捕获的异常，服务即将退出：${errorLogText(err)}`);
     if (fatal) return;
     fatal = true;
     print('');
-    print(`AI Console 遇到无法恢复的错误：${err instanceof Error ? err.message : String(err)}`);
+    print(`AI Console 遇到无法恢复的错误：${err instanceof Error ? err.message : typeof err === 'string' ? err : '非 Error 异常（已省略附带数据）'}`);
     print(`详细信息已写入 ${logFile}，把这个文件发给开发者即可定位问题。`);
     opts.onFatal(err);
   };

@@ -14,6 +14,7 @@ import {
 import { KEY_HEADER_LC } from './auth';
 import type { Services } from './services';
 import { toApiError, zodMessage } from './util';
+import { errorLogText } from './error-log';
 
 const WS_PATH = `${API_BASE}/ws`;
 const DEDUPE_LIMIT = 1000;
@@ -167,7 +168,7 @@ export function attachWs(server: Server, s: Services) {
           (result): AckFrame => ({ kind: 'ack', id: op.id, ok: true, result }),
           (e): AckFrame => {
             const { status, body } = toApiError(e);
-            if (status >= 500) console.error('[ws] 处理指令出错', op.op, e);
+            if (status >= 500) console.error('[ws] 处理指令出错', op.op, errorLogText(e));
             return { kind: 'ack', id: op.id, ok: false, error: body };
           },
         );

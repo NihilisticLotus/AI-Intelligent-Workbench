@@ -699,6 +699,7 @@ ErrorCode 增加：`agent.auth_required`、`agent.quota_exceeded`、`agent.crash
 
 1. 补齐退出记录：`process.on('exit', code)` 记录退出码；关掉控制台窗口的 `SIGHUP` 已经处理（`server.ts:334-336`，3 秒内停止），在它和 SIGINT、SIGTERM 里各记一条 INFO 写明原因（“控制台窗口被关闭”“按了 Ctrl+C”“收到结束信号”）；`SIGBREAK`（Ctrl+Break）按 SIGINT 处理。每条带 pid 和已运行时长。
 2. 启动时检查上一次的结尾：读 `gateway.log` 最后一条，如果是“启动”或“已启动”而没有对应的“退出”，记一条 WARN“上次运行没有正常退出（pid N，最后记录在 …）”。这条信息也放进 `GET /hello` 的可选字段 `lastExit: { clean: boolean, at: number, reason: string | null } | null`，网页设置页“关于”里显示。
+   - 文件与终端都执行现有脱敏规则。致命异常、启动失败、任务、HTTP / WebSocket 和事件订阅者的兜底错误只输出脱敏后的异常文本 / 堆栈，不直接展开异常对象的附带字段；任务出口同时使用本轮已知密钥原文。HTTP 不记录原始请求路径，避免路径混入请求数据。保留原错误返回、状态和收尾语义，不由本项推断旧退出根因（2026-11-08，ISSUE-0049）。
 3. 网页判断“服务已停止”：`ws.ts` 连续连接失败达到 3 次后（现有 0.5 / 1 秒退避，约 1.5 秒），用 `fetch(baseUrl + '/api/v1/hello')` 探测；连不上（网络错误，不是 401）时 `ConnState` 新增 `'down'`（只增），界面：
    - 输入框上方的提示改为“工作台服务已停止，对话不会丢。双击桌面上的“启动 AI Console”可以重新打开；打开后这里会自动恢复。”；
    - 输入框上方用错误底色、警告图标、独立标题和 `role="alert"`，避免被原 Agent 错误淹没；输入框占位同步写“工作台服务已停止，重新启动后可以继续发送”，不继续称为正在重连（2026-11-08 用户补验反馈，ISSUE-0045）；
@@ -881,7 +882,7 @@ op('prompt', z.object({ taskId: Id, text: z.string().max(100_000), attachments: 
 |---|---|
 | protocol | `prompt` 只有附件、只有文字、两者都没有（应失败）；`AttachmentInfo`、`tool.update`、`ModelInfo.vision` 正反例；`visionOf` 的三种来源；老事件（没有新字段）仍然通过 |
 | adapters | `quotaHint` 补验原文与 3 条正例；`TEXT_ERROR_PATTERNS` 的命中与不误判；`tool_update`（标题变化）；`session/prompt` 的 content 数组（文字 + 图片 base64 + resource_link + 小文本 resource）；没声明图片能力时拒绝；fake 适配器回复图片信息 |
-| gateway | 上传：类型按文件头判断、SVG 当文件、可执行文件拒绝、20 MB 上限、每任务 50 个上限、文件名清洗、`GET` 的响应头；发送：附件不属于这个任务、图片发给不能看图的 Agent、`deferPrompt`；清理：24 小时未引用删除、删任务删目录；无回应：60 秒提示、提示替换不堆叠、10 分钟自动取消、等待审批不计时；退出记录与 `lastExit`；迁移 v5 |
+| gateway | 上传：类型按文件头判断、SVG 当文件、可执行文件拒绝、20 MB 上限、每任务 50 个上限、文件名清洗、`GET` 的响应头；发送：附件不属于这个任务、图片发给不能看图的 Agent、`deferPrompt`；清理：24 小时未引用删除、删任务删目录；无回应：60 秒提示、提示替换不堆叠、10 分钟自动取消、等待审批不计时；退出记录与 `lastExit`；致命 / 启动 / 任务 / HTTP / WebSocket / 订阅者错误终端脱敏和附带对象省略；迁移 v5 |
 | web | `flush.ts` 调度；`ws.ts` 的 `down` 状态；`picker.ts` 的显示和行为；`attachments.ts` 的筛选、命名、提示；`core.ts` 处理 `tool.update` 和带附件的 `message.user`；没有凭据时不发需要令牌的请求 |
 
 ### 9.13 验收记录

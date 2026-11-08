@@ -3,6 +3,7 @@
 import { EventEnvelope, type NewEvent } from '@aic/protocol';
 import type { Db } from './db';
 import { now } from './util';
+import { errorLogText } from './error-log';
 
 export type Listener = (e: EventEnvelope) => void;
 
@@ -15,7 +16,7 @@ export class EventBus {
   emit(e: EventEnvelope) {
     for (const fn of this.listeners) {
       // 某个订阅者出错不影响其他订阅者，也不影响写库
-      try { fn(e); } catch (err) { console.error('[events] 订阅者处理事件出错', err); }
+      try { fn(e); } catch (err) { console.error('[events] 订阅者处理事件出错', errorLogText(err)); }
     }
   }
 }

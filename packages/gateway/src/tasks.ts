@@ -6,6 +6,7 @@ import { ErrorCode, visionOf } from '@aic/protocol';
 import type { z } from 'zod';
 import type { CreateTaskBody, PatchTaskBody, TasksQuery } from '@aic/protocol';
 import { AgentError, redact as redactText, redactExact, StreamRedactor, type SessionConfigState } from '@aic/adapters';
+import { errorLogText } from './error-log';
 import type { AgentAdapter, AgentConnection, AgentRegistry, AgentUpdate, PermissionOutcome, PermissionRequest, SessionHost } from './agents/registry';
 import type { AgentService } from './agents/service';
 import type { Db } from './db';
@@ -692,7 +693,7 @@ export class TaskService {
         this.emitError(taskId, rt?.sessionId ?? null, body);
         this.setStatus(taskId, 'failed');
       } else {
-        console.error('[tasks] 任务执行出错', e);
+        console.error('[tasks] 任务执行出错', errorLogText(e, rt?.secrets ?? this.secretsOf.get(taskId) ?? []));
         const msg = e instanceof Error ? e.message : String(e);
         this.emitError(taskId, rt?.sessionId ?? null, { code: ErrorCode.AgentFailed, message: `Agent 执行出错：${redactText(msg, rt?.secrets ?? this.secretsOf.get(taskId) ?? [])}`, hint: '可以重新发送消息再试一次', actions: [] });
         this.setStatus(taskId, 'failed');

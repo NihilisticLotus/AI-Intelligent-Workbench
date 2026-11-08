@@ -32,6 +32,7 @@ import { newId } from './util';
 const delay = (ms: number) => new Promise<void>((r) => { const t = setTimeout(r, ms); t.unref?.(); });
 import { attachWs } from './ws';
 import { gatewayLog, installCrashHandlers, readLastExit, lifecycle } from './crash-log';
+import { errorLogText } from './error-log';
 
 export const VERSION = '0.1.0';
 
@@ -374,9 +375,9 @@ const isEntry = (() => {
 })();
 if (isEntry) {
   main().catch((e) => {
-    gatewayLog(defaultDataDir(), 'FATAL', `启动失败：${e instanceof Error ? `${e.message}
-${e.stack ?? ''}` : String(e)}`);
-    console.error('AI Console 启动失败：', e instanceof Error ? e.message : e);
+    const detail = errorLogText(e);
+    gatewayLog(defaultDataDir(), 'FATAL', `启动失败：${detail}`);
+    console.error('AI Console 启动失败：', detail);
     process.exit(1);
   });
 }

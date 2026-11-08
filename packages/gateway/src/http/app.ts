@@ -15,6 +15,7 @@ import { taskRoutes } from './tasks';
 import { agentRoutes } from './agents';
 import { independentRoutes } from './independent';
 import { staticHandler } from './static';
+import { errorLogText } from '../error-log';
 
 export type Env = { Bindings: HttpBindings; Variables: { device: DeviceRow; ip: string } };
 export type Ctx = Context<Env>;
@@ -105,7 +106,7 @@ export function createApp(s: Services, opts: { webDist: string }) {
 
   app.onError((e, c) => {
     const { status, body } = toApiError(e);
-    if (status >= 500) console.error('[http] 处理请求出错', c.req.method, c.req.path, e);
+    if (status >= 500) console.error('[http] 处理请求出错', c.req.method, errorLogText(e));
     return c.json(body, status as 500);
   });
   app.notFound((c) => fail(c, Errors.notFound('没有这个地址')));

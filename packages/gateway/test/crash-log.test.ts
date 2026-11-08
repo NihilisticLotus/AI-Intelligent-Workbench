@@ -44,6 +44,17 @@ describe('兜底错误处理（ISSUE-0015）', () => {
     gatewayLog(dir, 'ERROR', '请求失败 Authorization: Bearer sk-ant-abcdefghijklmnopqrstuvwxyz0123');
     expect(log()).not.toContain('sk-ant-abcdefghijklmnopqrstuvwxyz0123');
   });
+  it.each([true, false])('致命异常的文件和终端都脱敏，保留原始收尾参数（Error=%s）', (asError) => {
+    const { printed, fatals, log } = setup();
+    const synthetic = 'only-a-synthetic-bearer-value';
+    const raw = `合成故障 Authorization: Bearer ${synthetic}`;
+    const reason = asError ? new Error(raw) : raw;
+    process.emit('uncaughtException', reason, 'uncaughtException');
+    expect(log()).not.toContain(synthetic);
+    expect(printed.join('\n')).not.toContain(synthetic);
+    expect(printed.join('\n')).toContain('合成故障');
+    expect(fatals).toEqual([reason]);
+  });
   it('致命错误即使完成收尾也不算正常退出', () => {
     const {dir}=setup();lifecycle(dir,'start',Date.now(),'启动');lifecycle(dir,'exit',Date.now(),'未捕获异常',1);
     expect(readLastExit(dir)).toMatchObject({clean:false,reason:'未捕获异常'});

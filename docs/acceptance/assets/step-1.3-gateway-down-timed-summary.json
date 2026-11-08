@@ -1,0 +1,14 @@
+{
+  "stopRequestedAt": 1794121746859,
+  "stopCompletedAt": 1794121746911,
+  "waitingStartedAt": 1794121735568,
+  "visibleObservedAt": 1794121748477,
+  "observedAfterStopRequestMs": 1618,
+  "waitBeganBeforeStop": true,
+  "sendEnabled": false,
+  "placeholder": "工作台服务已停止，重新启动后可以继续发送",
+  "scope": "本机 app 预览 17890，内嵌浏览器受控退出；不是 Chrome 人工关闭计时，也不解释原异常退出根因",
+  "newRealModelMessages": 0,
+  "newIndependentGenerationRequests": 0,
+  "newRemoteCatalogRequests": 0
+}

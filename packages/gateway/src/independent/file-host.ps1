@@ -43,7 +43,7 @@ try {
 } catch {
     $reason = 'io_error'
     $message = $_.Exception.GetBaseException().Message
-    if ($message -match '^aic_(forbidden|not_found|busy|conflict|too_large|binary|io_error)$') { $reason = $Matches[1] }
+    if ($message -match '^aic_(forbidden|not_found|busy|conflict|too_large|binary|io_error|interrupted)$') { $reason = $Matches[1] }
     [Console]::WriteLine((@{ ok = $false; reason = $reason } | ConvertTo-Json -Compress))
 } finally {
     if ($null -ne $guard) { $guard.Dispose() }

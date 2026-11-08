@@ -59,14 +59,15 @@ describe('独立项目文本工具', () => {
     const run = vi.spyOn(f.executor, 'run'); await expect(f.host.read('binary', AbortSignal.abort())).rejects.toMatchObject({ reason: 'cancelled' }); expect(run).not.toHaveBeenCalled();
   }, 30_000);
   it('定位忽略生成目录、私有状态和凭据路径，字面筛选与结果体积有界', async () => {
-    const f = setup(); f.put('src/Hello.ts', '文本'); f.put('node_modules/hidden.txt', '生成物'); f.put('.env', '虚构夹具'); f.put('.claude/example', '虚构夹具'); f.put('private-state/hidden', '私有夹具');
+    const f = setup(); f.put('src/Hello.ts', '文本'); f.put('node_modules/hidden.txt', '生成物'); f.put('.env', '虚构夹具'); f.put('.claude/example', '虚构夹具'); f.put('private-state/hidden', '私有夹具'); f.put('.aic-stage-fixture', '暂存夹具'); f.put('.aic-old-fixture', '保留夹具');
     const all = await f.files.list({ directory: null, query: '', maxEntries: 100 });
-    expect(all.paths).toEqual(['src/Hello.ts']); expect(all.skipped).toBeGreaterThanOrEqual(4);
+    expect(all.paths).toEqual(['src/Hello.ts']); expect(all.skipped).toBeGreaterThanOrEqual(6);
     expect((await f.files.list({ directory: null, query: 'HELLO.', maxEntries: 100 })).paths).toEqual(['src/Hello.ts']);
     for (let i = 0; i < 400; i++) f.put(`many/${String(i).padStart(4, '0')}-${'x'.repeat(175)}`, '');
     const limited = await f.files.list({ directory: 'many', query: '', maxEntries: 2000 }); expect(limited.truncated).toBe(true); expect(Buffer.byteLength(JSON.stringify(limited.paths))).toBeLessThan(64 * 1024);
     expect((await f.files.list({ directory: null, query: '', maxEntries: 1 })).truncated).toBe(true);
-    for (const name of ['.codex/auth.json', '.workbuddy/a', '.zcode/a', '.env.local', 'auth.json', 'certificate.pem']) expect(() => workspaceRelative(name)).toThrow();
+    for (const name of ['.codex/auth.json', '.workbuddy/a', '.zcode/a', '.env.local', 'auth.json', 'certificate.pem', '.aic-stage-fixture', '.aic-old-fixture']) expect(() => workspaceRelative(name)).toThrow();
+    for (const name of ['.aic-stage-fixture', '.aic-old-fixture']) await expect(f.host.read(name)).rejects.toMatchObject({ status: 403, body: { code: 'auth.forbidden' } });
   });
   it('搜索使用字面文本、限制命中与片段，跳过二进制并保留行号', async () => {
     const f = setup(); f.put('one.txt', 'A.*界\r\na.*界\n' + 'x'.repeat(4000) + 'A.*界\n'); f.put('binary', Buffer.from([0,65]));

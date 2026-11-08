@@ -9,7 +9,7 @@ using System.Text.RegularExpressions;
 using Microsoft.Win32.SafeHandles;
 
 public sealed class AicFileGuard : IDisposable {
-    const uint Read = 0x80000000, Write = 0x40000000, Attributes = 0x80;
+    const uint Read = 0x80000000, Write = 0x40000000, Delete = 0x10000, Attributes = 0x80;
     const uint Reparse = 0x00200000, BackupSemantics = 0x02000000;
     const int Limit = 512 * 1024;
     readonly string root;
@@ -26,6 +26,11 @@ public sealed class AicFileGuard : IDisposable {
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern uint GetFinalPathNameByHandleW(SafeFileHandle handle, StringBuilder path, uint length, uint flags);
     [DllImport("kernel32.dll")] static extern uint GetFileType(SafeFileHandle handle);
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)] static extern uint GetDriveTypeW(string root);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool SetFileInformationByHandle(SafeFileHandle handle, int kind, IntPtr data, uint length);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool GetFileInformationByHandleEx(SafeFileHandle handle, int kind, IntPtr data, uint length);
+    [DllImport("advapi32.dll", SetLastError = true)] static extern bool GetKernelObjectSecurity(SafeFileHandle handle, uint kind, byte[] data, uint length, out uint needed);
+    [DllImport("ntdll.dll")] static extern uint NtQueryInformationFile(SafeFileHandle handle, IntPtr io, IntPtr data, uint length, int kind);
+    [StructLayout(LayoutKind.Sequential)] struct SecurityAttributes { public int Length; public IntPtr Descriptor; public int Inherit; }
 
     public sealed class Blob { public byte[] Bytes; public string Hash, FileId; }
     public sealed class Hit { public string Path, TextBase64; public int Line; public bool TextTruncated; }
@@ -38,7 +43,7 @@ public sealed class AicFileGuard : IDisposable {
     static bool Blocked(string part) {
         string value = part.ToLowerInvariant();
         return new HashSet<string> { ".git", ".aic-data", ".claude", ".codex", ".codebuddy", ".workbuddy", ".zcode", ".ssh", ".aws", ".azure", "auth.json", "credentials.json", "credentials", ".npmrc", ".netrc", ".pypirc" }.Contains(value)
-            || value == ".env" || value.StartsWith(".env.") || value.EndsWith(".pem") || value.EndsWith(".key") || value.EndsWith(".pfx") || value.EndsWith(".p12");
+            || value == ".env" || value.StartsWith(".env.") || value.StartsWith(".aic-stage-") || value.StartsWith(".aic-old-") || value.EndsWith(".pem") || value.EndsWith(".key") || value.EndsWith(".pfx") || value.EndsWith(".p12");
     }
     static void Component(string part) {
         if (String.IsNullOrEmpty(part) || part == "." || part == ".." || part.Length > 200 || part.TrimEnd('.', ' ') != part
@@ -54,7 +59,7 @@ public sealed class AicFileGuard : IDisposable {
         return value.Substring(4).TrimEnd('\\');
     }
     static SafeFileHandle Open(string path, bool directory, bool write, bool create) {
-        SafeFileHandle handle = CreateFileW(path, directory ? Attributes : Read | (write ? Write : 0), create ? 0U : 1U,
+        SafeFileHandle handle = CreateFileW(path, directory ? Attributes : Read | (write ? Delete : 0), create ? 0U : 1U,
             IntPtr.Zero, create ? 1U : 3U, Reparse | BackupSemantics, IntPtr.Zero);
         if (handle.IsInvalid) { int error = Marshal.GetLastWin32Error(); handle.Dispose(); WinError(error); }
         try {
@@ -122,14 +127,95 @@ public sealed class AicFileGuard : IDisposable {
             }
         } } finally { foreach (SafeFileHandle handle in held) handle.Dispose(); }
     }
+    // delete-pending 是暂存文件的命名空间屏障；共享模式本身不能阻止新硬链接。
+    static void Disposition(SafeFileHandle handle, bool pending) {
+        IntPtr data = Marshal.AllocHGlobal(4);
+        try { Marshal.WriteInt32(data, pending ? 1 : 0); if (!SetFileInformationByHandle(handle, 4, data, 4)) WinError(); }
+        finally { Marshal.FreeHGlobal(data); }
+    }
+    static void ProtectStage(SafeFileHandle handle) {
+        Disposition(handle, true);
+        IntPtr io = Marshal.AllocHGlobal(IntPtr.Size * 2), data = Marshal.AllocHGlobal(12);
+        try {
+            // FileStandardLinkInformation 包括 pending 链接，普通 NumberOfLinks 不能替代它。
+            if (NtQueryInformationFile(handle, io, data, 12, 54) != 0 || Marshal.ReadInt32(data, 0) != 0
+                || Marshal.ReadInt32(data, 4) != 1 || Marshal.ReadByte(data, 8) != 1 || Marshal.ReadByte(data, 9) != 0) throw Error("forbidden");
+        } finally { Marshal.FreeHGlobal(io); Marshal.FreeHGlobal(data); }
+    }
+    static byte[] Security(SafeFileHandle handle) {
+        uint needed; GetKernelObjectSecurity(handle, 7, null, 0, out needed);
+        if (needed == 0 || needed > 65536) throw Error("forbidden");
+        byte[] data = new byte[needed]; if (!GetKernelObjectSecurity(handle, 7, data, needed, out needed)) WinError(); return data;
+    }
+    static void DefaultStreamOnly(SafeFileHandle handle) {
+        IntPtr data = Marshal.AllocHGlobal(65536);
+        try {
+            // 替换不能悄悄丢弃 Zone.Identifier 等额外流；只接受单一默认数据流。
+            if (!GetFileInformationByHandleEx(handle, 7, data, 65536) || Marshal.ReadInt32(data, 0) != 0
+                || Marshal.ReadInt32(data, 4) != 14 || Marshal.PtrToStringUni(IntPtr.Add(data, 24), 7) != "::$DATA") throw Error("forbidden");
+        } finally { Marshal.FreeHGlobal(data); }
+    }
+    static SafeFileHandle CreateStage(string path, byte[] security, uint attributes) {
+        IntPtr descriptor = IntPtr.Zero, settings = IntPtr.Zero;
+        try {
+            if (security != null) {
+                descriptor = Marshal.AllocHGlobal(security.Length); Marshal.Copy(security, 0, descriptor, security.Length);
+                SecurityAttributes value = new SecurityAttributes { Length = Marshal.SizeOf(typeof(SecurityAttributes)), Descriptor = descriptor, Inherit = 0 };
+                settings = Marshal.AllocHGlobal(value.Length); Marshal.StructureToPtr(value, settings, false);
+            }
+            SafeFileHandle handle = CreateFileW(path, Read | Write | Delete, 0, settings, 1, Reparse | BackupSemantics | attributes, IntPtr.Zero);
+            if (handle.IsInvalid) { int error = Marshal.GetLastWin32Error(); handle.Dispose(); WinError(error); }
+            return handle;
+        } finally { if (settings != IntPtr.Zero) Marshal.FreeHGlobal(settings); if (descriptor != IntPtr.Zero) Marshal.FreeHGlobal(descriptor); }
+    }
+    static void Rename(SafeFileHandle handle, string destination) {
+        byte[] name = Encoding.Unicode.GetBytes(destination); int rootOffset = IntPtr.Size == 8 ? 8 : 4, nameOffset = rootOffset + IntPtr.Size + 4;
+        int length = nameOffset + name.Length + 2; IntPtr data = Marshal.AllocHGlobal(length);
+        try {
+            for (int i = 0; i < nameOffset; i++) Marshal.WriteByte(data, i, 0);
+            Marshal.WriteInt32(data, rootOffset + IntPtr.Size, name.Length); Marshal.Copy(name, 0, IntPtr.Add(data, nameOffset), name.Length);
+            // Win32 包装层还会解析以 NUL 结尾的路径，不能只设置 FileNameLength。
+            Marshal.WriteInt16(data, nameOffset + name.Length, 0);
+            // ReplaceIfExists 始终为 false：间隔中被占名时只能停止，不能覆盖竞争者。
+            if (!SetFileInformationByHandle(handle, 3, data, (uint)length)) WinError();
+            if (!String.Equals(Final(handle), destination, StringComparison.OrdinalIgnoreCase)) throw Error("interrupted");
+        } finally { Marshal.FreeHGlobal(data); }
+    }
     public string WriteFile(string relative, string expectedHash, byte[] bytes, bool create, bool createParents) {
         ValidateText(bytes); string target = Target(relative); List<SafeFileHandle> held = Parents(target, create && createParents);
-        try { using (SafeFileHandle handle = Open(target, false, true, create)) using (FileStream stream = new FileStream(handle, FileAccess.ReadWrite)) {
-            if (!create) { byte[] old = Content(stream, Limit); if (Hash(old) != expectedHash) throw Error("conflict"); }
-            stream.Position = 0;
-            stream.Write(bytes, 0, bytes.Length); stream.SetLength(bytes.Length); stream.Flush(true);
+        SafeFileHandle original = null, stage = null; FileStream oldStream = null, newStream = null;
+        bool movedOriginal = false, published = false; string parent = Path.GetDirectoryName(target);
+        try {
+            byte[] security = null; uint attributes = 0;
+            if (!create) {
+                original = Open(target, false, true, false); Info info; if (!GetFileInformationByHandle(original, out info)) WinError();
+                // 不悄悄取消只读、压缩、加密或稀疏属性；这些文件需要单独验证的修改策略。
+                if ((info.Attributes & ~0x20A6U) != 0) throw Error("forbidden");
+                DefaultStreamOnly(original); attributes = info.Attributes & 0x2026U; security = Security(original);
+                oldStream = new FileStream(original, FileAccess.Read);
+                if (Hash(Content(oldStream, Limit)) != expectedHash) throw Error("conflict");
+            }
+            string staging = Path.Combine(parent, ".aic-stage-" + Guid.NewGuid().ToString("N"));
+            stage = CreateStage(staging, security, attributes);
+            ProtectStage(stage); // 先屏障、再核对含 pending 的总链接数；此时尚未写入任何正文。
+            newStream = new FileStream(stage, FileAccess.ReadWrite);
+            newStream.Write(bytes, 0, bytes.Length); newStream.SetLength(bytes.Length); newStream.Flush(true);
+            // 此后绝不再修改新 inode 的正文；清除 pending 后出现别名也不会遭到后续字节写入。
+            if (original != null) {
+                Rename(original, Path.Combine(parent, ".aic-old-" + Guid.NewGuid().ToString("N"))); movedOriginal = true;
+            }
+            Disposition(stage, false); Rename(stage, target); published = true;
+            if (original != null) Disposition(original, true);
             return Hash(bytes);
-        } } finally { foreach (SafeFileHandle handle in held) handle.Dispose(); }
+        } catch {
+            // 旧文件已移走时不能声称无副作用，也不能覆盖抢占者来自动回滚。
+            if (movedOriginal || published) throw Error("interrupted"); throw;
+        } finally {
+            if (stage != null && !published) { try { Disposition(stage, true); } catch { } }
+            if (newStream != null) newStream.Dispose(); if (stage != null) stage.Dispose();
+            if (oldStream != null) oldStream.Dispose(); if (original != null) original.Dispose();
+            foreach (SafeFileHandle handle in held) handle.Dispose();
+        }
     }
     public SearchResult Search(string[] paths, string query, bool caseSensitive, int maxMatches) {
         SearchResult result = new SearchResult(); int outputBytes = 0;

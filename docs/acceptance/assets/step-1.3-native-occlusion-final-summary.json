@@ -1,0 +1,77 @@
+{
+  "scope": "真实 CodeBuddy 原生 Windows 补验；窗口和系统通知由用户人工观察，事件与计时由本机只读核对",
+  "approvedProposal": "69cb62b",
+  "task": {
+    "id": "t_Q9p3-BnBt0n_",
+    "agent": "codebuddy",
+    "status": "paused",
+    "model": "default-model",
+    "permission": "ask"
+  },
+  "timerStartedAt": 1794138709729,
+  "sentAt": 1794139319743,
+  "approvalAt": 1794139328928,
+  "resolvedAt": 1794139346452,
+  "elapsedBeforeSendMs": 610014,
+  "elapsedBeforeApprovalMs": 619199,
+  "sessionsStarted": 1,
+  "userMessages": 1,
+  "messageAttempts": 1,
+  "approvalRequests": 1,
+  "approvals": [
+    {
+      "id": "a_oyyKJbVLs60V",
+      "status": "rejected",
+      "created_at": 1794139328927,
+      "decided_at": 1794139346451
+    }
+  ],
+  "decisions": [
+    {
+      "at": 1794139346452,
+      "status": "rejected",
+      "optionId": "reject",
+      "deviceName": "Chrome 浏览器（本机）"
+    }
+  ],
+  "toolStarts": 1,
+  "errors": 0,
+  "usageEvents": 3,
+  "outcome": "rejected_complete",
+  "targetExists": false,
+  "workspaceFiles": [
+    "AGENTS.md",
+    "CLAUDE.md"
+  ],
+  "syntheticRulesUnchanged": true,
+  "manualObservations": {
+    "source": "用户对三项明确回复：都按都是是",
+    "minimizedUntilNotification": true,
+    "windowsNotificationSeen": true,
+    "approvalVisibleWithoutRefresh": true,
+    "rejectedByUser": true,
+    "notificationClickPathVerified": false
+  },
+  "newClaudeMessages": 0,
+  "newCodexMessages": 0,
+  "newIndependentGenerationRequests": 0,
+  "newWorkbenchModelCatalogRequests": 0,
+  "newWorkbenchPublicCatalogRequests": 0,
+  "newWorkbenchRemoteCountRequests": 0,
+  "thirdPartyInternalRequestCount": "未知",
+  "actualSupplierCost": "未知",
+  "newManualReserveCny": 2,
+  "cumulativeManualReserveCny": 12.8,
+  "manualReserveIsHardLimit": false,
+  "otherStateChecks": {
+    "claudePausedAndUnsentDraftPreserved": true,
+    "independentCatalogBindingsRequestsBudgetsUnchanged": true
+  },
+  "controllerCleanup": {
+    "deviceName": "1.3 CodeBuddy 原生补验控制器",
+    "revoked": true,
+    "oldTokenCheck": 401,
+    "localTokenFileRemoved": true,
+    "at": 1794139464007
+  }
+}

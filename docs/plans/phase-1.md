@@ -566,7 +566,7 @@ ErrorCode 增加：`agent.auth_required`、`agent.quota_exceeded`、`agent.crash
 
 | 项 | 问题单 |
 |---|---|
-| 内嵌隐藏后的真实 CodeBuddy 审批已有证据；Windows Chrome 最小化超过十分钟后的演示审批、系统通知、无刷新卡片和最终拒绝已补验；真实 Agent 的同场景仍未验证 | ISSUE-0014 |
+| 原生 Windows Chrome 最小化后实际等待 610014ms 发送，619199ms 真实 CodeBuddy 审批到达；用户确认通知、恢复无刷新卡片并拒绝，文件未创建；真实同场景通过，修复 726e7ef，详见 step-1.3 最新节 | ISSUE-0014（fixed） |
 | 异常日志、down 提示与恢复已验证；用户物理关闭记录正常 SIGHUP，另一次受控退出的内嵌页提示计时 1618ms 通过；原始意外退出根因未查明 | ISSUE-0015 |
 | 用户已取消 Claude 登录；代登录与第三方 API 替换按新边界停止。独立真实文本、创建审批、流式替换、Flash 图片 / 换模型续接及 HTTP 取消 / 重启恢复通过，旧工具失败原因仍调查；两份旧工作台密钥已清理，目录和历史按授权保留 | ISSUE-0007、0013、0026（wontfix：旧认证路线取消）；ISSUE-0028（fixed）；ISSUE-0029、0042 |
 | 恢复会话后配置和上下文是否保留；拒绝审批后文件确实没写；Codex 在网页里的完整对话（2026-11-08 补验：Codex 全部通过，CodeBuddy 换模型后记得上下文；Claude 额度用完没测到） | ISSUE-0012 |

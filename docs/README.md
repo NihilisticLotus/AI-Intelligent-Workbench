@@ -34,6 +34,6 @@
 | 目录 | 说明 |
 |---|---|
 | [acceptance/](acceptance/) | 每一步的验收记录 |
-| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 稳定、补验与输入框：部分通过；独立 Agent 真实文本、创建审批、流式替换、Flash 图片 / 换模型续接及 HTTP 取消 / 重启恢复通过；Windows 拖入与演示通知已获人工确认、内嵌受控停服提示 1618ms；真实目录识别失败、旧工具根因未知，CodeBuddy 新一轮真实遮挡草稿已准备、尚待最小化就绪；Claude 与干净 Windows 环境仍有未验证项。两份旧工作台密钥已按授权清理，目录和历史保留，详见各追加节与问题单 |
+| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 稳定、补验与输入框：部分通过；独立 Agent 真实文本、创建审批、流式替换、Flash 图片 / 换模型续接及 HTTP 取消 / 重启恢复通过；Windows 拖入与演示通知已获人工确认、内嵌受控停服提示 1618ms；真实目录识别失败、旧工具根因未知，CodeBuddy 原生十分钟最小化后的真实审批、Windows 通知、无刷新卡片及拒绝已通过（ISSUE-0014 fixed）；Claude 与干净 Windows 环境仍有未验证项。两份旧工作台密钥已按授权清理，目录和历史保留，详见各追加节与问题单 |
 | [devlog/](devlog/) | 开发笔记，每月一个文件，只追加 |
 | [issues/](issues/README.md) | 问题收纳：总表 + 每个问题一个文件 |

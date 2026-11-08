@@ -14,6 +14,7 @@ import { ModelTransportError, ModelSse, postModel } from '../src/independent/mod
 import { IndependentConversationStore } from '../src/independent/conversation';
 import { IndependentTurnEngine } from '../src/independent/turn-engine';
 import { seed } from './fixtures/independent-journal';
+import { independentModelTools } from '../src/independent/tool-definitions';
 
 const servers: Server[] = [], databases: Db[] = [], dirs: string[] = [];
 const calls: { url: string; headers: Record<string, any>; body: any }[] = [];
@@ -48,6 +49,30 @@ async function fixture(protocol: IndependentApiProtocol = 'chat_completions', ha
 }
 
 describe('独立模型三协议正式传输', () => {
+  it.each(['chat_completions', 'responses', 'anthropic_messages'] as const)('%s 实际发送分开文件工具的根属性和完整必填，不使用顶层联合', async (protocol) => {
+    const f = await fixture(protocol, (_req, res) => { res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify(protocol === 'responses' ? responses([]) : protocol === 'anthropic_messages' ? messages([]) : chat())); });
+    await f.driver({ tools: independentModelTools('separate_v2') }).complete(f.request, f.signal);
+    const sent = calls[0]!.body.tools.map((entry: any) => protocol === 'chat_completions' ? entry.function
+      : protocol === 'anthropic_messages' ? { name: entry.name, parameters: entry.input_schema } : entry);
+    expect(sent.map((t: any) => t.name)).toEqual(['list_files', 'read_file', 'search_files', 'read_rules', 'create_file', 'replace_text', 'command']);
+    for (const entry of sent) {
+      expect(entry.parameters.type).toBe('object'); expect(entry.parameters.properties).toBeTruthy();
+      expect(entry.parameters.oneOf).toBeUndefined(); expect(entry.parameters.anyOf).toBeUndefined();
+      expect(entry.parameters.additionalProperties).toBe(false);
+      expect([...entry.parameters.required].sort()).toEqual(Object.keys(entry.parameters.properties).sort());
+    }
+    expect(sent.find((t: any) => t.name === 'create_file').parameters.required).toEqual(['path', 'content', 'createParents']);
+    expect(sent.find((t: any) => t.name === 'replace_text').parameters.required).toEqual(['path', 'expectedHash', 'oldText', 'newText']);
+    expect(calls).toHaveLength(1);
+  });
+  it('历史版本仍导出原工具集合、原描述和完整联合分支', () => {
+    const legacy = independentModelTools(); expect(legacy.map((t) => t.name)).toEqual(['list_files', 'read_file', 'search_files', 'read_rules', 'write_file', 'command']);
+    const write = legacy.find((t) => t.name === 'write_file')!;
+    expect(write.description).toBe('申请创建文件或唯一文本替换；用户批准后核对原内容再修改。');
+    expect(write.parameters.type).toBe('object'); expect(write.parameters.properties).toBeUndefined();
+    expect(write.parameters.oneOf).toHaveLength(2);
+  });
   it('SSE 解析器逐字节处理 UTF-8、CR / CRLF 与多行 data，未完成帧和坏 UTF-8 不伪造事件', () => {
     const events: string[] = [], parser = new ModelSse((data) => { events.push(data); return data === '结束'; });
     const raw = Buffer.from(':注释\r\rdata: 中文\r\ndata: 第二行\r\n\r\ndata: 结束\n\n');

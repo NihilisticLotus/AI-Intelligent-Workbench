@@ -1,10 +1,8 @@
 // 正式任务宿主：配置、记账、上下文、工具与审批均由 Gateway 持有，不借用第三方 Agent 认证。
-import { z } from 'zod';
 import {
   IndependentTaskOptions, IndependentTaskState, IndependentApprovalDetail, IndependentHistoryPage,
-  IndependentCommandSpec, IndependentFileListSpec, IndependentFileReadSpec, IndependentFileSearchSpec,
-  IndependentFileWriteSpec, IndependentProjectRulesSpec,
-  type AgentInfo, type IndependentModelToolDefinition, type IndependentTaskReference, type PermissionLevel,
+  IndependentCommandSpec,
+  type AgentInfo, type IndependentTaskReference, type PermissionLevel,
 } from '@aic/protocol';
 import { redact } from '@aic/adapters';
 import type { Db } from '../db';
@@ -27,19 +25,7 @@ import { IndependentFileDriver } from './file-driver';
 import { IndependentAttachments } from './attachments';
 import { IndependentApiDriver } from './model-driver';
 import { IndependentTurnEngine } from './turn-engine';
-
-const tool = (name: string, description: string, schema: z.ZodType): IndependentModelToolDefinition => {
-  const { $schema: _version, ...inputSchema } = z.toJSONSchema(schema, { io: 'input' });
-  return { name, description, parameters: { ...inputSchema, type: 'object' } };
-};
-const TOOLS = [
-  tool('list_files', '列出项目中的普通文件；结果有容量与时间限制。', IndependentFileListSpec),
-  tool('read_file', '读取项目 UTF-8 文本，返回内容与文件摘要。', IndependentFileReadSpec),
-  tool('search_files', '在项目普通文本内逐行搜索。', IndependentFileSearchSpec),
-  tool('read_rules', '读取目标文件所适用的 AGENTS.md 规则。', IndependentProjectRulesSpec),
-  tool('write_file', '申请创建文件或唯一文本替换；用户批准后核对原内容再修改。', IndependentFileWriteSpec),
-  tool('command', '申请执行命令。必须提供绝对可执行文件与参数数组；用户逐次批准，无系统沙箱。', IndependentCommandSpec),
-];
+import { independentModelTools } from './tool-definitions';
 const STOP_TEXT = {
   completed: '本回合已完成，等待你验收。', cancelled: '本回合已停止，实际工具与连接已收尾。',
   interrupted: '本回合已中断，请核对记录后继续。', timed_out: '已达到回合时间上限。',
@@ -93,6 +79,14 @@ export class IndependentTaskRuntime {
       if (old && Number(old.revision) !== expectedRevision) throw Errors.conflict('任务配置已变化，请重新载入');
       if (!old && expectedRevision !== undefined) throw Errors.conflict('任务配置尚未创建');
       if (old?.recovery_required) throw Errors.invalidState('请先核对中断记录');
+      if (!old) options.fileToolVersion ??= 'separate_v2';
+      else {
+        const previous = IndependentTaskOptions.parse(JSON.parse(String(old.options_json)));
+        if (options.fileToolVersion === undefined && previous.fileToolVersion !== undefined) options.fileToolVersion = previous.fileToolVersion;
+        if ((previous.fileToolVersion ?? 'combined_v1') !== (options.fileToolVersion ?? 'combined_v1')
+          && (this.db.get('SELECT id FROM independent_turns WHERE task_id=? LIMIT 1', taskId)
+            || this.ledger.snapshot(taskId).attemptedRequests > 0)) throw Errors.conflict('任务已使用原文件工具，请新建任务使用另一版本；现有上下文与预算保持不变');
+      }
       const model = this.catalog.getModel(options.selection.serviceId, options.selection.modelId);
       const service = this.catalog.getService(options.selection.serviceId);
       const cap = (field: string) => model.capabilities.find((c) => c.field === field && !c.stale && !c.conflict)?.value;
@@ -214,9 +208,11 @@ export class IndependentTaskRuntime {
       (proposal, signal) => approve(proposal.record.id, proposal.kind === 'create' ? '创建项目文件' : '替换项目文本',
         { kind: 'file', proposal }, signal));
     const command = new IndependentCommandTool(this.journal, executor);
+    const tools = options.limits.maxToolCalls > 0 ? independentModelTools(options.fileToolVersion) : [];
+    const allowedTools = new Set(tools.map((tool) => tool.name));
     const driver = new IndependentApiDriver(this.catalog, {
       generation: options.generation, context: options.context, accounting: this.ledger.accounting(taskId),
-      tools: options.limits.maxToolCalls > 0 ? TOOLS : [], loadAttachment: (id, attachmentId, signal) => new IndependentAttachments(this.attachments).load(id, attachmentId, signal),
+      tools, loadAttachment: (id, attachmentId, signal) => new IndependentAttachments(this.attachments).load(id, attachmentId, signal),
       onContext: (_binding, report) => { this.db.run('UPDATE independent_task_settings SET context_json=?,updated_at=? WHERE task_id=?', JSON.stringify(report), now(), taskId); this.changed(taskId); },
       onDelta: (_binding, delta) => {
         if (delta.type === 'text_delta' && delta.text) streamedText = true;
@@ -228,9 +224,10 @@ export class IndependentTaskRuntime {
       complete: (input, signal) => { messageId = newId('m'); streamedText = false; return driver.complete(input, signal); },
     }, {
       execute: async (call, identity, signal) => {
-        const toolId = newId('tool'); host.update({ kind: 'tool_start', toolId, toolKind: call.name === 'command' ? 'execute' : call.name === 'write_file' ? 'edit' : 'read', title: call.name, target: null });
+        const toolId = newId('tool'); host.update({ kind: 'tool_start', toolId, toolKind: call.name === 'command' ? 'execute' : ['write_file', 'create_file', 'replace_text'].includes(call.name) ? 'edit' : 'read', title: call.name, target: null });
         let ok = false;
         try {
+          if (!allowedTools.has(call.name)) return { role: 'tool', callId: call.id, name: call.name, outcome: 'error', text: '本次任务未声明这个工具，未执行' };
           if (call.name !== 'command') {
             const result = await fileDriver.execute(call, identity, signal); ok = result.outcome === 'ok'; return result;
           }

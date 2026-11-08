@@ -2,6 +2,7 @@
 import {
   IndependentFileApprovalDecision, IndependentFileListSpec, IndependentFileReadSpec, IndependentFileSearchSpec,
   IndependentFileWriteSpec, IndependentProjectRulesSpec, type IndependentFileProposal,
+  IndependentCreateFileArguments, IndependentReplaceTextArguments,
   type IndependentToolCall, type IndependentToolDriver, type IndependentToolMessage,
 } from '@aic/protocol';
 import { AppError } from '../util';
@@ -18,7 +19,9 @@ export class IndependentFileDriver implements IndependentToolDriver {
     const reply = (outcome: IndependentToolMessage['outcome'], text: string): IndependentToolMessage => ({ role: 'tool', callId: call.id, name: call.name, outcome, text });
     if (signal.aborted) return reply('cancelled', '文件操作已取消，未执行');
     const schema = call.name === 'list_files' ? IndependentFileListSpec : call.name === 'read_file' ? IndependentFileReadSpec
-      : call.name === 'search_files' ? IndependentFileSearchSpec : call.name === 'read_rules' ? IndependentProjectRulesSpec : call.name === 'write_file' ? IndependentFileWriteSpec : null;
+      : call.name === 'search_files' ? IndependentFileSearchSpec : call.name === 'read_rules' ? IndependentProjectRulesSpec
+      : call.name === 'create_file' ? IndependentCreateFileArguments : call.name === 'replace_text' ? IndependentReplaceTextArguments
+      : call.name === 'write_file' ? IndependentFileWriteSpec : null;
     if (!schema || !schema.safeParse(call.arguments).success) return reply('error', '工具名称或参数不符合严格规范，未执行');
     let prepared: IndependentFileProposal | undefined;
     try {
@@ -26,7 +29,10 @@ export class IndependentFileDriver implements IndependentToolDriver {
       if (call.name === 'read_file') return reply('ok', JSON.stringify(await this.files.read(IndependentFileReadSpec.parse(call.arguments), signal)));
       if (call.name === 'search_files') return reply('ok', JSON.stringify(await this.files.search(IndependentFileSearchSpec.parse(call.arguments), signal)));
       if (call.name === 'read_rules') return reply('ok', JSON.stringify(await this.files.rules(IndependentProjectRulesSpec.parse(call.arguments).target, signal)));
-      const spec = IndependentFileWriteSpec.parse(call.arguments);
+      const spec = IndependentFileWriteSpec.parse(call.name === 'create_file'
+        ? { ...IndependentCreateFileArguments.parse(call.arguments), kind: 'create' }
+        : call.name === 'replace_text' ? { ...IndependentReplaceTextArguments.parse(call.arguments), kind: 'replace' }
+        : call.arguments);
       prepared = await this.writes.prepare({ ...identity, callId: call.id }, spec, this.approvalBasis, signal);
       if (signal.aborted) { this.journal.cancel(prepared.record.id); return reply('cancelled', '文件修改已取消，未发起审批'); }
       let removeAbort = () => {};

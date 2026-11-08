@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'no
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { createHash } from 'node:crypto';
 import { IndependentTaskState, type IndependentTaskOptions } from '@aic/protocol';
 import { startGw, type TestGw } from './helpers';
 import { openDb } from '../src/db';
@@ -18,7 +19,7 @@ afterEach(async () => {
   for (const dir of directories.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 const done = (text: string) => ({ choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 2 } });
-async function setup(respond: (n: number, body: any) => unknown = () => done('已完成')) {
+async function setup(respond: (n: number, body: any) => unknown = () => done('已完成'), fileToolVersion: IndependentTaskOptions['fileToolVersion'] = 'combined_v1') {
   let count = 0; const bodies: any[] = [];
   server = createServer((req, res) => { void (async () => {
     const chunks: Buffer[] = []; for await (const chunk of req) chunks.push(chunk);
@@ -34,7 +35,7 @@ async function setup(respond: (n: number, body: any) => unknown = () => done('�
     protocol: 'chat_completions', authentication: 'none', enabled: true, providerId: null, plan: null, apiVersion: null });
   const model = s.independent.createModel(service.id, { name: '夹具模型', remoteModelId: 'fixture' });
   s.independent.overrides(service.id, model.id, { expectedRevision: model.revision, values: { tools: true, contextWindow: 100_000 } });
-  const options: IndependentTaskOptions = { selection: { serviceId: service.id, modelId: model.id }, generation: { stream: false },
+  const options: IndependentTaskOptions = { selection: { serviceId: service.id, modelId: model.id }, generation: { stream: false }, fileToolVersion,
     context: { mode: 'local' }, limits: { maxModelCalls: 3, maxToolCalls: 3, maxOutputTokens: 1000, maxContextBytes: 1024 * 1024, timeoutMs: 60_000 }, requestBudget: { maxRequests: 10, money: null } };
   const created = await gateway.api('POST', '/tasks', { token, body: { projectId: project.json.id, prompt: '完成测试', agent: 'independent', permission: 'ask', deferPrompt: true, independent: options } });
   expect(created.status).toBe(201);
@@ -44,6 +45,59 @@ async function setup(respond: (n: number, body: any) => unknown = () => done('�
 }
 
 describe('正式独立任务的离线接口与闭环', () => {
+  it('新任务缺省持久化分开工具；历史无版本配置保持合并，旧客户端更新不降级新版本', async () => {
+    const f = await setup(); const { fileToolVersion: _version, ...oldOptions } = f.options;
+    const fresh = await gateway!.api('POST', '/tasks', { token: f.token, body: { projectId: f.task.projectId, prompt: '新任务', agent: 'independent', permission: 'ask', deferPrompt: true, independent: oldOptions } });
+    expect(fresh.status).toBe(201); const freshId = fresh.json.id;
+    expect(f.s.independentRuntime.state(freshId).options.fileToolVersion).toBe('separate_v2');
+    await f.s.tasks.updateIndependent(freshId, 'configure', oldOptions, f.s.independentRuntime.state(freshId).revision);
+    expect(f.s.independentRuntime.state(freshId).options.fileToolVersion).toBe('separate_v2');
+    f.s.db.run('UPDATE independent_task_settings SET options_json=? WHERE task_id=?', JSON.stringify(oldOptions), f.task.id);
+    await f.s.tasks.updateIndependent(f.task.id, 'configure', oldOptions, f.state().revision);
+    expect(f.state().options.fileToolVersion).toBeUndefined(); expect(f.count()).toBe(0);
+  });
+  it('分开工具完成创建、分段读取、摘要约束替换与模型继续，审批仍绑定原私有正文', async () => {
+    const content = '分开工具的原文', replacement = '分开工具的新文';
+    const response = (name: string, args: unknown) => ({ choices: [{ index: 0, message: { role: 'assistant', content: '', tool_calls: [
+      { id: name + '-one', type: 'function', function: { name, arguments: JSON.stringify(args) } },
+    ] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 5 } });
+    const f = await setup((n) => n === 1 ? response('create_file', { path: 'separate.txt', content, createParents: false })
+      : n === 2 ? response('read_file', { path: 'separate.txt', startLine: 1, maxLines: 10 })
+      : n === 3 ? response('replace_text', { path: 'separate.txt', expectedHash: createHash('sha256').update(content).digest('hex'), oldText: content, newText: replacement }) : done('创建与替换均完成'), 'separate_v2');
+    await f.s.tasks.updateIndependent(f.task.id, 'configure', { ...f.options, limits: { ...f.options.limits, maxModelCalls: 5, maxToolCalls: 5 } }, f.state().revision);
+    await f.s.tasks.prompt(f.task.id, '创建并改为新文');
+    const device = f.s.db.get<{ id: string }>('SELECT id FROM devices LIMIT 1')!;
+    for (const kind of ['create', 'replace']) {
+      await expect.poll(() => f.s.tasks.listApprovals('pending').length, { timeout: 30_000 }).toBe(1);
+      const approval = f.s.tasks.listApprovals('pending')[0]!;
+      const detail = await gateway!.api('GET', `/tasks/${f.task.id}/independent/approvals/${approval.independentToolId}`, { token: f.token });
+      expect(detail.json.proposal.kind).toBe(kind); expect(detail.json.proposal.afterText).toBe(kind === 'create' ? content : replacement);
+      await f.s.tasks.approve(approval.id, 'allow', undefined, device.id);
+    }
+    await f.wait(); expect(f.count()).toBe(4); expect(readFileSync(path.join(f.workspace, 'separate.txt'), 'utf8')).toBe(replacement);
+    expect(f.state().budget.attemptedRequests).toBe(4);
+    const raw = f.s.independentRuntime.history(f.task.id, 0, 100).items;
+    expect(raw.map((e) => e.message).filter((message) => message.role === 'tool').map((message) => message.name)).toEqual(['create_file', 'read_file', 'replace_text']);
+    expect(JSON.stringify(f.s.events.read({ taskId: f.task.id, after: 0, limit: 500 }))).not.toContain(content);
+    const before = f.state();
+    await expect(f.s.tasks.updateIndependent(f.task.id, 'configure', { ...before.options, fileToolVersion: 'combined_v1' }, before.revision)).rejects.toThrow('已使用原文件工具');
+    expect(f.state()).toEqual(before);
+  }, 90_000);
+  it.each(['empty', 'extra', 'wrong-tool', 'readonly'])('分开工具 %s 不绕过参数、声明范围或只读权限', async (mode) => {
+    const f = await setup((n) => n === 1 ? { choices: [{ index: 0, message: { role: 'assistant', content: '', tool_calls: [
+      { id: 'invalid-one', type: 'function', function: { name: mode === 'wrong-tool' ? 'write_file' : 'create_file', arguments: JSON.stringify(mode === 'empty' ? {} : { path: 'must-not-exist.txt', content: '未获准', createParents: false, ...(mode === 'extra' ? { approved: true } : mode === 'wrong-tool' ? { kind: 'create' } : {}) }) } },
+    ] }, finish_reason: 'tool_calls' }], usage: { prompt_tokens: 10, completion_tokens: 5 } } : done('未执行文件修改'), 'separate_v2');
+    if (mode === 'readonly') await f.s.tasks.patch(f.task.id, { permission: 'readonly' });
+    await f.s.tasks.prompt(f.task.id, '不应执行'); await f.wait();
+    expect(f.s.tasks.listApprovals('pending')).toEqual([]); expect(existsSync(path.join(f.workspace, 'must-not-exist.txt'))).toBe(false);
+    const results = f.s.independentRuntime.history(f.task.id, 0, 100).items.filter((e) => e.message.role === 'tool');
+    if (mode === 'wrong-tool') {
+      expect(f.count()).toBe(1); expect(results).toEqual([]);
+      expect(f.state().requests[0]).toMatchObject({ status: 'failed', settlement: { failure: 'protocol' } }); return;
+    }
+    expect(f.count()).toBe(2);
+    expect(results).toHaveLength(1); expect(results[0]!.message).toMatchObject({ outcome: mode === 'readonly' ? 'rejected' : 'error' });
+  }, 90_000);
   it('正式附件以任务身份读取并编码；不支持图片时在发布用户消息和请求前拒绝', async () => {
     const f = await setup(), id = f.task.id;
     const image = f.s.attachments.upload(id, 'pixel.png', Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=', 'base64'));

@@ -947,9 +947,13 @@ export const IndependentGenerationOptions = z.object({
 }).strict();
 export type IndependentGenerationOptions = z.infer<typeof IndependentGenerationOptions>;
 /** 正式独立任务的显式配置；不接受凭据、路径或工具执行策略。 */
+export const IndependentFileToolVersion = z.enum(['combined_v1', 'separate_v2']);
+export type IndependentFileToolVersion = z.infer<typeof IndependentFileToolVersion>;
 export const IndependentTaskOptions = z.object({
   selection: IndependentSelection, generation: IndependentGenerationOptions, context: IndependentContextPolicy,
   limits: IndependentRunLimits, requestBudget: IndependentRequestBudget,
+  /** 新任务由宿主持久化版本；历史配置缺省时保留原合并工具，执行后不可切换。 */
+  fileToolVersion: IndependentFileToolVersion.optional(),
 }).strict();
 export type IndependentTaskOptions = z.infer<typeof IndependentTaskOptions>;
 export const IndependentTaskReference = IndependentSelection.extend({ revision: Revision }).strict();
@@ -1045,6 +1049,11 @@ export const IndependentFileWriteSpec = z.discriminatedUnion('kind', [
     oldText: z.string().min(1).max(512 * 1024), newText: z.string().max(512 * 1024) }).strict(),
 ]);
 export type IndependentFileWriteSpec = z.infer<typeof IndependentFileWriteSpec>;
+/** 分开的模型工具不让模型提供操作判别字段；校验后由宿主映射到原有写入规格。 */
+export const IndependentCreateFileArguments = IndependentFileWriteSpec.options[0].omit({ kind: true });
+export type IndependentCreateFileArguments = z.infer<typeof IndependentCreateFileArguments>;
+export const IndependentReplaceTextArguments = IndependentFileWriteSpec.options[1].omit({ kind: true });
+export type IndependentReplaceTextArguments = z.infer<typeof IndependentReplaceTextArguments>;
 export const IndependentFileWriteOutcome = z.object({
   status: z.enum(['written', 'conflict', 'cancelled', 'interrupted', 'failed']), path: IndependentRelativePath,
   beforeHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(), afterHash: z.string().regex(/^[a-f0-9]{64}$/).nullable(),

@@ -6,7 +6,7 @@
 
 | 文档 | 说明 |
 |---|---|
-| [design/design.md](design/design.md) | 架构设计 v0.4.17：第三方设置归属、独立任务、自有循环、三协议、预算与恢复；加入 DeepSeek Harness 参考及采用边界 |
+| [design/design.md](design/design.md) | 架构设计 v0.4.18：第三方设置归属、独立任务、自有循环、三协议、预算与恢复；DeepSeek Harness 参考、新任务文件工具拆分及历史兼容 |
 | [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.7：统一选择器、附件、独立服务与模型、能力来源、任务策略 / 预算、私有审批、恢复及失败片段收尾 |
 | [prototype/index.html](prototype/index.html) | 可点击原型（双击打开）：工作台、看板、Agent、资产、生成、自动化、监控、能力 |
 

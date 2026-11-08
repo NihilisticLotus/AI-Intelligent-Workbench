@@ -1,0 +1,75 @@
+{
+  "checkedAt": "2026-11-08T18:47:31.681Z",
+  "sourceCommit": "17c4496",
+  "service": {
+    "id": "isv_EcIJVwi76kfS",
+    "name": "智谱真实补验",
+    "protocol": "responses",
+    "baseUrl": "https://open.bigmodel.cn/api/v1",
+    "configRevision": 1
+  },
+  "activeTasks": [],
+  "independentV2RequestCount": 11,
+  "directory": {
+    "attemptedAt": 1794163644069,
+    "hasSnapshot": false,
+    "lastError": {
+      "at": 1794163644337,
+      "message": "元数据结构无法识别，未替换上次预览",
+      "diagnostics": {
+        "stage": "service_parse",
+        "serviceRequests": 1,
+        "publicCatalogRequests": 0,
+        "parsedPages": 0,
+        "httpStatus": 200,
+        "parseFailure": "data_not_array",
+        "rootShape": {
+          "root": "object",
+          "data": "missing",
+          "errorMarker": false,
+          "topLevelKeys": 1
+        }
+      }
+    },
+    "snapshot": null
+  },
+  "hashes": {
+    "services": "d061ac8cfa4231e84be5e2d2293ffcf518337c557233c09d56dc6f4623ea03c4",
+    "models": "e9df7679eea500e98596b2afb9c0cc9fdf7fe24fb346411b495428cbb8eed724",
+    "bindings": "69b9d546dda1527b03c370dddb250af8086f37910853b18c9538a59f573da4c5",
+    "requests": "c583e9126c14f60a5e7ee4176e2edf96a3030bbeddfc236cde48d6e4aae11b3c",
+    "budgets": "50221a38164240c854bbae2294009171eb6ecbc12f4650b348917754a834d472",
+    "messages": "3d3444dcd0fde0c0f430355e6438617616884226ac7533aaf2d32437b1723c51",
+    "otherDiscoveries": "a6cac3a076af0eeb9cf4323a592ada46c6a11031057016394617d4e5d5bb5075",
+    "defaultValue": "74234e98afe7498fb5daf1f36ac2d78acc339464f950703b8c019892f982b90b"
+  },
+  "previousDirectory": {
+    "attemptedAt": 1794162458793,
+    "hasSnapshot": false,
+    "lastError": {
+      "at": 1794162458996,
+      "message": "元数据域名解析到受限地址",
+      "diagnostics": {
+        "stage": "service_request",
+        "serviceRequests": 1,
+        "publicCatalogRequests": 0,
+        "parsedPages": 0,
+        "httpStatus": null
+      }
+    },
+    "snapshot": null
+  },
+  "unchanged": {
+    "services": true,
+    "models": true,
+    "bindings": true,
+    "requests": true,
+    "budgets": true,
+    "messages": true,
+    "otherDiscoveries": true,
+    "defaultValue": true
+  },
+  "additionalManualReserveCny": 0.2,
+  "cumulativeManualReserveCny": 25,
+  "actualCost": null
+}

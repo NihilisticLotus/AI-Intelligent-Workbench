@@ -31,7 +31,15 @@ describe('选择器与附件',()=>{
     expect(profileInfo(a, 'legacy')?.models).toEqual(a.models);
     const items = pickerItems(a, 'claude', { model: 'yes', effort: 'enabled' }, 'legacy', 'new');
     expect(items.profiles).toEqual([]);
-    expect(items.models.map((m) => m.id)).toEqual(['yes', 'no']);
+    expect(items.models.map((m) => m.id)).toEqual(['', 'yes', 'no']);
+  });
+  it('新任务可选择软件默认模型，已有会话和独立模型只提供实际 ID', () => {
+    const a = agent({kind:'codex', usesNativeConfig:true, defaultModel:'yes'});
+    const cfg = {model:'yes', effort:null};
+    expect(pickerItems(a,'fake',cfg,null,'new').models[0]).toMatchObject({id:'',name:'Agent 自己的默认模型',failure:null,cannotSee:false});
+    expect(pickerItems(a,'codex',cfg,null,'task').models.map((m)=>m.id)).toEqual(['yes','no']);
+    expect(pickerItems(agent({kind:'independent'}),'fake',cfg,null,'new').models.map((m)=>m.id)).toEqual(['yes','no']);
+    expect(pickerItems({...a,models:[]},'fake',cfg,null,'new').models.map((m)=>m.id)).toEqual(['']);
   });
   it('新任务换自定义账号后只列该账号模型，清除旧模型和思考强度；旧服务端仍兼容',()=>{
     const profiles=[{id:'local',isDefault:true,models:[{id:'native',name:'订阅模型',contextWindow:null}],efforts:['high']},

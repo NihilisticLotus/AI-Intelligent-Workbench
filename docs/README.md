@@ -7,7 +7,7 @@
 | 文档 | 说明 |
 |---|---|
 | [design/design.md](design/design.md) | 架构设计 v0.4.22：第三方设置归属、独立任务、自有循环、三协议、预算与恢复；DeepSeek Harness 参考、文件工具版本、旧密钥清理、有限诊断及已有模型官方能力预览 |
-| [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.11：统一选择器、附件、独立服务与模型、能力来源、任务策略 / 预算、私有审批、恢复、目录诊断、服务停止提示及已有模型能力预览 |
+| [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.12：统一选择器、附件、独立服务与模型、能力来源、任务策略 / 预算、私有审批、恢复、目录诊断、服务停止提示及已有模型能力预览 |
 | [prototype/index.html](prototype/index.html) | 可点击原型（双击打开）：工作台、看板、Agent、资产、生成、自动化、监控、能力 |
 
 ## 调研

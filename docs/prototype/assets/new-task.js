@@ -100,8 +100,8 @@
       $('[data-nt="perm"]', page).innerHTML = `${ic(st.perm === '完全访问' ? 'unlock' : 'shield')}<span>${st.perm}</span>${ic('down')}`;
       $('[data-nt="perm"]', page).classList.toggle('attn', st.perm === '完全访问');
       $('[data-nt="perm"]', page).setAttribute('aria-label', `权限：${st.perm}`);
-      $('[data-nt="agent"]', page).innerHTML = `<span class="ag ${st.ag}" aria-hidden="true">${BADGE[st.ag] || agName[0]}</span><span>${esc(agName)}</span><span class="sub">${esc(st.model)}${st.effort ? ' · 思考 ' + esc(st.effort) : ''}</span>${ic('down')}`;
-      $('[data-nt="agent"]', page).setAttribute('aria-label', `Agent、模型和思考强度：${agName} · ${st.model}${st.effort ? ' · 思考 ' + st.effort : ''}`);
+      $('[data-nt="agent"]', page).innerHTML = `<span class="ag ${st.ag}" aria-hidden="true">${BADGE[st.ag] || agName[0]}</span><span>${esc(agName)}</span><span class="sub">${esc(st.model || 'Agent 自己的默认模型')}${st.effort ? ' · 思考 ' + esc(st.effort) : ''}</span>${ic('down')}`;
+      $('[data-nt="agent"]', page).setAttribute('aria-label', `Agent、模型和思考强度：${agName} · ${st.model || 'Agent 自己的默认模型'}${st.effort ? ' · 思考 ' + st.effort : ''}`);
       $('.nt-idle', page).hidden = !st.idle;
       $('.nt-send', page).disabled = !ta.value.trim() && !att?.count();
       att?.refresh();
@@ -139,7 +139,7 @@
 
     // Agent · 模型 · 思考强度：和对话输入框共用 interact.js 的 aicAgentPicker
     const agentMenu = (b) => window.aicAgentPicker(b, {
-      agent: st.ag, model: st.model, effort: st.effort, list: agents.map(([k]) => k),
+      agent: st.ag, model: st.model, effort: st.effort, list: agents.map(([k]) => k), allowDefault: true,
       onPick: (p) => { st.ag = p.agent; st.model = p.model; st.effort = p.effort; paint(); recommend(); },
       onEffort: (e) => { st.effort = e; paint(); },
     });

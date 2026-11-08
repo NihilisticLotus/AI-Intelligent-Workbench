@@ -27,6 +27,10 @@ export function pickerItems(info: AgentInfo, current: AgentKind, cfg: SessionCfg
   const models = pickModels(info,session).map((m) => ({ ...m, cannotSee: visionOf({...info,models:pickModels(info,session)},m.id) === false,
     failure: info.modelFailures?.find((f)=>f.model===m.id && f.profileId===(profileId ?? info.profiles?.find((p)=>p.isDefault)?.id ?? null))?.reason ?? null,
   }));
+  // 新任务可以不下发模型，让第三方软件采用自身默认值；运行中的会话只接受实际模型 ID。
+  if (mode === 'new' && info.usesNativeConfig) {
+    models.unshift({ id: '', name: 'Agent 自己的默认模型', contextWindow: null, cannotSee: false, failure: null });
+  }
   const efforts = pickEfforts(info,session)?.slice().sort((a,b)=>a==='enabled'?-1:b==='enabled'?1:0) ?? null;
   const profiles = !info.usesNativeConfig && info.kind === current && (info.profiles?.length ?? 0)>1 ? info.profiles!.map((p)=>({ ...p,
     blocked: mode==='task' && p.id!==profileId && profileSwitchKind(info.profiles?.find((x)=>x.id===profileId) ?? null,p)==='handoff',

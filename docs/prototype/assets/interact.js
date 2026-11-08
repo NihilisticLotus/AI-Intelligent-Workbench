@@ -786,7 +786,7 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
     const root = document.createElement('div');
     root.className = 'menu ap-root'; root.setAttribute('role', 'menu'); root.setAttribute('aria-label', '选择 Agent');
     const metaOf = (k) => {
-      if (k === sel.agent) return `<span class="meta">${esc(sel.model)}${sel.effort ? ' · 思考 ' + esc(sel.effort) : ''} ✓</span>`;
+      if (k === sel.agent) return `<span class="meta">${esc(sel.model || 'Agent 自己的默认模型')}${sel.effort ? ' · 思考 ' + esc(sel.effort) : ''} ✓</span>`;
       const st = status[k];
       if (st && st !== '空闲') return `<span class="meta attn">${esc(st)}</span>`;
       return `<span class="meta">${agents[k][1].length} 个模型</span>`;
@@ -812,6 +812,7 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
       const ef = efforts[k];
       const accs = opts.accounts && k === sel.agent && accounts[k].length > 1 ? accounts[k] : null;
       sub.innerHTML = `<div class="ap-label">模型</div>
+        ${opts.allowDefault ? `<button type="button" role="menuitemradio" aria-checked="${k === sel.agent && !sel.model}" data-m="">Agent 自己的默认模型</button>` : ''}
         ${agents[k][1].map((m) => { const v = window.aicVision?.(k, m); return `<button type="button" role="menuitemradio" aria-checked="${k === sel.agent && m === sel.model}" class="${k === sel.agent && m === sel.model ? 'on' : ''}" data-m="${esc(m)}">${esc(m)}${v === false ? '<span class="ap-tag" title="这个模型看不了图片">不能看图</span>' : ''}</button>`; }).join('')}
         <div class="ap-label">思考强度</div>
         ${ef ? `<div class="ap-seg" role="radiogroup" aria-label="${agents[k][0]} 的思考强度">${ef.map((e) => `<button type="button" role="radio" aria-checked="${e === eff[k]}" data-e="${e}">${e}</button>`).join('')}</div>`
@@ -824,7 +825,7 @@ ${extra.attempts.length ? extra.attempts.map((m) => '- ' + m).join('\n') : '- �
       picker.sub = sub; picker.k = k;
       sub.addEventListener('click', (e) => {
         const b = e.target.closest('button'); if (!b) return;
-        if (b.dataset.m) { const pick = { agent: k, model: b.dataset.m, effort: eff[k] }; closePicker(); anchor.focus(); opts.onPick?.(pick); }
+        if ('m' in b.dataset) { const pick = { agent: k, model: b.dataset.m, effort: eff[k] }; closePicker(); anchor.focus(); opts.onPick?.(pick); }
         else if (b.dataset.e) {
           eff[k] = b.dataset.e;
           $$('.ap-seg button', sub).forEach((x) => x.setAttribute('aria-checked', String(x === b)));

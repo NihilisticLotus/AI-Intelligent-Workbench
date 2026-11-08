@@ -17,6 +17,7 @@ import { useNow } from './hooks';
 import { focusApprovalStore } from './focus';
 import { MessageAttachments } from './Attachments';
 import { AnnotationLayer } from './Annotations';
+import { IndependentApproval } from './independent-task-panel';
 
 const busyStatuses = new Set<Task['status']>(['running', 'waiting', 'queued']);
 
@@ -282,6 +283,7 @@ function ApprovalCard({ approval, resolvedInLog, task }: { approval: Approval; r
   const [rejecting, setRejecting] = useState(false);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const [independentReady, setIndependentReady] = useState(false);
   const cardRef = useRef<HTMLElement>(null);
   const reasonRef = useRef<HTMLInputElement>(null);
 
@@ -304,6 +306,7 @@ function ApprovalCard({ approval, resolvedInLog, task }: { approval: Approval; r
 
   const decide = async (optionId: string, withNote?: string) => {
     if (busy) return;
+    if (approval.independentToolId && optionId === allowOnce?.id && !independentReady) return;
     setBusy(true);
     try {
       await approve(approval.id, optionId, withNote?.trim() || undefined);
@@ -343,13 +346,14 @@ function ApprovalCard({ approval, resolvedInLog, task }: { approval: Approval; r
       <span className="sr-only" id={'ap-k-' + approval.id}>卡片获得焦点时按 Enter 允许，按 Esc 拒绝并填写理由</span>
       {approval.reason ? <p className="why">{approval.reason}</p> : null}
       <pre className="mono">{approval.detail}</pre>
+      {approval.independentToolId ? <IndependentApproval taskId={task.id} toolId={approval.independentToolId} ready={setIndependentReady} /> : null}
       <dl className="facts">
         {approval.cwd ? <><dt>运行位置</dt><dd className="mono" style={{ fontSize: 12 }}>{approval.cwd}</dd></> : null}
         <dt>为什么要审批</dt><dd>当前权限级别为“{permInfo[task.permission].label}”：{permInfo[task.permission].desc}</dd>
         <dt>Agent</dt><dd>{agentName}</dd>
       </dl>
       <div className="acts">
-        {allowOnce ? <button type="button" className="btn attn" disabled={busy || !online} onClick={() => void decide(allowOnce.id)}>{allowOnce.label || '允许'} <kbd>Enter</kbd></button> : null}
+        {allowOnce ? <button type="button" className="btn attn" disabled={busy || !online || !!approval.independentToolId && !independentReady} onClick={() => void decide(allowOnce.id)}>{allowOnce.label || '允许'} <kbd>Enter</kbd></button> : null}
         {extraOptions.map((o) => (
           <button key={o.id} type="button" className={'btn' + (o.kind.startsWith('reject') ? ' danger' : '')} disabled={busy || !online} onClick={() => void decide(o.id)}>{o.label}</button>
         ))}

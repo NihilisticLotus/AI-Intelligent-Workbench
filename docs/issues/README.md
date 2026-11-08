@@ -32,7 +32,7 @@
 | [ISSUE-0026](ISSUE-0026-claude-profile-settings-routing.md) | Claude 用户设置可能覆盖 API 账号路由 | investigating | bug | 2026-11-08 | |
 | [ISSUE-0027](ISSUE-0027-codebuddy-auto-label.md) | CodeBuddy 自动强度在提示和面板中显示 enabled | fixed | bug | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0028](ISSUE-0028-api-profile-delete-policy.md) | API 账号删除时的目录与凭据清理规则冲突（旧配置已阻断，清理待完成） | investigating | 验收未通过 | 2026-11-08 | |
-| [ISSUE-0029](ISSUE-0029-custom-api-agent-boundary.md) | 工作台自定义 API 被错误归属到第三方认证（原生边界已整改，独立 Agent / 多 API 模型与能力识别待实现） | investigating | 验收未通过 | 2026-11-08 | |
+| [ISSUE-0029](ISSUE-0029-custom-api-agent-boundary.md) | 工作台自定义 API 被错误归属到第三方认证（原生边界与独立任务已整改，真实服务待补验） | investigating | 验收未通过 | 2026-11-08 | |
 | [ISSUE-0030](ISSUE-0030-pi-runtime-contracts.md) | Pi 候选的参数、终态与用量语义需宿主适配 | investigating | 外部依赖 | 2026-11-08 | |
 | [ISSUE-0031](ISSUE-0031-nested-transaction-rollback.md) | 捕获内层事务错误后会提交半次修改 | fixed | bug | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0032](ISSUE-0032-capability-form-config-revision.md) | 旧能力表单可能写入已变更的服务范围 | fixed | bug | 2026-11-08 | 2026-11-08 |
@@ -43,3 +43,5 @@
 | [ISSUE-0037](ISSUE-0037-model-terminal-consistency.md) | 矛盾的 Responses 终态仍可能返回工具调用 | fixed | bug | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0038](ISSUE-0038-large-base64-stack.md) | 合法大附件触发 base64 校验栈溢出 | fixed | bug | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0039](ISSUE-0039-attachment-read-path.md) | 附件下载跟随目录联接且未复核上传摘要 | fixed | 安全边界 | 2026-11-08 | 2026-11-08 |
+| [ISSUE-0040](ISSUE-0040-independent-image-prompt-guard.md) | 独立任务图片校验未使用自有模型能力 | investigating | bug | 2026-11-08 | |
+| [ISSUE-0041](ISSUE-0041-independent-config-event.md) | 独立任务换模型后输入框沿用旧会话配置 | investigating | bug | 2026-11-08 | |

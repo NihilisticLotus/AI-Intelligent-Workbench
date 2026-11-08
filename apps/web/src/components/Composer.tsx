@@ -22,6 +22,7 @@ import { TaskError } from './Chat';
 import { AnnotationChip, clearAnnotations, draftAnnotations, onAnnotationsChanged, restoreAnnotations, useAnnotations } from './Annotations';
 import { clearDraft, loadDraft, localDraft, saveDraft } from '../state/drafts';
 import { composeWithAnnotations } from '../lib/annotations';
+import { openIndependentConfig } from './independent-task-panel';
 
 const busyStatuses = new Set<Task['status']>(['running', 'waiting', 'queued']);
 
@@ -100,6 +101,7 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
     try { await cancelTask(task.id); toast('已请求停止，Agent 会在当前步骤结束后停下'); } catch (e) { toastErrorOf(e, { taskId: task.id, kind: task.agent }); }
   };
   const chooseImageModel = async (model:string) => {
+    if (task.agent === 'independent') { openIndependentConfig(task.id, model); return; }
     try {
       if(switchNeedsTurnEnd(task.status,'model',modelSwitchKind(info?.caps))){
         const choice=await choiceDialog({title:'Agent 正在执行',body:<p>可以等当前步骤完成后切换，也可以立即中断这一轮。</p>,choices:[{value:'wait',label:'等当前步骤完成',primary:true},{value:'interrupt',label:'立即中断',danger:true}]});
@@ -203,7 +205,7 @@ function Switcher({ task, config, online }: { task: Task; config: SessionCfg; on
   const [busy,setBusy] = useState<Busy>(null), [swErr,setSwErr] = useState<ApiError|null>(null);
   const pendingSw = useStore(pendingSwitchStore,(m)=>m[task.id]??null);
   const req=useStore(switcherRequestStore,(s)=>s),[requestKey,setRequestKey]=useState(0);
-  useEffect(()=>{if(req?.taskId===task.id){setRequestKey(req.n);switcherRequestStore.set(()=>null);}},[req,task.id]);
+  useEffect(()=>{if(req?.taskId===task.id){if(task.agent==='independent')openIndependentConfig(task.id);else setRequestKey(req.n);switcherRequestStore.set(()=>null);}},[req,task.id,task.agent]);
   const doSwitch=async(kind:Exclude<Busy,null>,patch:SwitchPatch)=>{
     if(busy)return;setSwErr(null);const label=kind==='model'?'换模型':kind==='profile'?'换账号':'调整思考强度';
     if(switchNeedsTurnEnd(task.status,kind,modelSwitchKind(info?.caps))){
@@ -214,6 +216,7 @@ function Switcher({ task, config, online }: { task: Task; config: SessionCfg; on
     setBusy(kind);try{await switchConfig(task.id,patch);}catch(e){setSwErr(withDefaultActions(asApiError(e),{taskId:task.id,kind:task.agent}));}finally{setBusy(null);}
   };
   const profileId=config.profileId??task.profileId??info?.profiles?.find((p)=>p.isDefault)?.id??null;
+  if (task.agent === 'independent') return <button type="button" className="picker-trigger independent-runtime-trigger" aria-label="AI Console 独立 Agent 独立 Agent · 模型与运行配置" title="独立 Agent · 模型与运行配置" disabled={!online || busyStatuses.has(task.status)} onClick={() => openIndependentConfig(task.id)}><AgentBadge kind="independent" size="sm"/>独立配置<Icon name="down"/></button>;
   return <div>
     <AgentPicker agents={agents} agent={task.agent} config={config} profileId={profileId} mode="task" disabled={!online||!!busy} requestKey={requestKey} taskPreset={{projectId:task.projectId,prompt:task.prompt}}
       onPick={(p)=>void doSwitch(p.profileId?'profile':p.model!==undefined?'model':'effort',{...(p.model?{model:p.model}:{}),...(p.effort?{effort:p.effort}:{}),...(p.profileId?{profileId:p.profileId}:{})})}/>

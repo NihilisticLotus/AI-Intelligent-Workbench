@@ -11,7 +11,7 @@ export const Id = z.string().min(1).max(64);
 /** 毫秒时间戳 */
 export const Ts = z.number().int().nonnegative();
 
-export const AgentKind = z.enum(['fake', 'claude', 'codex', 'codebuddy', 'zcode', 'workbuddy']);
+export const AgentKind = z.enum(['fake', 'claude', 'codex', 'codebuddy', 'zcode', 'workbuddy', 'independent']);
 export type AgentKind = z.infer<typeof AgentKind>;
 
 export const PermissionLevel = z.enum(['readonly', 'ask', 'workspace', 'full']);
@@ -135,6 +135,7 @@ export const Task = z.object({
   lastActivityAt: Ts, createdAt: Ts, updatedAt: Ts,
   /** 1.2 新增：任务使用的账号；空 = 该 Agent 的默认账号 */
   profileId: Id.nullable().optional(),
+  independent: z.lazy(() => IndependentTaskReference).optional(),
 });
 export type Task = z.infer<typeof Task>;
 
@@ -231,7 +232,7 @@ export const AttachmentInfo = z.object({
 });
 export type AttachmentInfo = z.infer<typeof AttachmentInfo>;
 /** 仅服务端和适配器之间传递，路径不返回客户端。 */
-export type PromptAttachment = Pick<AttachmentInfo, 'kind' | 'mime' | 'name' | 'width' | 'height'> & { path: string; uri: string };
+export type PromptAttachment = Pick<AttachmentInfo, 'kind' | 'mime' | 'name' | 'width' | 'height'> & { path: string; uri: string; attachmentId?: string };
 export type PromptInput = { text: string; attachments?: PromptAttachment[] };
 
 export const Approval = z.object({
@@ -243,6 +244,7 @@ export const Approval = z.object({
   options: z.array(z.object({ id: z.string(), label: z.string(), kind: z.enum(['allow_once', 'allow_always', 'reject_once', 'reject_always']) })),
   status: z.enum(['pending', 'allowed', 'rejected', 'expired']),
   decidedBy: Id.nullable(), createdAt: Ts, expiresAt: Ts.nullable(),
+  independentToolId: Id.optional(),
   /** 1.1 新增：处理这条审批的设备名（显示“由 xxx 处理”用） */
   decidedByName: z.string().nullable().optional(),
 });
@@ -264,7 +266,7 @@ export const EventEnvelope = z.discriminatedUnion('type', [
   ev('session.ended', z.object({ reason: z.string() })),
   ev('message.user', z.object({ messageId: Id, text: z.string(), attachments: z.array(AttachmentInfo).max(10).optional() })),
   ev('message.delta', z.object({ messageId: Id, text: z.string() })),
-  ev('message.done', z.object({ messageId: Id })),
+  ev('message.done', z.object({ messageId: Id, text: z.string().optional() })),
   ev('thought.delta', z.object({ messageId: Id, text: z.string() })),
   ev('tool.start', z.object({ toolId: Id, kind: ToolKind, title: z.string(), target: z.string().nullable() })),
   ev('tool.update', z.object({ toolId: Id, title: z.string().optional(), target: z.string().nullable().optional(), kind: ToolKind.optional() })),
@@ -305,6 +307,7 @@ export const EventEnvelope = z.discriminatedUnion('type', [
     scope: z.enum(['service', 'model', 'default']), action: z.enum(['created', 'updated', 'deleted']),
     serviceId: Id.nullable(), modelId: Id.nullable(),
   }).strict()),
+  ev('independent.task_changed', z.object({ revision: z.number().int().positive() }).strict()),
 ]);
 export type EventEnvelope = z.infer<typeof EventEnvelope>;
 export type EventType = EventEnvelope['type'];
@@ -360,6 +363,7 @@ export const CreateTaskBody = z.object({
   profileId: Id.nullable().optional(),
   attachments: z.array(Id).max(10).optional(),
   deferPrompt: z.boolean().optional(),
+  independent: z.lazy(() => IndependentTaskOptions).optional(),
 }).refine((v) => !!v.prompt.trim() || !!v.attachments?.length || v.deferPrompt === true, '文字和附件至少提供一个');
 export const PatchTaskBody = z.object({
   title: z.string().max(200).optional(), groupId: Id.nullable().optional(), permission: PermissionLevel.optional(),
@@ -660,6 +664,10 @@ export interface IndependentCommandHostOptions {
   onStarted?(process: { pid: number; startedAt: number }): void | Promise<void>;
   captureLimitBytes?: number;
 }
+export interface IndependentExecutorObserver {
+  started(process: { pid: number; startedAt: number }): void | Promise<void>;
+  exited(pid: number): void;
+}
 
 export const IndependentToolState = z.enum(['pending', 'approved', 'rejected', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted']);
 export type IndependentToolState = z.infer<typeof IndependentToolState>;
@@ -923,6 +931,7 @@ export const IndependentRequestBudgetSnapshot = z.object({
   remainingMicros: IndependentMoneyMicros.nullable(),
   // 目前不接供应商账单；usage 与人工预留均不能冒充实际金额。
   actualCostMicros: z.null(),
+  revision: Revision.optional(),
 }).strict();
 export type IndependentRequestBudgetSnapshot = z.infer<typeof IndependentRequestBudgetSnapshot>;
 /** 可信宿主必须同步落盘后才允许 POST；不能在回调里另发模型请求。 */
@@ -937,6 +946,31 @@ export const IndependentGenerationOptions = z.object({
   chatTokenLimitField: z.enum(['max_completion_tokens', 'max_tokens']).optional(),
 }).strict();
 export type IndependentGenerationOptions = z.infer<typeof IndependentGenerationOptions>;
+/** 正式独立任务的显式配置；不接受凭据、路径或工具执行策略。 */
+export const IndependentTaskOptions = z.object({
+  selection: IndependentSelection, generation: IndependentGenerationOptions, context: IndependentContextPolicy,
+  limits: IndependentRunLimits, requestBudget: IndependentRequestBudget,
+}).strict();
+export type IndependentTaskOptions = z.infer<typeof IndependentTaskOptions>;
+export const IndependentTaskReference = IndependentSelection.extend({ revision: Revision }).strict();
+export type IndependentTaskReference = z.infer<typeof IndependentTaskReference>;
+export const PutIndependentTaskBody = z.object({ expectedRevision: Revision, options: IndependentTaskOptions }).strict();
+export type PutIndependentTaskBody = z.infer<typeof PutIndependentTaskBody>;
+export const IndependentRecoveryBody = z.object({ expectedRevision: Revision, acknowledged: z.literal(true) }).strict();
+export type IndependentRecoveryBody = z.infer<typeof IndependentRecoveryBody>;
+export const IndependentTaskState = z.object({
+  revision: Revision, options: IndependentTaskOptions, binding: IndependentModelBinding,
+  budget: IndependentRequestBudgetSnapshot, recoveryRequired: z.boolean(),
+  lastTurn: IndependentTurnRecord.nullable(), context: IndependentContextReport.nullable(),
+  requests: z.array(IndependentRequestRecord).max(1000), tools: z.array(IndependentToolRecord).max(200),
+  checkpoint: IndependentContextCheckpoint.nullable().optional(),
+}).strict();
+export type IndependentTaskState = z.infer<typeof IndependentTaskState>;
+export const IndependentHistoryQuery = z.object({ after: z.coerce.number().int().nonnegative().default(0), limit: z.coerce.number().int().min(1).max(100).default(20) });
+export const IndependentCheckpointBody = z.object({ throughSeq: z.number().int().positive(), expectedTailHash: z.string().regex(/^[a-f0-9]{64}$/), summary: z.string().trim().min(1).max(100_000) }).strict();
+export type IndependentCheckpointBody = z.infer<typeof IndependentCheckpointBody>;
+export const IndependentRebindConfirmation = z.object({ previousBinding: IndependentModelBinding, tailHash: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
+export type IndependentRebindConfirmation = z.infer<typeof IndependentRebindConfirmation>;
 export const IndependentModelToolDefinition = z.object({
   name: IndependentToolCall.shape.name, description: z.string().min(1).max(4000),
   parameters: IndependentToolArguments.refine((v) => v.type === 'object', '工具参数 schema 必须为 object'),
@@ -988,6 +1022,10 @@ export interface IndependentModelDriver {
   /** 实际网络 driver 用于取消后等待资源收尾；旧 driver 可不提供。 */
   waitForIdle?(binding: IndependentModelBinding): Promise<void>;
 }
+/** 可信宿主只在助手消息已持久化后发布完整结果。 */
+export interface IndependentTurnObserver {
+  assistant(turn: IndependentTurnRecord, reply: IndependentAssistantMessage): void;
+}
 export interface IndependentToolDriver {
   /** 收到取消后实际关闭工具资源再 settle；循环等待该 promise，不将信号当作收尾。 */
   execute(call: IndependentToolCall, identity: { taskId: string; sessionId: string; turnId: string }, signal: AbortSignal): Promise<IndependentToolMessage>;
@@ -1028,6 +1066,14 @@ export const IndependentFileProposal = z.object({
   workspaceHash: z.string().regex(/^[a-f0-9]{64}$/), rulesFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
 }).strict();
 export type IndependentFileProposal = z.infer<typeof IndependentFileProposal>;
+export const IndependentApprovalDetail = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('file'), proposal: IndependentFileProposal }).strict(),
+  z.object({ kind: z.literal('command'), record: IndependentToolRecord, spec: IndependentCommandSpec,
+    warning: z.string().max(1000) }).strict(),
+]);
+export type IndependentApprovalDetail = z.infer<typeof IndependentApprovalDetail>;
+export const IndependentHistoryPage = z.object({ items: z.array(IndependentConversationEntry).max(100), nextCursor: z.number().int().nullable() });
+export type IndependentHistoryPage = z.infer<typeof IndependentHistoryPage>;
 export const IndependentFileReadSpec = z.object({ path: IndependentRelativePath,
   startLine: z.number().int().min(1).max(1_000_000), maxLines: z.number().int().min(1).max(1000),
 }).strict();

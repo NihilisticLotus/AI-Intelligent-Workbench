@@ -1,6 +1,7 @@
 // 任务、事件、Agent、审批
 import { Hono } from 'hono';
 import { ApprovalsQuery, CreateTaskBody, EventsQuery, PatchTaskBody, PutTaskDraftBody, TasksQuery, type TaskDraft } from '@aic/protocol';
+import { PutIndependentTaskBody, IndependentRecoveryBody, IndependentHistoryQuery, IndependentCheckpointBody } from '@aic/protocol';
 import type { Services } from '../services';
 import { Errors } from '../util';
 import { parseQuery, readBody, type Env } from './app';
@@ -12,6 +13,18 @@ export function taskRoutes(s: Services) {
   r.post('/tasks', async (c) => c.json(await s.tasks.create(await readBody(c, CreateTaskBody)), 201));
   r.get('/tasks/:id', (c) => c.json(s.tasks.get(c.req.param('id'))));
   r.patch('/tasks/:id', async (c) => c.json(await s.tasks.patch(c.req.param('id'), await readBody(c, PatchTaskBody))));
+  r.get('/tasks/:id/independent', (c) => c.json(s.independentRuntime.state(c.req.param('id'))));
+  r.put('/tasks/:id/independent', async (c) => {
+    const body = await readBody(c, PutIndependentTaskBody);
+    return c.json(await s.tasks.updateIndependent(c.req.param('id'), 'configure', body.options, body.expectedRevision));
+  });
+  r.post('/tasks/:id/independent/recover', async (c) => c.json(await s.tasks.updateIndependent(c.req.param('id'), 'recover', await readBody(c, IndependentRecoveryBody))));
+  r.get('/tasks/:id/independent/history', (c) => {
+    const q = parseQuery(c, IndependentHistoryQuery);
+    return c.json(s.independentRuntime.history(c.req.param('id'), q.after, q.limit));
+  });
+  r.post('/tasks/:id/independent/checkpoint', async (c) => c.json(await s.tasks.updateIndependent(c.req.param('id'), 'checkpoint', await readBody(c, IndependentCheckpointBody))));
+  r.get('/tasks/:id/independent/approvals/:toolId', (c) => c.json(s.independentRuntime.approval(c.req.param('id'), c.req.param('toolId'))));
 
   r.post('/tasks/:id/attachments', async (c) => {
     s.tasks.getRow(c.req.param('id'));

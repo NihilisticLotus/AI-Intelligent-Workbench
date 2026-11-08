@@ -214,6 +214,20 @@ const MIGRATIONS: string[] = [
     UNIQUE(task_id,ordinal)
   );
   `,
+  // v12：正式任务配置、恢复确认与逐请求的历史绑定 / 币种快照。
+  `
+  ALTER TABLE independent_request_budgets ADD COLUMN revision INTEGER NOT NULL DEFAULT 1;
+  ALTER TABLE independent_request_attempts ADD COLUMN binding_json TEXT;
+  ALTER TABLE independent_request_attempts ADD COLUMN currency TEXT;
+  UPDATE independent_request_attempts SET
+    binding_json=(SELECT binding_json FROM independent_request_budgets WHERE task_id=independent_request_attempts.task_id),
+    currency=(SELECT json_extract(policy_json,'$.money.currency') FROM independent_request_budgets WHERE task_id=independent_request_attempts.task_id);
+  CREATE TABLE independent_task_settings (
+    task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE,
+    revision INTEGER NOT NULL, options_json TEXT NOT NULL, recovery_required INTEGER NOT NULL DEFAULT 0,
+    context_json TEXT, updated_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

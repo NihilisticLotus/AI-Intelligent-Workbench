@@ -39,6 +39,27 @@ afterEach(async () => {
 });
 
 describe('完整独立会话与循环', () => {
+  it('换模型必须核对旧绑定与历史尾摘要，原始续传保留但不交给新模型', () => {
+    const { store, create } = setup(); const first = create(), owner = store.acquire(first.id);
+    store.claimModel(first.id, owner); store.assistant(first.id, owner, { ...finalReply, continuation: '旧模型专用续传资料' }); store.finish(first.id, owner, 'completed');
+    const next = { ...binding, modelId: 'new-model', modelRevision: 2 }, tail = store.entries('session').at(-1)!;
+    expect(() => store.create(next, 'session', user, limits)).toThrow('明确核对');
+    expect(() => store.create(next, 'session', user, limits, '', { previousBinding: binding, tailHash: 'f'.repeat(64) })).toThrow('明确核对');
+    expect(() => store.create(next, 'session', user, limits, '', { previousBinding: next, tailHash: tail.hash })).toThrow('明确核对');
+    expect(store.entries('session')).toHaveLength(2);
+    const second = store.create(next, 'session', user, limits, '', { previousBinding: binding, tailHash: tail.hash });
+    expect(store.context(second.id).messages.find((m) => m.role === 'assistant')).not.toHaveProperty('continuation');
+    expect(store.entries('session')[1]!.message).toHaveProperty('continuation', '旧模型专用续传资料');
+  });
+  it('只有助手正文落盘成功后才通知宿主确认消息，持久化失败不发布成功', async () => {
+    const { db, store, model, tools, create } = setup(); const observed = vi.fn(() => { expect(db.all('SELECT seq FROM independent_messages')).toHaveLength(2); });
+    const engine = new IndependentTurnEngine(store, model, tools, { assistant: observed }); engines.push(engine);
+    await engine.run(create().id); expect(observed).toHaveBeenCalledTimes(1);
+    const other = setup(); const unpublished = vi.fn();
+    const failing = new IndependentTurnEngine(other.store, other.model, other.tools, { assistant: unpublished }); engines.push(failing);
+    vi.spyOn(other.store, 'assistant').mockImplementation(() => { throw Error('落盘故障'); });
+    await expect(failing.run(other.create().id)).rejects.toThrow('落盘故障'); expect(unpublished).not.toHaveBeenCalled();
+  });
   it('多轮工具调用先保存回复与结果，再发送下一请求，保留原样参数和剩余预算', async () => {
     const { engine, store, model, tools, create } = setup([toolReply, { ...toolReply, toolCalls: [{ ...call, id: 'call-2' }] }, finalReply]);
     const turn = create({}, '项目规则：使用中文');
@@ -273,8 +294,8 @@ describe('原始记录、压缩和跨进程恢复', () => {
   it('v8 升至当前版本保留旧草稿、会话与发现表，重开不重复迁移', () => {
     const file = path.join(temporary(), 'migration.db'); const current = openDb(file); seed(current);
     current.run("INSERT INTO task_drafts(task_id,text,annotations_json,updated_at) VALUES ('task','原草稿','[]',1)"); current.close();
-    const old = new DatabaseSync(file); old.exec('DROP TABLE independent_request_attempts; DROP TABLE independent_request_budgets; DROP TABLE independent_file_receipts; ALTER TABLE independent_tool_calls DROP COLUMN file_outcome_json; DROP TABLE independent_checkpoints; DROP TABLE independent_messages; DROP TABLE independent_turns; PRAGMA user_version=8;'); old.close();
-    for (let i = 0; i < 2; i++) { const db = openDb(file); expect(db.get('PRAGMA user_version')).toEqual({ user_version: 11 });
+    const old = new DatabaseSync(file); old.exec('DROP TABLE independent_task_settings; DROP TABLE independent_request_attempts; DROP TABLE independent_request_budgets; DROP TABLE independent_file_receipts; ALTER TABLE independent_tool_calls DROP COLUMN file_outcome_json; DROP TABLE independent_checkpoints; DROP TABLE independent_messages; DROP TABLE independent_turns; PRAGMA user_version=8;'); old.close();
+    for (let i = 0; i < 2; i++) { const db = openDb(file); expect(db.get('PRAGMA user_version')).toEqual({ user_version: 12 });
       expect(db.get('SELECT text FROM task_drafts')).toEqual({ text: '原草稿' }); expect(db.all('SELECT * FROM independent_discoveries')).toEqual([]);
       expect(db.get('SELECT id FROM sessions')).toEqual({ id: 'session' });
       expect(new IndependentConversationStore(db).entries('session')).toEqual([]); db.close(); }

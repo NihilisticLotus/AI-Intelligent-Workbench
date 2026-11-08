@@ -30,7 +30,7 @@ export function systemRoutes(s: Services) {
         [FeatureKey.Drafts]: true,
         [FeatureKey.IndependentCatalog]: true,
         [FeatureKey.IndependentDiscovery]: true,
-        [FeatureKey.IndependentRuntime]: false,
+        [FeatureKey.IndependentRuntime]: true,
         [FeatureKey.PageAssets]: false,
         [FeatureKey.PageGenerate]: false,
         [FeatureKey.PageAutomations]: false,

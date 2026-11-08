@@ -273,9 +273,12 @@ export function buildTimeline(events: readonly EventEnvelope[]): TimelineItem[] 
         it.text += ev.data.text;
         break;
       }
-      case 'message.done':
-        agentItem(ev.data.messageId, ev.ts, true).done = true;
+      case 'message.done': {
+        const item = agentItem(ev.data.messageId, ev.ts, true);
+        if (ev.data.text !== undefined) item.text = ev.data.text;
+        item.done = true;
         break;
+      }
       case 'tool.start': {
         closeOpen(ev.ts);
         const t: ToolItem = { id: ev.data.toolId, kind: ev.data.kind, title: ev.data.title, target: ev.data.target, output: '', state: 'running', summary: null, startTs: ev.ts, endTs: null };

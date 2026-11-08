@@ -43,4 +43,22 @@ describe('独立目录 REST 客户端', () => {
     response={items:[model],nextCursor:null}; const selected={snapshotId:'snapshot',expectedConfigRevision:2,remoteModelIds:['remote']};await client.importIndependentModels(service.id,selected);
     const [url,init]=fetcher.mock.calls.at(-1)! as unknown as [string,RequestInit];expect(url).toBe('/api/v1/independent/services/s%20%2F%3F/models/import');expect(JSON.parse(init.body as string)).toEqual(selected);
   });
+  it('任务原始记录、审批与恢复只访问 Gateway，写入不重试', async () => {
+    const fetcher = vi.fn(async () => new Response(JSON.stringify({ code: 'conflict', message: '请核对最新版本', actions: [] }), { status: 409 }));
+    const client = new HttpClient({ fetchImpl: fetcher, getAuthHeaders: () => ({ 'X-AIC-Key': 'fixture-device-key' }) });
+    const id = 'task /?', prefix = '/api/v1/tasks/task%20%2F%3F/independent';
+    const checks: [() => Promise<unknown>, string, string][] = [
+      [() => client.independentTask(id), 'GET', prefix],
+      [() => client.recoverIndependentTask(id, 7), 'POST', prefix + '/recover'],
+      [() => client.independentHistory(id, 20), 'GET', prefix + '/history?after=20&limit=20'],
+      [() => client.checkpointIndependentTask(id, { throughSeq: 2, expectedTailHash: 'a'.repeat(64), summary: '人工总结' }), 'POST', prefix + '/checkpoint'],
+      [() => client.independentApproval(id, 'tool /?'), 'GET', prefix + '/approvals/tool%20%2F%3F'],
+    ];
+    for (const [call, method, url] of checks) {
+      await expect(call()).rejects.toMatchObject({ status: 409 });
+      expect(fetcher.mock.calls.at(-1)).toMatchObject([url, { method, credentials: 'include', headers: { 'X-AIC-Key': 'fixture-device-key' } }]);
+    }
+    expect(fetcher).toHaveBeenCalledTimes(checks.length);
+    expect(JSON.parse((fetcher.mock.calls[1] as unknown as [string, RequestInit])[1].body as string)).toEqual({ expectedRevision: 7, acknowledged: true });
+  });
 });

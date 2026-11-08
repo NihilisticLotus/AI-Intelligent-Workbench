@@ -100,6 +100,17 @@ describe('applyEvent', () => {
 });
 
 describe('buildTimeline 合并', () => {
+  it('消息确认可携带已提交的完整正文，替换暂存流片段且兼容非流响应', () => {
+    let seq = 0;
+    const event = (type: string, data: unknown) => ({ seq: ++seq, ts: seq, taskId: 't1', sessionId: 's1', type, data } as EventEnvelope);
+    const result = buildTimeline([
+      event('message.delta', { messageId: 'm1', text: '部分' }),
+      event('message.done', { messageId: 'm1', text: '已提交完整正文' }),
+      event('message.user', { messageId: 'user2', text: '继续' }),
+      event('message.done', { messageId: 'm2', text: '非流完整响应' }),
+    ]).filter((item) => item.kind === 'agent');
+    expect(result.map((item) => item.kind === 'agent' && [item.text, item.done])).toEqual([['已提交完整正文', true], ['非流完整响应', true]]);
+  });
   it('思考和正文用了不同 messageId 时合并成一条消息', () => {
     let seq = 100;
     const b = (type: string, data: unknown): EventEnvelope =>
@@ -222,6 +233,14 @@ describe('1.2：真实 Agent', () => {
     expect(again.usage).toBeUndefined();
     // 老版本的 session.config 没有 models / efforts：界面回落到 /agents 的缓存
     expect(sessionConfig(t, [b(1, 'session.config', { model: 'x', effort: null })]).models).toBeUndefined();
+  });
+
+  it('独立任务应用模型后立即覆盖上一轮模型，无需先发送下一条消息', () => {
+    const t = task({ agent: 'independent', model: 'new-model', effort: null });
+    expect(sessionConfig(t, [
+      b(1, 'session.started', { agent: 'independent', model: 'old-model' }),
+      b(2, 'session.config', { model: 'new-model', effort: null, permission: 'ask' }),
+    ]).model).toBe('new-model');
   });
 
   it('中断错误：只认最后一条用户消息之后的 error，且任务处于暂停 / 中断 / 失败', () => {

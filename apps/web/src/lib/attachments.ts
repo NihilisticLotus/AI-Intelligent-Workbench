@@ -5,5 +5,6 @@ export function attachmentLimit(size: number, count: number) { return count>=10?
 export function visionWarning(info: AgentInfo | undefined, model: string | null, count: number) {
   const vision=visionOf(info,model);
   const recommendation=info?.models.find((m)=>m.id!==model && visionOf(info,m.id)===true)??null;
-  return { vision, recommendation, text: !count||vision===true?'':vision===false?`${info?.displayName??'当前 Agent'} · ${model??'当前模型'} 看不了图片，这 ${count} 张图片发过去它收不到`:'没有报告能不能看图片，可能收不到' };
+  const modelName=info?.models.find((m)=>m.id===model)?.name??model??'当前模型';
+  return { vision, recommendation, text: !count||vision===true?'':vision===false?`${info?.displayName??'当前 Agent'} · ${modelName} 看不了图片，这 ${count} 张图片发过去它收不到`:'没有报告能不能看图片，可能收不到' };
 }

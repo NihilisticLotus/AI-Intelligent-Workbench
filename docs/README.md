@@ -33,6 +33,6 @@
 | 目录 | 说明 |
 |---|---|
 | [acceptance/](acceptance/) | 每一步的验收记录 |
-| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 稳定、补验与输入框：部分通过；独立命令基础、多服务模型与发现导入已实现，正式运行时与真实补验仍待完成（ISSUE-0029、0030） |
+| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 稳定、补验与输入框：部分通过；独立任务、模型配置、预算、审批与恢复已用本机夹具验证，真实服务补验与旧测试配置清理仍待完成（ISSUE-0028、0029、0030） |
 | [devlog/](devlog/) | 开发笔记，每月一个文件，只追加 |
 | [issues/](issues/README.md) | 问题收纳：总表 + 每个问题一个文件 |

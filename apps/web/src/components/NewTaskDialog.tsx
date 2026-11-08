@@ -1,7 +1,7 @@
 // 新建任务对话框：项目、分组、要做什么、Agent、账号、模型、思考强度、权限。
 // 真实 Agent（第 1.2 步）：直接在项目目录里运行，只开放“只读”“需审批”；未就绪的 Agent 显示原因，可以跳到 Agent 页处理。
 import { useMemo, useRef, useState } from 'react';
-import { FeatureKey, type AgentInfo, type AgentKind, type ApiError, type PermissionLevel } from '@aic/protocol';
+import { FeatureKey, type AgentInfo, type AgentKind, type ApiError, type PermissionLevel, type IndependentTaskOptions } from '@aic/protocol';
 import { createTask, sendPrompt, api, useApp } from '../state/app';
 import { navigate, toast } from '../state/ui';
 import { permInfo, permOrder } from '../lib/format';
@@ -14,6 +14,7 @@ import { AgentPicker } from './AgentPicker';
 import { visionWarning } from '../lib/attachments';
 import { profileDefaults, profileInfo } from '../lib/picker';
 import { Icon } from './Icon';
+import { IndependentTaskConfig } from './independent-task-config';
 /** 默认选中的模型和思考强度（见 lib/agents.ts 的 taskDefaults：真实 Agent 优先用 Agent 设置里的默认值） */
 const defaultModel = (a: AgentInfo | undefined) => taskDefaults(a).model;
 const defaultEffort = (a: AgentInfo | undefined) => taskDefaults(a).effort;
@@ -46,6 +47,7 @@ export function NewTaskDialog({ close, preset, onAddProject }: {
   const [perm, setPerm] = useState<PermissionLevel>('ask');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<ApiError | null>(null);
+  const [independent, setIndependent] = useState<IndependentTaskOptions | null>(null);
 
   const readiness = agentReadiness(info);
   const wsNote = workspaceConfigNote(info);
@@ -82,13 +84,15 @@ export function NewTaskDialog({ close, preset, onAddProject }: {
     const text = prompt.trim();
     if (!text && !attachments.items.length) { document.getElementById('nt-d')?.focus(); toast('先写一句要做什么', 'attn'); return; }
     if (!projectId || !agent || busy || attachments.uploading || !readiness.ready) return;
+    if (agent === 'independent' && !independent) { toast('请先填写有效的独立 Agent 配置', 'attn'); return; }
     const warning=visionWarning(info,model||null,attachments.items.filter((a)=>a.info?.kind==='image'||a.file?.type.startsWith('image/')).length);
     if(warning.text && (warning.vision===false||!force)){toast(warning.text,'attn');document.querySelector<HTMLElement>('.attachment-warning button')?.focus();return;}
     setBusy(true);setErr(null);
     try {
       const t = created ? {id:created} : await createTask({
         projectId, groupId: groupId || null, prompt: text, agent,
-        model: model || null, effort: effort || null, permission: perm,
+        model: agent === 'independent' ? null : model || null, effort: agent === 'independent' ? null : effort || null, permission: perm,
+        ...(agent === 'independent' && independent ? { independent } : {}),
         ...(profileId ? { profileId } : {}),
         ...(attachments.items.length?{deferPrompt:true}:{}),
       });
@@ -117,7 +121,7 @@ export function NewTaskDialog({ close, preset, onAddProject }: {
           <p className="dlg-warn" role="note"><Icon name="warn" /><span>{DIRECT_EDIT_WARNING}{wsNote?.warn ? ` ${wsNote.text}。` : ''}</span></p>
         ) : null}
         <button type="button" className="btn" onClick={close}>取消</button>
-        <button type="button" className="btn primary" aria-busy={busy} disabled={busy || !agent || !readiness.ready} onClick={()=>void submit()}>派发</button>
+        <button type="button" className="btn primary" aria-busy={busy} disabled={busy || !agent || !readiness.ready || agent === 'independent' && !independent} onClick={()=>void submit()}>派发</button>
       </>}>
       {err ? <ErrorNotice error={err} /> : null}
       <div className="form-row"><label htmlFor="nt-p">项目</label>
@@ -146,6 +150,7 @@ export function NewTaskDialog({ close, preset, onAddProject }: {
         <AgentPicker agents={agents} agent={agent||'fake'} config={{model:model||null,effort:effort||null}} profileId={profileId||info?.profiles?.find((p)=>p.isDefault)?.id||null} mode="new" disabled={busy||!!created}
           onPick={(p)=>{if(p.agent!==agent)changeAgent(p.agent);if(p.model!==undefined)setModel(p.model);if(p.effort!==undefined)setEffort(p.effort);if(p.profileId){setProfileId(p.profileId);const next=profileDefaults(baseInfo,p.profileId,model,effort);setModel(next.model);setEffort(next.effort);}}}/>
       </div>
+      {agent === 'independent' ? <IndependentTaskConfig initialModelId={model} onChange={(value) => { setIndependent(value); if (value) setModel(value.selection.modelId); }} disabled={busy || !!created} /> : null}
       {agent && !readiness.ready ? (
         <div className="alert attn" id="nt-a-why" style={{ margin: '0 0 var(--sp-3)' }}>
           <Icon name="warn" />

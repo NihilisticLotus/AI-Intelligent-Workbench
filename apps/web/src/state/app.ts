@@ -75,7 +75,10 @@ function flushEvents() {
 
 /** 事件带来的界面副作用：播报、系统通知 */
 function sideEffects(before: AppState, batch: EventEnvelope[]) {
-  if (batch.some((ev) => ev.type === 'independent.catalog_changed')) set((s) => ({ ...s, independentCatalogVersion: s.independentCatalogVersion + 1 }));
+  if (batch.some((ev) => ev.type === 'independent.catalog_changed')) {
+    set((s) => ({ ...s, independentCatalogVersion: s.independentCatalogVersion + 1 }));
+    void refreshAgents().catch(() => { /* 目录页保留错误提示，断线后由完整快照恢复。 */ });
+  }
   for (const ev of batch) {
     if (ev.type === 'approval.requested' && !before.approvals[ev.data.approval.id] && ev.data.approval.status === 'pending') {
       const a = ev.data.approval;

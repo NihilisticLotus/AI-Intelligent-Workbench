@@ -2,6 +2,7 @@
 import type { AttachmentService } from './attachments';
 import type { IndependentCatalog } from './independent/catalog';
 import type { IndependentDiscovery } from './independent/discovery';
+import type { IndependentTaskRuntime } from './independent/task-runtime';
 import type { Hello } from '@aic/protocol';
 import type { AuthService } from './auth';
 import type { AgentRegistry } from './agents/registry';
@@ -19,6 +20,7 @@ export interface Services {
   attachments: AttachmentService;
   independent: IndependentCatalog;
   independentDiscovery: IndependentDiscovery;
+  independentRuntime: IndependentTaskRuntime;
   lastExit: Hello['lastExit'];
   auth: AuthService;
   events: EventStore;

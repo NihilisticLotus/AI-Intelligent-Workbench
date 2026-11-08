@@ -91,7 +91,7 @@ describe('真实形态的 Agent（假 ACP 进程）', () => {
 
     // GET /agents：真实形态的 Agent 带账号概要
     const agents = (await t!.api('GET', '/agents', { token })).json.items as { kind: string; profiles?: unknown[]; status: string }[];
-    expect(agents.map((a) => a.kind)).toEqual(['fake', 'claude']);
+    expect(agents.map((a) => a.kind)).toEqual(['fake', 'claude', 'independent']);
     expect(agents[1]!.profiles).toHaveLength(1);
     expect(agents[1]!.status).toBe('ready');
 

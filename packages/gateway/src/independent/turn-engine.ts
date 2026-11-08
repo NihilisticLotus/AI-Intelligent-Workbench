@@ -1,7 +1,7 @@
 // Gateway 自有循环：driver 不能自动批准 / 调用工具；所有续传以已提交的会话为准。
 import {
   IndependentAssistantMessage, IndependentToolMessage, type IndependentModelDriver,
-  type IndependentToolDriver, type IndependentTurnRecord, type IndependentTurnStop,
+  type IndependentToolDriver, type IndependentTurnRecord, type IndependentTurnStop, type IndependentTurnObserver,
 } from '@aic/protocol';
 import { Errors } from '../util';
 import { IndependentConversationStore } from './conversation';
@@ -22,7 +22,8 @@ function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
 export class IndependentTurnEngine {
   private active = new Map<string, { abort: AbortController; completion: Promise<IndependentTurnRecord> }>();
   private closed = false;
-  constructor(private store: IndependentConversationStore, private model: IndependentModelDriver, private tools: IndependentToolDriver) {}
+  constructor(private store: IndependentConversationStore, private model: IndependentModelDriver, private tools: IndependentToolDriver,
+    private observer?: IndependentTurnObserver) {}
 
   run(id: string, externalSignal?: AbortSignal): Promise<IndependentTurnRecord> {
     if (this.closed) return Promise.reject(Errors.invalidState('独立执行循环已关闭'));
@@ -101,6 +102,7 @@ export class IndependentTurnEngine {
       if (isStopped()) return finish(stopped());
       // DB 错误必须向宿主传播；不能被网络异常处理吞掉后标为成功。
       turn = this.store.assistant(id, owner, reply);
+      this.observer?.assistant(turn, reply);
       if (turn.outputTokens !== null && turn.outputTokens > turn.limits.maxOutputTokens) return finish('output_limit');
       if (reply.stopReason === 'complete') return finish('completed');
       if (reply.stopReason === 'error') return finish('model_error');

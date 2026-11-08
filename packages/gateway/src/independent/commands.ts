@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { IndependentCommandSpec, type IndependentCommandResult, type IndependentCommandHostOptions } from '@aic/protocol';
+import { IndependentCommandSpec, type IndependentCommandResult, type IndependentCommandHostOptions, type IndependentExecutorObserver } from '@aic/protocol';
 import { redact } from '@aic/adapters';
 
 /** 只取工具运行需要的系统项，不继承 API Key、代理认证、Node hooks 或 Agent 配置。 */
@@ -20,7 +20,7 @@ export function independentCommandEnv(home: string, source: NodeJS.ProcessEnv = 
 export class IndependentCommandExecutor {
   private active = new Set<{ stop(): void; done: Promise<IndependentCommandResult> }>();
   private closed = false;
-  constructor(private dataDir: string) {}
+  constructor(private dataDir: string, private observer?: IndependentExecutorObserver) {}
 
   async run(input: IndependentCommandSpec, options: IndependentCommandHostOptions): Promise<IndependentCommandResult> {
     const spec = IndependentCommandSpec.parse(input);
@@ -108,6 +108,7 @@ export class IndependentCommandExecutor {
     child.once('error', () => { startupError = '无法启动命令宿主'; stop('start_failed'); });
     child.once('spawn', () => {
       void (async () => {
+        await this.observer?.started({ pid: child.pid!, startedAt: Date.now() });
         await options.onStarted?.({ pid: child.pid!, startedAt: Date.now() });
         if (settled || stopReason || this.closed) { child.stdin.end(); return; }
         child.stdin.write(`${JSON.stringify({ program: spec.program, args: spec.args, cwd })}\n`);
@@ -118,6 +119,7 @@ export class IndependentCommandExecutor {
       options.signal?.removeEventListener('abort', abort);
       this.active.delete(entry);
       cleanup();
+      if (child.pid) this.observer?.exited(child.pid);
       const clean = (buffers: Buffer[]) => {
         let text = redact(Buffer.concat(buffers).toString('utf8'), options.redact);
         // 上限或中断可能把密钥截成前缀，不能把已知密钥的这段尾巴返回调用方。

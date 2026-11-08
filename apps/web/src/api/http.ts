@@ -10,6 +10,7 @@ import {
 import { z } from 'zod';
 import {
   IndependentService, IndependentModel, IndependentDefault, IndependentDiscoveryState, ImportIndependentModelsResult,
+  IndependentTaskState, IndependentHistoryPage, IndependentApprovalDetail, type IndependentTaskOptions, type IndependentCheckpointBody,
   type CreateIndependentServiceBody, type PatchIndependentServiceBody, type CreateIndependentModelBody,
   type PatchIndependentModelBody, type PatchIndependentOverridesBody, type DiscoverIndependentModelsBody, type ImportIndependentModelsBody,
 } from '@aic/protocol';
@@ -227,6 +228,7 @@ export class HttpClient {
     agent: string; model: string | null; effort: string | null; permission: string;
     /** 1.2：不传或 null 表示用该 Agent 的默认账号 */
     profileId?: string | null; deferPrompt?: boolean; attachments?: string[];
+    independent?: IndependentTaskOptions;
   }) { return this.request('POST', '/tasks', { body, parse: oneOf(Task) }); }
   patchTask(id: string, body: { title?: string; groupId?: string | null; permission?: string; profileId?: string | null }) {
     return this.request('PATCH', `/tasks/${encodeURIComponent(id)}`, { body, parse: oneOf(Task) });
@@ -281,4 +283,16 @@ export class HttpClient {
   deleteProfile(id: string) { return this.request('DELETE', `/profiles/${encodeURIComponent(id)}`, { parse: DeleteProfileResult }); }
   refreshProfileModels(id: string) { return this.request('POST', `/profiles/${encodeURIComponent(id)}/models/refresh`, { body: {}, parse: oneOf(AgentProfile) }); }
   pendingApprovals() { return this.request('GET', '/approvals', { query: { status: 'pending' }, parse: listOf(Approval) }).then((r) => r.items); }
+  independentTask(id: string) { return this.request('GET', `/tasks/${encodeURIComponent(id)}/independent`, { parse: IndependentTaskState }); }
+  configureIndependentTask(id: string, expectedRevision: number, options: IndependentTaskOptions) {
+    return this.request('PUT', `/tasks/${encodeURIComponent(id)}/independent`, { body: { expectedRevision, options }, parse: IndependentTaskState });
+  }
+  recoverIndependentTask(id: string, expectedRevision: number) {
+    return this.request('POST', `/tasks/${encodeURIComponent(id)}/independent/recover`, { body: { expectedRevision, acknowledged: true }, parse: IndependentTaskState });
+  }
+  independentHistory(id: string, after = 0) { return this.request('GET', `/tasks/${encodeURIComponent(id)}/independent/history`, { query: { after, limit: 20 }, parse: IndependentHistoryPage }); }
+  checkpointIndependentTask(id: string, body: IndependentCheckpointBody) {
+    return this.request('POST', `/tasks/${encodeURIComponent(id)}/independent/checkpoint`, { body, parse: IndependentTaskState });
+  }
+  independentApproval(id: string, toolId: string) { return this.request('GET', `/tasks/${encodeURIComponent(id)}/independent/approvals/${encodeURIComponent(toolId)}`, { parse: IndependentApprovalDetail }); }
 }

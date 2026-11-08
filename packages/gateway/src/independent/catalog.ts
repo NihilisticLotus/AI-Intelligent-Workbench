@@ -215,6 +215,18 @@ export class IndependentCatalog {
     if (service.configRevision !== row.config_revision || model.revision !== row.model_revision) throw Errors.conflict('任务所选配置已修订，请核对后明确继续');
     return IndependentModelBinding.parse({ taskId, serviceId: service.id, modelId: model.id, configRevision: row.config_revision, modelRevision: row.model_revision, createdAt: row.created_at });
   }
+  /** 用户在空闲任务明确核对后使用；事务内核对旧快照，不借默认值换服务。 */
+  rebind(taskId: string, selection: IndependentSelection, expected: IndependentModelBinding): IndependentModelBinding {
+    return this.db.tx(() => {
+      const old = this.db.get('SELECT * FROM independent_task_models WHERE task_id=?', taskId);
+      if (!old || old.service_id !== expected.serviceId || old.model_id !== expected.modelId || old.config_revision !== expected.configRevision
+        || old.model_revision !== expected.modelRevision || old.created_at !== expected.createdAt || expected.taskId !== taskId) throw Errors.conflict('任务绑定已变化，请重新核对');
+      const { service, model } = this.usable(selection);
+      this.db.run('UPDATE independent_task_models SET service_id=?,model_id=?,config_revision=?,model_revision=?,created_at=? WHERE task_id=?',
+        service.id, model.id, service.configRevision, model.revision, now(), taskId);
+      return this.bound(taskId);
+    });
+  }
 
   /** 仅发现服务内部使用；没有公开读取密钥的路由，不从进程环境或其他服务兜底。 */
   async discoveryCredentials(serviceId: string, expectedConfigRevision: number) {

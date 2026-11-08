@@ -35,8 +35,8 @@ export function AgentsPage() {
   const allAgents = useApp((s) => s.agents);
   const toggleOn = useApp((s) => !!s.hello?.features[FeatureKey.AgentToggle]);
   // 上方卡片只放已启用的；关闭的列在下面“其他 Agent”（design.md 6.7）
-  const agents = useMemo(() => allAgents.filter(isEnabled), [allAgents]);
-  const offAgents = useMemo(() => allAgents.filter((a) => !isEnabled(a)), [allAgents]);
+  const agents = useMemo(() => allAgents.filter((a) => a.kind !== 'independent' && isEnabled(a)), [allAgents]);
+  const offAgents = useMemo(() => allAgents.filter((a) => a.kind !== 'independent' && !isEnabled(a)), [allAgents]);
   const [toggling, setToggling] = useState<AgentKind | null>(null);
   const route = useStore(routeStore, (r) => r);
   const routeAgent = route.page === 'agents' ? route.agent : undefined;
@@ -326,7 +326,7 @@ function NativeConfigSection({ a, onRedetect, redetecting }: { a: AgentInfo; onR
         <Icon name="key" /><div className="info"><b>{p.name}<span className="tag attn">已停用</span></b><span>{profileKindText[p.kind]} · {p.hasSecret ? '加密密钥已保留，不再使用' : '历史配置已保留'}</span></div>
       </div>)}
     </> : null}
-    <p className="muted-note">AI Console 自有 API 服务归本页上方的独立 Agent 管理，独立任务执行尚未开放。</p>
+    <p className="muted-note">AI Console 自有 API 服务归本页上方的独立 Agent 管理，可在新建任务中选择独立 Agent。</p>
   </>;
 }
 

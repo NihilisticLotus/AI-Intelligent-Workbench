@@ -46,8 +46,8 @@ export function IndependentAgentPanel() {
   const selectedModel = selectedService ? snapshot?.models[selectedService.id]?.find((m) => m.id === snapshot.selection?.modelId) : null;
   return <section className="independent-panel" aria-labelledby="independent-title">
     <div className="independent-heading"><div><h2 id="independent-title">工作台独立 Agent</h2><p>自己的 API 服务与模型目录，可添加多个服务，每个服务保留多个模型。</p></div>
-      <span className="tag">执行能力尚未实现</span></div>
-    <p className="muted">可管理配置、获取模型与能力、手动修订和设置默认值；暂不能派发任务。“刷新已保存目录”只读取工作台资料，在线获取需进入服务后明确操作。</p>
+    <span className="tag">支持独立任务 · 待真实补验</span></div>
+    <p className="muted">可管理配置、获取模型与能力、手动修订和设置默认值。新建任务中选择“AI Console 独立 Agent”，填写模型、上下文与请求预算后派发。“刷新已保存目录”只读取工作台资料，在线获取需进入服务后明确操作。</p>
     {!available ? <p role="status">当前 Gateway 未提供独立模型目录，请更新服务后刷新页面。</p> : <>
       <div className="independent-actions"><button className="btn primary" onClick={() => serviceDialog()}>添加 API 服务</button>
         <button className="btn" disabled={loading} onClick={() => void refresh()}>{loading ? '正在读取…' : '刷新已保存目录'}</button></div>

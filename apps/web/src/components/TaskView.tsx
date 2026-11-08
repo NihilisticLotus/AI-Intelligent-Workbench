@@ -11,6 +11,7 @@ import { Composer } from './Composer';
 import { Resizer, SidePanel } from './SidePanel';
 import { ErrorNotice, StatusMark, toastErrorOf } from './ui';
 import { Icon } from './Icon';
+import { IndependentTaskPanel } from './independent-task-panel';
 
 const EMPTY: EventEnvelope[] = [];
 
@@ -61,6 +62,7 @@ export function TaskView({ taskId }: { taskId: string }) {
           <section className="content" aria-label="对话">
             {history === 'error' ? <div style={{ padding: '0 var(--sp-5)' }}><ErrorNotice error={{ code: 'client.history', message: '对话记录没有载入完整', hint: '刷新页面再试一次。', actions: [{ label: '刷新页面', action: 'reload' }] }} /></div> : null}
             <Stream task={task} items={items} loading={history !== 'done'} onOpenPlan={() => { setPref('sideOpen', true); setPref('sideTab', 'plan'); }} />
+            {task.agent === 'independent' ? <IndependentTaskPanel task={task} /> : null}
             <Composer key={task.id} task={task} pending={pending} config={config} blocking={blocking} />
           </section>
         </div>

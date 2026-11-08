@@ -122,6 +122,19 @@ describe('持久请求预算', () => {
     expect(() => accounting.reserve({ ...binding, taskId: 'other' }, attempt)).toThrow('不属于');
     expect(ledger.snapshot('task').attemptedRequests).toBe(0);
   });
+  it('显式调整保留历史绑定、币种和占额，不能用缩小或换币种清账', () => {
+    const { ledger } = setup(); const id = ledger.reserve(binding, attempt); ledger.settle(id, failed);
+    const changed = { ...binding, modelId: 'another-model', modelRevision: 2 };
+    const next = ledger.adjust(changed, { ...policy, maxRequests: 8 }, 1);
+    expect(next).toMatchObject({ revision: 2, attemptedRequests: 1, reservedMicros: 10 });
+    expect(ledger.get(id)).toMatchObject({ binding, currency: 'CNY', reservedMicros: 10 });
+    expect(() => ledger.adjust(changed, policy, 1)).toThrow('已变化');
+    expect(() => ledger.adjust(changed, { ...policy, money: { ...policy.money!, currency: 'USD' } }, 2)).toThrow('币种');
+    expect(() => ledger.adjust(changed, { ...policy, money: { ...policy.money!, maxReservedMicros: 9 } }, 2)).toThrow('已占用预留');
+    expect(() => ledger.adjust(changed, { ...policy, money: null }, 2)).toThrow('记账方式');
+    const pending = ledger.reserve(changed, attempt); expect(() => ledger.adjust(changed, policy, 2)).toThrow('尚未核对');
+    ledger.settle(pending, failed); expect(ledger.snapshot('task').attemptedRequests).toBe(2);
+  });
   it('外层事务未提交不能取得可发送的请求身份，回滚后额度完整', () => {
     const { db, ledger } = setup(), accounting = ledger.accounting('task');
     expect(() => db.tx(() => accounting.reserve(binding, attempt))).toThrow('外层事务');
@@ -144,9 +157,9 @@ describe('持久请求预算', () => {
     const directory = temporary(), file = path.join(directory, 'migration.db'); const { db } = setup(file);
     db.run("INSERT INTO task_drafts(task_id,text,annotations_json,updated_at) VALUES ('task','原草稿','[]',1)");
     databases.splice(databases.indexOf(db), 1); db.close();
-    const old = new DatabaseSync(file); old.exec('DROP TABLE independent_request_attempts; DROP TABLE independent_request_budgets; PRAGMA user_version=10;'); old.close();
+    const old = new DatabaseSync(file); old.exec('DROP TABLE independent_task_settings; DROP TABLE independent_request_attempts; DROP TABLE independent_request_budgets; PRAGMA user_version=10;'); old.close();
     for (let i = 0; i < 2; i++) { const migrated = openDb(file);
-      expect(migrated.get('PRAGMA user_version')).toEqual({ user_version: 11 }); expect(migrated.get('SELECT text FROM task_drafts')).toEqual({ text: '原草稿' });
+      expect(migrated.get('PRAGMA user_version')).toEqual({ user_version: 12 }); expect(migrated.get('SELECT text FROM task_drafts')).toEqual({ text: '原草稿' });
       expect(migrated.get('SELECT id FROM sessions')).toEqual({ id: 'session' }); expect(migrated.all('SELECT * FROM independent_request_attempts')).toEqual([]); migrated.close(); }
   });
   it('预留后子进程崩溃，重开数据库仍耗尽额度，不产生重发', async () => {

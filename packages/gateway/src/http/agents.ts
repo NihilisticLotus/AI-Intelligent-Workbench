@@ -12,6 +12,7 @@ import { parseQuery, readBody, type Ctx, type Env } from './app';
 const kindOf = (c: Ctx) => {
   const r = AgentKind.safeParse(c.req.param('kind'));
   if (!r.success) throw Errors.notFound('没有这个 Agent');
+  if (r.data === 'independent') throw Errors.badRequest('独立 Agent 的 API 与模型请在工作台自有服务中配置');
   return r.data;
 };
 
@@ -19,10 +20,10 @@ export function agentRoutes(s: Services) {
   const r = new Hono<Env>();
 
   // 读缓存，不触发探测（第一次请求时等待启动检测完成）
-  r.get('/agents', async (c) => c.json({ items: await s.agentSvc.list(), nextCursor: null }));
+  r.get('/agents', async (c) => c.json({ items: [...await s.agentSvc.list(), s.independentRuntime.info()], nextCursor: null }));
 
   r.post('/agents/redetect', async (c) => {
-    const out: z.infer<typeof RedetectResult> = { items: await s.agentSvc.redetect() };
+    const out: z.infer<typeof RedetectResult> = { items: [...await s.agentSvc.redetect(), s.independentRuntime.info()] };
     return c.json(out);
   });
 

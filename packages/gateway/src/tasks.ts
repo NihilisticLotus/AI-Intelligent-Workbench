@@ -11,6 +11,8 @@ import type { AgentService } from './agents/service';
 import type { Db } from './db';
 import type { EventStore } from './events';
 import { AppError, AbortError, Errors, newId, now } from './util';
+import type { IndependentTaskRuntime } from './independent/task-runtime';
+import type { IndependentTaskOptions } from '@aic/protocol';
 
 type TaskRow = {
   id: string; project_id: string; group_id: string | null; title: string; prompt: string;
@@ -100,6 +102,8 @@ export class TaskService {
   private log: (msg: string) => void;
   /** 由 Gateway 组装时注入（1.2）；为空时退回 1.1 的行为 */
   agentSvc: AgentService | null = null;
+  independentRuntime: IndependentTaskRuntime | null = null;
+  private configuring = new Set<string>();
 
   constructor(private db: Db, private events: EventStore, private agents: AgentRegistry, opts: TaskServiceOptions = {}) {
     this.noResponseNoticeMs = opts.noResponseNoticeMs ?? 60_000;
@@ -136,7 +140,10 @@ export class TaskService {
     if (!r) throw Errors.notFound('找不到这个任务');
     return r;
   }
-  get(id: string): Task { return toTask(this.getRow(id)); }
+  get(id: string): Task {
+    const task = toTask(this.getRow(id));
+    return task.agent === 'independent' && this.independentRuntime ? { ...task, independent: this.independentRuntime.reference(id) } : task;
+  }
 
   /** 按最近活动倒序；游标分页 */
   list(q: z.infer<typeof TasksQuery>): { items: Task[]; nextCursor: string | null } {
@@ -155,7 +162,7 @@ export class TaskService {
     const sql = `SELECT * FROM tasks ${where.length ? `WHERE ${where.join(' AND ')}` : ''} ORDER BY last_activity_at DESC, id DESC LIMIT ?`;
     const rows = this.db.all<TaskRow>(sql, ...params, q.limit + 1);
     const more = rows.length > q.limit;
-    const items = rows.slice(0, q.limit).map(toTask);
+    const items = rows.slice(0, q.limit).map((r) => this.get(r.id));
     const last = items[items.length - 1];
     return { items, nextCursor: more && last ? Buffer.from(JSON.stringify([last.lastActivityAt, last.id])).toString('base64url') : null };
   }
@@ -265,6 +272,23 @@ export class TaskService {
   async create(body: z.infer<typeof CreateTaskBody>): Promise<Task> {
     if (!this.db.get('SELECT id FROM projects WHERE id = ?', body.projectId)) throw Errors.badRequest('找不到这个项目');
     if (body.groupId && !this.db.get('SELECT id FROM task_groups WHERE id = ?', body.groupId)) throw Errors.badRequest('找不到这个分组');
+    if (body.agent === 'independent') {
+      if (!this.independentRuntime || !body.independent) throw Errors.badRequest('请先填写独立 Agent 的模型、上下文与预算配置');
+      if (body.profileId || body.model || body.effort) throw Errors.badRequest('独立 Agent 使用自己的任务配置，不接受第三方账号或模型字段');
+      if (!['readonly', 'ask'].includes(body.permission)) throw Errors.levelUnavailable('独立 Agent 当前仅支持只读或需审批');
+      if (body.attachments?.length) throw Errors.badRequest('请先创建任务，再上传附件');
+      const id = newId('t'), t = now();
+      this.db.tx(() => {
+        this.db.run(`INSERT INTO tasks (id,project_id,group_id,title,prompt,status,permission_level,agent,last_activity_at,created_at,updated_at)
+          VALUES (?,?,?,?,?,'draft',?,'independent',?,?,?)`, id, body.projectId, body.groupId ?? null,
+          body.title?.trim() || body.prompt.trim().split(/\r?\n/)[0]?.slice(0,40) || '新任务', body.prompt, body.permission, this.activityTs(), t, t);
+        this.independentRuntime!.configure(id, body.independent!);
+        this.events.append({ type: 'task.created', taskId: id, sessionId: null, data: { task: this.get(id) } });
+      });
+      if (!body.deferPrompt) { this.independentRuntime.assertReady(id); this.startTurn(id, body.prompt); }
+      return this.get(id);
+    }
+    if (body.independent) throw Errors.badRequest('独立配置只能用于独立 Agent');
     const a = await this.adapterFor(body.agent, body.profileId);
     this.checkPermission(a, body.permission);
     const profileId = body.profileId ?? null;
@@ -291,6 +315,8 @@ export class TaskService {
 
   async patch(id: string, body: z.infer<typeof PatchTaskBody>): Promise<Task> {
     const row = this.getRow(id);
+    if (row.agent === 'independent' && body.permission && !['readonly','ask'].includes(body.permission)) throw Errors.levelUnavailable('独立 Agent 当前仅支持只读或需审批');
+    if (this.configuring.has(id)) throw Errors.invalidState('任务配置正在更新');
     if (body.groupId && !this.db.get('SELECT id FROM task_groups WHERE id = ?', body.groupId)) throw Errors.badRequest('找不到这个分组');
     const a = this.agents.get(row.agent);
     if (body.permission !== undefined && a) this.checkPermission(a, body.permission);
@@ -428,8 +454,13 @@ export class TaskService {
     const rt = this.runtimes.get(taskId);
     if (!rt) return;
     rt.closing = true;
+    try { await rt.conn.close(); } catch {
+      if (this.getRow(taskId).agent === 'independent') {
+        rt.closing = false; this.independentRuntime?.requireReview(taskId);
+        throw Errors.invalidState('独立会话未可靠收尾，请先核对中断记录');
+      }
+    }
     this.runtimes.delete(taskId);
-    try { await rt.conn.close(); } catch { /* 忽略 */ }
     rt.release();
     this.endSession(taskId, rt.sessionId, reason);
   }
@@ -474,6 +505,20 @@ export class TaskService {
 
   private async startRuntime(taskId: string, signal?: AbortSignal, opts: { strictResume?: boolean; noQueue?: boolean } = {}): Promise<Runtime> {
     const row = this.getRow(taskId);
+    if (row.agent === 'independent') {
+      if (!this.independentRuntime) throw Errors.invalidState('独立 Agent 尚未装配');
+      const project = this.db.get<{ path: string }>('SELECT path FROM projects WHERE id=?', row.project_id);
+      if (!project) throw Errors.notFound('找不到任务的项目');
+      const previous = this.db.get<{ id: string }>('SELECT id FROM sessions WHERE task_id=? AND agent_id=? ORDER BY started_at DESC LIMIT 1', taskId, row.agent);
+      const sessionId = previous?.id ?? newId('s');
+      if (!previous) this.db.run("INSERT INTO sessions(id,task_id,agent_id,model,agent_session_id,status,started_at) VALUES (?,?,'independent',?,?,'active',?)", sessionId, taskId, row.model, sessionId, now());
+      const conn = await this.independentRuntime.open(taskId, sessionId, project.path, row.permission_level, this.host(taskId, sessionId));
+      if (signal?.aborted) { await conn.close(); throw new AbortError(); }
+      this.db.run("UPDATE sessions SET status='active',ended_at=NULL,model=? WHERE id=?", row.model, sessionId);
+      this.events.append({ type: 'session.started', taskId, sessionId, data: { agent: row.agent, model: row.model, resumed: !!previous } });
+      const rt: Runtime = { sessionId, conn, profileId: null, release: () => {}, lastActive: now(), closing: false, secrets: [], redactor: new StreamRedactor([]) };
+      this.runtimes.set(taskId, rt); return rt;
+    }
     const a = await this.adapterFor(row.agent, row.profile_id);
     const project = this.db.get<{ path: string }>('SELECT path FROM projects WHERE id = ?', row.project_id);
     const svc = a.real ? this.agentSvc : null;
@@ -550,7 +595,7 @@ export class TaskService {
   }
 
   private isBusy(taskId: string) {
-    return this.turnAborts.has(taskId);
+    return this.turnAborts.has(taskId) || this.configuring.has(taskId);
   }
 
   /** 上一个会话（或能力缓存）记录的换模型方式；不知道时返回 null */
@@ -614,7 +659,13 @@ export class TaskService {
         }, Math.min(1000, this.noResponseNoticeMs, this.noResponseCancelMs));
         watchdog.unref?.();
       });
-      const r = await Promise.race([rt.conn.prompt({ text, attachments }, abort.signal), timeout]);
+      const prompt = rt.conn.prompt({ text, attachments }, abort.signal);
+      let r: Awaited<typeof prompt>;
+      try { r = await Promise.race([prompt, timeout]); }
+      catch (error) {
+        if (this.getRow(taskId).agent === 'independent') await prompt.catch(() => {});
+        throw error;
+      }
       rt.lastActive = now();
       if (rt.redactor.active) this.flushRedactor(taskId, rt.sessionId, rt.redactor);
       // 审批超时：不放行，本轮结束后任务暂停（不进入待验收）
@@ -683,9 +734,10 @@ export class TaskService {
     const row = this.getRow(taskId);
     if (FINAL.includes(row.status)) throw Errors.invalidState('任务已经结束，不能继续发送消息');
     if (this.isBusy(taskId)) throw Errors.invalidState('任务正在执行', '请等这一轮结束，或先点 [停止]', [{ label: '停止', action: 'task.cancel', args: { taskId } }]);
+    if (row.agent === 'independent') this.independentRuntime?.assertReady(taskId);
     const a = this.attachments?.resolve(taskId, attachmentIds) ?? { infos: [], inputs: [] };
     const agent = this.agents.get(row.agent);
-    const info = agent ? this.agentSvc?.info(agent) : undefined;
+    const info = row.agent === 'independent' ? this.independentRuntime?.info() : agent ? this.agentSvc?.info(agent) : undefined;
     const configModels = this.runtimes.get(taskId)?.conn.config?.().models;
     if (a.infos.some((x) => x.kind === 'image') && visionOf(info ? { ...info, models: configModels ?? info.models } : undefined, row.model) === false) {
       throw new AppError(415, { code: ErrorCode.AttachmentUnsupported, message: (info?.displayName ?? row.agent) + ' · ' + (row.model ?? '当前模型') + ' 看不了图片', actions: [{ label: '换模型', action: 'task.switch_model', args: { taskId } }] });
@@ -700,12 +752,31 @@ export class TaskService {
     abort.abort();
   }
 
+  /** 独立任务的配置 / 恢复操作在整个异步收尾期间占住任务，防止并发发送。 */
+  async updateIndependent(taskId: string, action: 'configure' | 'recover' | 'checkpoint', input: IndependentTaskOptions | { expectedRevision: number } | { throughSeq: number; summary: string; expectedTailHash: string }, expectedRevision?: number) {
+    const row = this.getRow(taskId);
+    if (row.agent !== 'independent' || !this.independentRuntime) throw Errors.badRequest('这个任务不是独立 Agent 任务');
+    if (FINAL.includes(row.status) || this.isBusy(taskId)) throw Errors.invalidState('请在任务空闲且未结束时操作');
+    this.configuring.add(taskId);
+    try {
+      await this.dropRuntime(taskId, 'independent_config');
+      if (action === 'configure') this.independentRuntime.configure(taskId, input as IndependentTaskOptions, expectedRevision);
+      else if (action === 'recover') await this.independentRuntime.acknowledge(taskId, (input as { expectedRevision: number }).expectedRevision);
+      else this.independentRuntime.checkpoint(taskId, input as { throughSeq: number; summary: string; expectedTailHash: string });
+      this.emitUpdated(taskId);
+      // 输入框从会话事件推导当前模型；明确应用后立即覆盖旧 session.started。
+      if (action === 'configure') this.emitConfig(taskId, null, null);
+      return this.independentRuntime.state(taskId);
+    } finally { this.configuring.delete(taskId); }
+  }
+
   /**
    * 切换（design.md 7.4）：同 Agent 换模型、思考强度（H0：会话内切换；不支持时 H1：结束进程 → 带新参数重启 → 恢复）；
    * 同 Agent 换账号（结束进程 → 用新账号重启 → 恢复）；跨 Agent 在 1.4 提供。
    */
   async switch(taskId: string, opts: { agent?: AgentKind | undefined; model?: string | undefined; effort?: string | undefined; profileId?: string | undefined }): Promise<Task> {
     const row = this.getRow(taskId);
+    if (row.agent === 'independent') throw Errors.badRequest('请在独立任务配置中明确应用服务、模型与预算');
     if (opts.agent && opts.agent !== row.agent) {
       throw Errors.agentUnavailable('暂时不能切换到其他 Agent', '跨 Agent 交接会在之后的版本提供；现在可以换模型或思考强度');
     }
@@ -851,6 +922,7 @@ export class TaskService {
     const approval: Approval = {
       id: newId('a'), taskId, sessionId, title: req.title, reason: req.reason, detail: req.detail, cwd: req.cwd,
       options: req.options, status: 'pending', decidedBy: null, createdAt: t, expiresAt: t + this.approvalTimeoutMs,
+      ...(row.agent === 'independent' ? { independentToolId: req.toolId } : {}),
     };
     this.db.run(
       'INSERT INTO approvals (id, task_id, session_id, request_json, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',

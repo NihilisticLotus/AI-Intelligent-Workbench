@@ -25,6 +25,23 @@
 .independent-fieldset > details { margin: 16px 0; }
 .independent-fieldset summary { cursor: pointer; }
 .independent-check { display: flex; gap: 10px; align-items: center; min-height: 44px; }
+.independent-config { min-width: 0; margin: 16px 0; padding: 16px; border: 1px solid var(--line); border-radius: var(--r-card); }
+.independent-config legend { padding: 0 8px; font-weight: 600; }
+.independent-config details > summary, .independent-task-panel > summary, .independent-task-panel details > summary, .independent-history summary { min-height: 44px; padding: 12px 0; cursor: pointer; overflow-wrap: anywhere; }
+.independent-config .form-row > div { min-width: 0; flex: 1; }
+.independent-config input, .independent-config select { max-width: 100%; min-height: 44px; }
+.independent-task-panel { flex: 0 0 auto; margin: 0 var(--sp-5) 12px; padding: 0 16px; max-height: 45vh; overflow: auto; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-2); }
+.independent-task-panel p, .independent-config p { line-height: 1.7; }
+.independent-task-panel .btn, .independent-approval-detail .btn { min-height: 44px; }
+.independent-table-scroll { max-width: 100%; overflow-x: auto; }
+.independent-table-scroll table { width: 100%; border-collapse: collapse; }
+.independent-table-scroll th, .independent-table-scroll td { text-align: left; padding: 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.independent-history { max-height: 35vh; overflow: auto; margin-bottom: 16px; }
+.independent-history pre, .independent-approval-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 35vh; overflow: auto; padding: 12px; background: var(--bg-1); }
+@media (max-width: 600px) { .independent-task-panel { margin-inline: 12px; padding-inline: 12px; } .independent-config { padding: 12px; } }
+.ag.independent { background: var(--bg-3); color: var(--fg-1); }
+.compose-bar:has(.independent-runtime-trigger) { flex-wrap: wrap; }
+.picker-trigger.independent-runtime-trigger { flex: 0 0 auto; flex-wrap: nowrap; white-space: nowrap; min-height: 44px; }
 .independent-capability { border-bottom: 1px solid var(--line); }
 .independent-capability-body { padding-top: 8px; }
 .independent-evidence { padding-left: 20px; font-size: var(--fs-12); color: var(--fg-2); overflow-wrap: anywhere; }

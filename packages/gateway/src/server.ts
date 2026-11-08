@@ -24,6 +24,7 @@ import type { Services } from './services';
 import { AttachmentService } from './attachments';
 import { IndependentCatalog } from './independent/catalog';
 import { IndependentDiscovery } from './independent/discovery';
+import { IndependentTaskRuntime } from './independent/task-runtime';
 import type { readMetadataJson } from './independent/metadata-http';
 import { TaskService } from './tasks';
 import { newId } from './util';
@@ -219,12 +220,16 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   tasks.agentSvc = agentSvc;
   tasks.recoverOnStartup();
   // 上次遗留的 Agent 进程（核对启动时间后结束进程树）；不在启动时预先拉起 Agent
-  void processes.cleanupOrphans().catch((e) => log(`清理遗留的 Agent 进程失败：${String(e)}`));
+  const orphanCleanup = processes.cleanupOrphans();
+  void orphanCleanup.catch(() => log('遗留进程清理失败，独立 Agent 暂停执行与恢复'));
+  const independentRuntime = new IndependentTaskRuntime(db, independent, events, attachments, dataDir, processes, orphanCleanup);
+  independentRuntime.recoverOnStartup();
+  tasks.independentRuntime = independentRuntime;
   const projects = new ProjectService(db);
   const groups = new GroupService(db, tasks);
 
   const services: Services = {
-    db, attachments, independent, independentDiscovery, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks,
+    db, attachments, independent, independentDiscovery, independentRuntime, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks,
     port: () => port,
     machine: { id: machineId, name: hostname(), os: process.platform === 'win32' ? 'windows' : process.platform },
     version: VERSION,

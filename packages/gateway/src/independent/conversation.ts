@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import {
   IndependentAssistantMessage, IndependentContextCheckpoint, IndependentConversationMessage,
   IndependentModelBinding, IndependentRunLimits, IndependentToolMessage, IndependentTurnRecord, IndependentUserMessage,
+  IndependentRebindConfirmation,
   type IndependentConversationEntry, type IndependentToolCall, type IndependentTurnStop,
 } from '@aic/protocol';
 import type { Db, Row } from '../db';
@@ -62,7 +63,7 @@ export class IndependentConversationStore {
       turn.sessionId, seq, turn.id, json, previousHash, digest(previousHash, turn.sessionId, turn.id, seq, json), now());
   }
 
-  create(bindingInput: IndependentModelBinding, sessionId: string, userInput: IndependentUserMessage, limitsInput: IndependentRunLimits, systemPrompt = ''): IndependentTurnRecord {
+  create(bindingInput: IndependentModelBinding, sessionId: string, userInput: IndependentUserMessage, limitsInput: IndependentRunLimits, systemPrompt = '', rebindInput?: IndependentRebindConfirmation): IndependentTurnRecord {
     const binding = IndependentModelBinding.parse(bindingInput); const user = IndependentUserMessage.parse(userInput);
     const limits = IndependentRunLimits.parse(limitsInput);
     if (Buffer.byteLength(systemPrompt) > 1024 * 1024) throw Errors.tooLarge('项目规则与系统提示过大');
@@ -73,7 +74,11 @@ export class IndependentConversationStore {
       const previous = this.db.get('SELECT binding_json FROM independent_turns WHERE session_id=? ORDER BY created_at DESC,rowid DESC LIMIT 1', sessionId);
       if (previous) {
         const old = IndependentModelBinding.parse(JSON.parse(String(previous.binding_json)));
-        if (old.serviceId !== binding.serviceId || old.modelId !== binding.modelId || old.configRevision !== binding.configRevision || old.modelRevision !== binding.modelRevision) throw Errors.conflict('会话配置已变化，须明确核对后建立新绑定');
+        if (old.serviceId !== binding.serviceId || old.modelId !== binding.modelId || old.configRevision !== binding.configRevision || old.modelRevision !== binding.modelRevision) {
+          const confirmation = IndependentRebindConfirmation.safeParse(rebindInput);
+          if (!confirmation.success || JSON.stringify(confirmation.data.previousBinding) !== JSON.stringify(old)
+            || confirmation.data.tailHash !== this.entries(sessionId).at(-1)?.hash) throw Errors.conflict('会话配置已变化，须明确核对后建立新绑定');
+        }
       }
       this.entries(sessionId);
       const id = newId('itr'); const at = now();
@@ -97,7 +102,14 @@ export class IndependentConversationStore {
     const checkpoint = r ? IndependentContextCheckpoint.parse({ id: r.id, sessionId: r.session_id, throughSeq: r.through_seq, sourceHash: r.source_hash, summary: r.summary, createdAt: r.created_at }) : null;
     if (checkpoint && entries[checkpoint.throughSeq - 1]?.hash !== checkpoint.sourceHash) throw Errors.invalidState('压缩来源摘要不一致');
     return { systemPrompt: String(this.row(id).system_prompt), checkpoint,
-      messages: entries.filter((e) => e.seq > (checkpoint?.throughSeq ?? 0)).map((e) => e.message) };
+      messages: entries.filter((e) => e.seq > (checkpoint?.throughSeq ?? 0)).map((e) => {
+        const message = e.message;
+        if (message.role !== 'assistant' || !message.continuation) return message;
+        const old = this.get(e.turnId).binding;
+        if (old.serviceId === turn.binding.serviceId && old.modelId === turn.binding.modelId && old.configRevision === turn.binding.configRevision
+          && old.modelRevision === turn.binding.modelRevision) return message;
+        const { continuation: _private, ...portable } = message; return portable;
+      }) };
   }
   pending(id: string): IndependentToolCall[] {
     const turn = this.get(id); const entries = this.entries(turn.sessionId).filter((e) => e.turnId === id);

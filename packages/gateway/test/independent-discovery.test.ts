@@ -35,7 +35,7 @@ describe('模型发现预览与追加导入', () => {
     }
     expect(read).not.toHaveBeenCalled();
     expect((await t.api('POST',`${route}/models/import`,{token,body:{snapshotId:'x',expectedConfigRevision:1,remoteModelIds:['m'],evidence:[]}})).status).toBe(400);
-    const hello=await t.api('GET','/hello',{token});expect(hello.json.features[FeatureKey.IndependentDiscovery]).toBe(true);expect(hello.json.features[FeatureKey.IndependentRuntime]).toBe(false);
+    const hello=await t.api('GET','/hello',{token});expect(hello.json.features[FeatureKey.IndependentDiscovery]).toBe(true);expect(hello.json.features[FeatureKey.IndependentRuntime]).toBe(true);
   });
   it('两服务密钥仅送自己的模型接口，公共目录不带认证；事件与缓存无密钥', async () => {
     const calls: Parameters<typeof readMetadataJson>[0][]=[];

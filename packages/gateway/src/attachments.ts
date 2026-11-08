@@ -100,7 +100,7 @@ export class AttachmentService {
   resolve(taskId: string, ids: string[] = []): { infos: AttachmentInfo[]; inputs: PromptAttachment[] } {
     if (ids.length > 10) throw attachmentError(400, ErrorCode.AttachmentTooMany, '每条消息最多 10 个附件');
     const found = [...new Set(ids)].map((id) => this.get(taskId, id));
-    return { infos: found.map((a) => a.info), inputs: found.map((a) => ({ ...a.info, path: a.path, uri: pathToFileURL(a.path).href })) };
+    return { infos: found.map((a) => a.info), inputs: found.map((a) => ({ ...a.info, attachmentId: a.info.id, path: a.path, uri: pathToFileURL(a.path).href })) };
   }
   markUsed(taskId: string, ids: string[]) { for (const id of ids) this.db.run('UPDATE attachments SET used_at = ? WHERE id = ? AND task_id = ?', Date.now(), id, taskId); }
   cleanup(at = Date.now()) {

@@ -13,7 +13,7 @@ export class IndependentRequestLedger {
   private budget(taskId: string) {
     const row = this.db.get('SELECT * FROM independent_request_budgets WHERE task_id=?', taskId);
     if (!row) throw Errors.invalidState('任务尚未设置独立请求预算');
-    return { binding: IndependentModelBinding.parse(JSON.parse(String(row.binding_json))),
+    return { revision: Number(row.revision), binding: IndependentModelBinding.parse(JSON.parse(String(row.binding_json))),
       policy: IndependentRequestBudget.parse(JSON.parse(String(row.policy_json))) };
   }
   /** 首次设置后不可隐式重置；重复装配同一配置是幂等的。 */
@@ -22,7 +22,7 @@ export class IndependentRequestLedger {
     return this.db.tx(() => {
       if (this.db.get('SELECT task_id FROM independent_request_budgets WHERE task_id=?', binding.taskId)) {
         const existing = this.budget(binding.taskId);
-        if (JSON.stringify(existing) !== JSON.stringify({ binding, policy })) throw Errors.conflict('任务已有固定请求预算，不能通过重新装配清空记录');
+        if (JSON.stringify({ binding: existing.binding, policy: existing.policy }) !== JSON.stringify({ binding, policy })) throw Errors.conflict('任务已有固定请求预算，不能通过重新装配清空记录');
       } else {
         this.db.run('INSERT INTO independent_request_budgets(task_id,binding_json,policy_json,created_at) VALUES (?,?,?,?)',
           binding.taskId, JSON.stringify(binding), JSON.stringify(policy), now());
@@ -31,21 +31,20 @@ export class IndependentRequestLedger {
     });
   }
   snapshot(taskId: string): IndependentRequestBudgetSnapshot {
-    const { binding, policy } = this.budget(taskId);
+    const { binding, policy, revision } = this.budget(taskId);
     const totals = this.db.get<{ count: number; pending: number; reserved: number }>(
       "SELECT count(*) AS count,coalesce(sum(CASE WHEN state='reserved' THEN 1 ELSE 0 END),0) AS pending,coalesce(sum(reserved_micros),0) AS reserved FROM independent_request_attempts WHERE task_id=?", taskId)!;
     return IndependentRequestBudgetSnapshot.parse({ binding, policy, attemptedRequests: totals.count, pendingRequests: totals.pending,
       remainingRequests: Math.max(0, policy.maxRequests - totals.count), reservedMicros: policy.money ? totals.reserved : null,
-      remainingMicros: policy.money ? Math.max(0, policy.money.maxReservedMicros - totals.reserved) : null, actualCostMicros: null });
+      remainingMicros: policy.money ? Math.max(0, policy.money.maxReservedMicros - totals.reserved) : null, actualCostMicros: null, revision });
   }
   get(id: string): IndependentRequestRecord {
     const row = this.db.get('SELECT * FROM independent_request_attempts WHERE id=?', id);
     if (!row) throw Errors.notFound('找不到独立请求记录');
-    const { binding, policy } = this.budget(String(row.task_id));
-    return IndependentRequestRecord.parse({ id: row.id, taskId: row.task_id, ordinal: row.ordinal, binding,
+    return IndependentRequestRecord.parse({ id: row.id, taskId: row.task_id, ordinal: row.ordinal, binding: JSON.parse(String(row.binding_json)),
       attempt: JSON.parse(String(row.attempt_json)), status: row.state,
       settlement: row.settlement_json === null ? null : JSON.parse(String(row.settlement_json)), reservedMicros: row.reserved_micros,
-      currency: policy.money?.currency ?? null, createdAt: row.created_at, updatedAt: row.updated_at });
+      currency: row.currency, createdAt: row.created_at, updatedAt: row.updated_at });
   }
   entries(taskId: string) {
     this.budget(taskId);
@@ -59,9 +58,25 @@ export class IndependentRequestLedger {
       const money = snapshot.policy.money, ceiling = money ? (attempt.kind === 'model' ? money.modelCeilingMicros : money.counterCeilingMicros) : null;
       if (snapshot.remainingRequests < 1 || money && (ceiling === null || ceiling > snapshot.remainingMicros!)) throw new ModelTransportError('budget');
       const id = newId('ireq'), at = now();
-      this.db.run("INSERT INTO independent_request_attempts(id,task_id,ordinal,attempt_json,state,reserved_micros,created_at,updated_at) VALUES (?,?,?,?,'reserved',?,?,?)",
-        id, binding.taskId, snapshot.attemptedRequests + 1, JSON.stringify(attempt), ceiling, at, at);
+      this.db.run("INSERT INTO independent_request_attempts(id,task_id,ordinal,attempt_json,state,reserved_micros,created_at,updated_at,binding_json,currency) VALUES (?,?,?,?,'reserved',?,?,?,?,?)",
+        id, binding.taskId, snapshot.attemptedRequests + 1, JSON.stringify(attempt), ceiling, at, at, JSON.stringify(binding), money?.currency ?? null);
       return id;
+    });
+  }
+  /** 仅由空闲任务的显式配置操作调用；保存历史快照与已占额度。 */
+  adjust(bindingInput: IndependentModelBinding, policyInput: IndependentRequestBudget, expectedRevision: number) {
+    const binding = IndependentModelBinding.parse(bindingInput), policy = IndependentRequestBudget.parse(policyInput);
+    return this.db.tx(() => {
+      const old = this.snapshot(binding.taskId);
+      if (old.revision !== expectedRevision) throw Errors.conflict('预算已变化，请载入最新记录再核对');
+      if (old.pendingRequests) throw Errors.invalidState('请求结果尚未核对，不能修改预算或绑定');
+      if (policy.maxRequests < old.attemptedRequests) throw Errors.badRequest('请求上限不能小于已占用次数');
+      if (old.attemptedRequests && ((old.policy.money === null) !== (policy.money === null)
+        || old.policy.money && policy.money && old.policy.money.currency !== policy.money.currency)) throw Errors.badRequest('已有请求后不能更换币种或金额记账方式');
+      if (policy.money && policy.money.maxReservedMicros < (old.reservedMicros ?? 0)) throw Errors.badRequest('金额上限不能小于已占用预留');
+      this.db.run('UPDATE independent_request_budgets SET binding_json=?,policy_json=?,revision=revision+1 WHERE task_id=?',
+        JSON.stringify(binding), JSON.stringify(policy), binding.taskId);
+      return this.snapshot(binding.taskId);
     });
   }
   settle(id: string, input: IndependentRequestSettlement) {

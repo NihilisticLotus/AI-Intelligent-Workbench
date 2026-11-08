@@ -23,6 +23,24 @@ describe('模型发现字段语义', () => {
       expect(output).not.toContain('fixture-private'); expect(output).not.toContain('private_field');
     }
   });
+  it.each([
+    {raw:{error:{code:'fixture-private-code',message:'fixture-private-text'}},shape:{root:'object',data:'missing',errorMarker:true,topLevelKeys:1}},
+    {raw:{code:200,msg:'fixture-private',data:{list:[{id:'fixture-private-model'}]}},shape:{root:'object',data:'object',errorMarker:true,topLevelKeys:3}},
+    {raw:{object:'list',data:null},shape:{root:'object',data:'null',errorMarker:false,topLevelKeys:2}},
+    {raw:{data:'fixture-private'},shape:{root:'object',data:'string',errorMarker:false,topLevelKeys:1}},
+    {raw:[{id:'fixture-private-model'}],shape:{root:'array',data:null,errorMarker:null,topLevelKeys:null}},
+    {raw:'fixture-private',shape:{root:'string',data:null,errorMarker:null,topLevelKeys:null}},
+    {raw:null,shape:{root:'null',data:null,errorMarker:null,topLevelKeys:null}},
+  ])('列表结构不符时只记根结构 $shape.root / $shape.data，不带任何键名或值', ({raw,shape}) => {
+    try { parse(service({protocol:'responses'}),raw); expect.fail('本合成结构应拒绝'); }
+    catch (error) {
+      expect(error).toBeInstanceOf(MetadataParseError); expect(error).toMatchObject({reason:'data_not_array',rootShape:shape});
+      const output = String(error) + JSON.stringify(error) + JSON.stringify((error as MetadataParseError).rootShape);
+      expect(output).not.toContain('fixture-private');
+      // 只有四个固定键，值只来自固定集合：键名 list / msg 等不会出现
+      const r = (error as MetadataParseError).rootShape!; expect(Object.keys(r).sort()).toEqual(['data','errorMarker','root','topLevelKeys']); expect(JSON.stringify(r)).not.toMatch(/list|msg|code/);
+    }
+  });
   it('标准或未知兼容接口只识别 ID，保留原样且不推测模型名、声明或外链', () => {
     const s = service(); const r = parse(s,{data:[{id:'model/image-high',context_window:999,image_input:true,url:'https://evil.example/',api_key:'fixture'}],next:'https://evil.example/'});
     expect(r.items).toEqual([{remoteModelId:'model/image-high',name:'model/image-high',evidence:[]}]); expect(r.notices).toHaveLength(1);

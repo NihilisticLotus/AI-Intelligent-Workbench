@@ -1,17 +1,31 @@
 import {
   CreateIndependentModelBody, IndependentCapabilityEvidence, IndependentCapabilityValues,
   type IndependentCapabilityField, type IndependentDiscoveredModel, type IndependentService,
-  type IndependentDiscoveryParseFailure,
+  type IndependentDiscoveryParseFailure, type IndependentDiscoveryRootShape,
 } from '@aic/protocol';
 import { capabilityScope } from './capabilities';
 
 export const objectOf = (v: unknown): Record<string, unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string,unknown> : {};
 /** 只携带本地校验分类；不把服务返回的值、字段名或错误正文带出解析器。 */
 export class MetadataParseError extends Error {
-  constructor(readonly reason: IndependentDiscoveryParseFailure) {
+  constructor(readonly reason: IndependentDiscoveryParseFailure, readonly rootShape?: IndependentDiscoveryRootShape) {
     super({data_not_array:'未知模型列表结构',data_limit:'未知模型列表结构',duplicate_id:'模型列表包含重复 ID',pagination_state:'Messages 模型列表缺少分页状态',pagination_cursor:'Messages 分页游标不正确'}[reason]);
     this.name = 'MetadataParseError';
   }
+}
+const kindOf = (v: unknown) => v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v === 'object' ? 'object' : typeof v === 'string' ? 'string' : typeof v === 'number' ? 'number' : typeof v === 'boolean' ? 'boolean' : 'null';
+/**
+ * 列表结构不符时只记 JSON 形状（ISSUE-0029）：根类型、data 类型、顶层键数量、有没有常见错误标记。
+ * 不记任何键名、值或正文，因此不能据此判断供应商的具体错误或认证状态。
+ */
+export function rootShapeOf(raw: unknown): IndependentDiscoveryRootShape {
+  const root = kindOf(raw) as IndependentDiscoveryRootShape['root'];
+  if (root !== 'object') return { root, data: null, errorMarker: null, topLevelKeys: null };
+  const o = raw as Record<string, unknown>; const keys = Object.keys(o);
+  // 只在 data 不是数组时调用（data_not_array），所以这里不会出现 array
+  const data = !Object.prototype.hasOwnProperty.call(o, 'data') ? 'missing' : kindOf(o.data);
+  return { root, data: data as NonNullable<IndependentDiscoveryRootShape['data']>,
+    errorMarker: ['error', 'code', 'msg', 'message'].some((k) => Object.prototype.hasOwnProperty.call(o, k)), topLevelKeys: Math.min(keys.length, 10_000) };
 }
 const atPath = (value: unknown, path: string) => path.split('.').reduce<unknown>((v, key) => objectOf(v)[key], value);
 export function evidenceBuilder(service: IndependentService, modelId: string, sourceUrl: string, version: string, at: number, kind: 'endpoint' | 'catalog' | 'official' = 'endpoint') {
@@ -64,7 +78,7 @@ export function supplementCatalog(service: IndependentService, items: Independen
 /** 已知传输不等于已知元数据扩展；OpenAI 兼容仅保证读取 ID。 */
 export function parseEndpointPage(service: IndependentService, raw: unknown, sourceUrl: string, digest: string, at = Date.now()) {
   const root = objectOf(raw);
-  if (!Array.isArray(root.data)) throw new MetadataParseError('data_not_array');
+  if (!Array.isArray(root.data)) throw new MetadataParseError('data_not_array', rootShapeOf(raw));
   if (root.data.length > 10_000) throw new MetadataParseError('data_limit');
   const url = new URL(service.baseUrl);
   const deepseek = service.protocol === 'chat_completions' && url.origin === 'https://api.deepseek.com' && ['/', '/v1', '/v1/'].includes(url.pathname);

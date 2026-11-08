@@ -1,5 +1,5 @@
 // 能力值只按协议解释；不根据模型名猜窗口、图片或思考档位。
-import { IndependentCapabilityPatch, type IndependentCapabilityField, type IndependentModel, type IndependentService, type IndependentDiscoveryParseFailure } from '@aic/protocol';
+import { IndependentCapabilityPatch, type IndependentCapabilityField, type IndependentModel, type IndependentService, type IndependentDiscoveryParseFailure, type IndependentDiscoveryRootShape } from '@aic/protocol';
 
 const discoveryParseFailureLabels = {
   data_not_array: '响应不符合已接入的模型列表结构', data_limit: '本页模型条目超过解析上限',
@@ -7,6 +7,13 @@ const discoveryParseFailureLabels = {
 } satisfies Record<IndependentDiscoveryParseFailure, string>;
 export const discoveryParseFailureText = (reason?: IndependentDiscoveryParseFailure) => reason
   ? discoveryParseFailureLabels[reason] : '未记录具体校验原因；不会从历史错误推断';
+/** 列表结构不符时的根结构描述（ISSUE-0029）：只说 JSON 形状，不推断供应商错误原因 */
+export function discoveryRootShapeText(shape?: IndependentDiscoveryRootShape): string {
+  if (!shape) return '未记录根结构（这条诊断早于 2026-11-09，或不是列表结构问题）';
+  const kind = { object: '对象', array: '数组', string: '字符串', number: '数字', boolean: '布尔值', null: '空值', missing: '没有该字段' } as const;
+  if (shape.root !== 'object') return `响应根是${kind[shape.root]}，不是对象`;
+  return `响应根是对象，共 ${shape.topLevelKeys} 个顶层字段；data 字段：${kind[shape.data!]}；${shape.errorMarker ? '含常见错误标记字段（error / code / msg / message 之一）' : '没有常见错误标记字段'}`;
+}
 
 export const capabilityLabels = {
   contextWindow: '上下文总窗口（令牌）', inputLimit: '最大输入（令牌）', outputLimit: '最大输出（令牌）',

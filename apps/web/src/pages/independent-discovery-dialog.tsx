@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { type DiscoverIndependentModelsBody, type IndependentDiscoveryDiagnostics, type IndependentDiscoveryState, type IndependentModel, type IndependentService } from '@aic/protocol';
 import { api } from '../state/app';
 import { Dialog, ErrorNotice, asApiError } from '../components/ui';
-import { capabilityLabels, capabilityText, discoveryParseFailureText, latestRequest, sourceLabels } from '../lib/independent';
+import { capabilityLabels, capabilityText, discoveryParseFailureText, discoveryRootShapeText, latestRequest, sourceLabels } from '../lib/independent';
 import { toast } from '../state/ui';
 import { ApiRequestError } from '../api/http';
 
@@ -57,8 +57,9 @@ export function IndependentDiscoveryDialog({ initialService, close, saved }: {in
     {state?.lastError?<details><summary>查看本次获取诊断</summary>{state.lastError.diagnostics?<>
       <p>失败阶段：{discoveryStageLabels[state.lastError.diagnostics.stage]} · HTTP 状态：{state.lastError.diagnostics.httpStatus ?? '未确认'}</p>
       {state.lastError.diagnostics.stage==='service_parse'?<p>解析校验：{discoveryParseFailureText(state.lastError.diagnostics.parseFailure)}</p>:null}
+      {state.lastError.diagnostics.parseFailure==='data_not_array'?<p>响应根结构：{discoveryRootShapeText(state.lastError.diagnostics.rootShape)}</p>:null}
       <p>服务请求尝试 {state.lastError.diagnostics.serviceRequests} 次 · 公共目录请求尝试 {state.lastError.diagnostics.publicCatalogRequests} 次 · 已解析 {state.lastError.diagnostics.parsedPages} 页</p>
-      <p className="form-note">次数表示工作台发起的读取尝试，不证明上游收到或计费。诊断不包含响应正文、响应头或密钥。</p>
+      <p className="form-note">次数表示工作台发起的读取尝试，不证明上游收到或计费。诊断不包含响应正文、响应头、字段名或密钥；根结构只描述 JSON 形状，不能据此判断供应商的具体错误或认证状态。</p>
     </>:<p className="form-note">这条历史记录未包含诊断，阶段、次数和 HTTP 状态未确认。不会自动重试获取。</p>}</details>:null}
     {snapshot?<>
       <p role="status">{snapshot.source==='configured'?'已有模型能力预览（不含服务完整列表）':'服务模型列表预览'} · {snapshot.items.length} 个候选 · {snapshot.pageCount} 页 · {snapshot.requestCount} 次请求 · 获取 {new Date(snapshot.fetchedAt).toLocaleString('zh-CN')} · 失效 {new Date(snapshot.expiresAt).toLocaleString('zh-CN')}{stale?' · 预览不可导入（过期、配置变化或上次获取失败）':''}</p>

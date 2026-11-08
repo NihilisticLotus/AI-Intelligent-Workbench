@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { IndependentCapabilityField, IndependentDiscoveryParseFailure, type IndependentModel, type IndependentService } from '@aic/protocol';
-import { capabilityLabels, capabilityText, discoveryParseFailureText, evidenceApplies, latestRequest, overridePatch } from './independent';
+import { capabilityLabels, capabilityText, discoveryParseFailureText, discoveryRootShapeText, evidenceApplies, latestRequest, overridePatch } from './independent';
 
 describe('独立模型能力编辑', () => {
   it('固定解析分类有中文说明，旧诊断明确未记录，不推断上游结构', () => {
@@ -9,6 +9,13 @@ describe('独立模型能力编辑', () => {
     const descriptions=IndependentDiscoveryParseFailure.options.map(discoveryParseFailureText);
     expect(new Set(descriptions).size).toBe(5);
     expect(descriptions.every(text=>/[\u4e00-\u9fff]/.test(text)&&!text.includes('fixture'))).toBe(true);
+  });
+  it('根结构只描述 JSON 形状，缺失时说明未记录，不推断错误原因', () => {
+    expect(discoveryRootShapeText()).toContain('未记录');
+    expect(discoveryRootShapeText({root:'object',data:'missing',errorMarker:true,topLevelKeys:2})).toBe('响应根是对象，共 2 个顶层字段；data 字段：没有该字段；含常见错误标记字段（error / code / msg / message 之一）');
+    expect(discoveryRootShapeText({root:'object',data:'object',errorMarker:false,topLevelKeys:1})).toContain('data 字段：对象；没有常见错误标记字段');
+    expect(discoveryRootShapeText({root:'array',data:null,errorMarker:null,topLevelKeys:null})).toBe('响应根是数组，不是对象');
+    for (const text of [discoveryRootShapeText({root:'object',data:'missing',errorMarker:true,topLevelKeys:2})]) expect(text).not.toMatch(/认证|密钥|欠费|权限/);
   });
   it('16 个协议字段均有中文名称，未知、false、零和空列表各自保留', () => {
     expect(Object.keys(capabilityLabels).sort()).toEqual([...IndependentCapabilityField.options].sort());

@@ -785,6 +785,18 @@ export const IndependentDiscoverySnapshot = z.object({
 export type IndependentDiscoverySnapshot = z.infer<typeof IndependentDiscoverySnapshot>;
 export const IndependentDiscoveryParseFailure = z.enum(['data_not_array', 'data_limit', 'duplicate_id', 'pagination_state', 'pagination_cursor']);
 export type IndependentDiscoveryParseFailure = z.infer<typeof IndependentDiscoveryParseFailure>;
+/**
+ * data_not_array 时响应根结构的固定分类（2026-11-09，ISSUE-0029）。只描述 JSON 形状，不含任何字段名、值或正文：
+ * 根不是对象（array / string / number / boolean / null），或对象里 data 的类型（缺失 / null / object / string / number / boolean），
+ * 以及对象有没有常见的错误标记（顶层存在 error、code、msg、message 之一，只记有或没有，不记是哪个、值是什么）。
+ */
+export const IndependentDiscoveryRootShape = z.object({
+  root: z.enum(['object', 'array', 'string', 'number', 'boolean', 'null']),
+  data: z.enum(['missing', 'null', 'object', 'string', 'number', 'boolean']).nullable(),
+  errorMarker: z.boolean().nullable(),
+  topLevelKeys: z.number().int().nonnegative().max(10_000).nullable(),
+}).strict();
+export type IndependentDiscoveryRootShape = z.infer<typeof IndependentDiscoveryRootShape>;
 // 诊断只包含固定分类、尝试计数与已确认状态，不接收上游正文、字段名或响应头。
 export const IndependentDiscoveryDiagnostics = z.object({
   stage: z.enum(['prepare', 'service_request', 'service_parse', 'catalog_request', 'snapshot']),
@@ -793,7 +805,11 @@ export const IndependentDiscoveryDiagnostics = z.object({
   parsedPages: z.number().int().nonnegative().max(10),
   httpStatus: z.number().int().min(100).max(599).nullable(),
   parseFailure: IndependentDiscoveryParseFailure.optional(),
-}).strict().refine(v => v.parseFailure === undefined || (v.stage === 'service_parse' && v.httpStatus === 200 && v.serviceRequests > 0), '解析分类必须对应已收到的服务模型列表');
+  /** 只在 parseFailure 为 data_not_array 时出现（2026-11-09 追加，可选） */
+  rootShape: IndependentDiscoveryRootShape.optional(),
+}).strict().refine(v => v.parseFailure === undefined || (v.stage === 'service_parse' && v.httpStatus === 200 && v.serviceRequests > 0), '解析分类必须对应已收到的服务模型列表')
+  .refine(v => v.rootShape === undefined || v.parseFailure === 'data_not_array', '根结构分类只对应列表结构不符')
+  .refine(v => { const s = v.rootShape; if (!s) return true; const inner = [s.data, s.errorMarker, s.topLevelKeys]; return s.root === 'object' ? inner.every((x) => x !== null) : inner.every((x) => x === null); }, '对象内的分类只在根是对象时出现，且三项要么全有要么全无');
 export type IndependentDiscoveryDiagnostics = z.infer<typeof IndependentDiscoveryDiagnostics>;
 export const IndependentDiscoveryState = z.object({
   snapshot: IndependentDiscoverySnapshot.nullable(), stale: z.boolean(),

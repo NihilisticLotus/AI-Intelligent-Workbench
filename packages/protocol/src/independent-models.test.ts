@@ -12,6 +12,19 @@ describe('独立模型配置协议', () => {
     for (const change of [{parseFailure:'fixture-private-body'},{parseFailure:null},{parseFailure:{body:'fixture'}},{parseFailure:'data_not_array',stage:'service_request'},{parseFailure:'data_not_array',httpStatus:null},{parseFailure:'data_not_array',serviceRequests:0}])
       expect(IndependentDiscoveryDiagnostics.safeParse({...old,...change}).success).toBe(false);
   });
+  it('列表结构不符的根结构分类只追加可选字段，只允许固定形状，不收任何上游文本', () => {
+    const base = {stage:'service_parse',serviceRequests:1,publicCatalogRequests:0,parsedPages:0,httpStatus:200,parseFailure:'data_not_array'};
+    const obj = {root:'object',data:'missing',errorMarker:true,topLevelKeys:3};
+    expect(IndependentDiscoveryDiagnostics.parse({...base,rootShape:obj}).rootShape).toEqual(obj);
+    expect(IndependentDiscoveryDiagnostics.parse({...base,rootShape:{root:'array',data:null,errorMarker:null,topLevelKeys:null}}).rootShape?.root).toBe('array');
+    expect(IndependentDiscoveryDiagnostics.parse(base)).toEqual(base); // 旧诊断没有 rootShape 仍然有效
+    for (const rootShape of [
+      {...obj,data:'array'}, {...obj,keyNames:['error']}, {...obj,root:'html'}, {...obj,data:null},
+      {root:'array',data:'missing',errorMarker:null,topLevelKeys:null}, {...obj,topLevelKeys:-1}, {...obj,errorMarker:'error'},
+    ]) expect(IndependentDiscoveryDiagnostics.safeParse({...base,rootShape}).success).toBe(false);
+    expect(IndependentDiscoveryDiagnostics.safeParse({...base,parseFailure:'duplicate_id',rootShape:obj}).success).toBe(false);
+    expect(IndependentDiscoveryDiagnostics.safeParse({...base,parseFailure:undefined,rootShape:obj}).success).toBe(false);
+  });
   it('识别范围只追加可选字段，旧请求与旧快照原样保留，已有模型允许零网络读取', () => {
     const body={expectedConfigRevision:1,includeCatalog:false};
     expect(DiscoverIndependentModelsBody.parse(body)).toEqual(body);

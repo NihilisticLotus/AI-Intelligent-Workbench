@@ -21,7 +21,7 @@ describe('模型发现预览与追加导入', () => {
     const model=s.independent.createModel(service.id,{remoteModelId:'m',name:'人工模型'});s.independent.setDefault({selection:{serviceId:service.id,modelId:model.id}});
     const before=JSON.stringify({service:s.independent.getService(service.id),models:s.independent.listModels(service.id),defaults:s.independent.getDefault()});
     expect((await t.api('POST',route+'/discovery',{token,body})).status).toBe(502);expect(calls).toBe(1);
-    const cached=await t.api('GET',route+'/discovery',{token});expect(cached.json.snapshot).toBeNull();expect(cached.json.lastError.diagnostics).toEqual({stage:'service_parse',serviceRequests:1,publicCatalogRequests:0,parsedPages:0,httpStatus:200,parseFailure:'data_not_array'});
+    const cached=await t.api('GET',route+'/discovery',{token});expect(cached.json.snapshot).toBeNull();expect(cached.json.lastError.diagnostics).toEqual({stage:'service_parse',serviceRequests:1,publicCatalogRequests:0,parsedPages:0,httpStatus:200,parseFailure:'data_not_array',rootShape:{root:'object',data:'missing',errorMarker:true,topLevelKeys:2}});
     expect(JSON.stringify({service:s.independent.getService(service.id),models:s.independent.listModels(service.id),defaults:s.independent.getDefault()})).toBe(before);
     const persisted=JSON.stringify(s.db.all('SELECT * FROM independent_discoveries'))+JSON.stringify(s.db.all('SELECT * FROM events'));
     for(const secret of ['fixture-body-secret','fixture-response-secret','fixture-key-secret','private_field']){expect(persisted).not.toContain(secret);expect(cached.text).not.toContain(secret);}

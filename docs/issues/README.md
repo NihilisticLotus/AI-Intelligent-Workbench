@@ -46,4 +46,4 @@
 | [ISSUE-0040](ISSUE-0040-independent-image-prompt-guard.md) | 独立任务图片校验未使用自有模型能力 | fixed | bug | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0041](ISSUE-0041-independent-config-event.md) | 独立任务换模型后输入框沿用旧会话配置 | fixed | bug | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0042](ISSUE-0042-bigmodel-responses-tool-failure.md) | 智谱 Responses 真实工具补验遇到空参数与协议失败 | investigating | 验收未通过 | 2026-11-08 | |
-| [ISSUE-0043](ISSUE-0043-terminal-fragment-progress.md) | 任务已失败但未确认片段仍显示正在处理 | investigating | bug | 2026-11-08 | |
+| [ISSUE-0043](ISSUE-0043-terminal-fragment-progress.md) | 任务已失败但未确认片段仍显示正在处理 | fixed | bug | 2026-11-08 | 2026-11-08 |

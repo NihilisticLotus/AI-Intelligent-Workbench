@@ -1,11 +1,28 @@
 import { describe, expect, it } from 'vitest';
 import type { IndependentService } from '@aic/protocol';
-import { parseEndpointPage, supplementCatalog } from '../src/independent/metadata-parser';
+import { MetadataParseError, parseEndpointPage, supplementCatalog } from '../src/independent/metadata-parser';
 const service = (extra: Partial<IndependentService> = {}): IndependentService => ({id:'s',name:'服务',revision:1,configRevision:1,protocol:'chat_completions',baseUrl:'https://example.com/v1',authentication:'none',apiVersion:null,providerId:null,plan:null,enabled:true,hasSecret:false,secretHint:null,createdAt:1,updatedAt:1,...extra});
 const parse = (s: IndependentService, data: unknown) => parseEndpointPage(s,data,`${s.baseUrl}/models`,'fixture');
 const values = (evidence: ReturnType<typeof parse>['items'][number]['evidence']) => Object.fromEntries(evidence.map((e) => [e.field,e.value]));
 function directory() { return {p:{id:'p',models:{m:{id:'m',limit:{context:32000,input:28000,output:4000},modalities:{input:['text','image/png'],output:['text']},capabilities:{tools:{supported:true},reasoning:{supported:true,toggle:true,effort:['none','medium'],default:{type:'effort',value:'medium'},budget:{min:-1,max:999}},stream_usage:false,structured_output:true},api:{responses:{base_url:'https://example.com/v1',capabilities:{tools:{strict:true}}}}}}}}; }
 describe('模型发现字段语义', () => {
+  it('Messages 声明还有下一页时，明确空游标不能当作列表结束', () => {
+    expect(() => parse(service({protocol:'anthropic_messages'}),{data:[],has_more:true,last_id:null})).toThrowError(expect.objectContaining({reason:'pagination_cursor'}));
+  });
+  it.each([
+    {reason:'data_not_array',raw:{error:'fixture-private-body',private_field:'fixture-private-value'}},
+    {reason:'data_limit',raw:{data:Array(10_001).fill(null)}},
+    {reason:'duplicate_id',raw:{data:[{id:'fixture-private-model'},{id:'fixture-private-model'}]}},
+    {reason:'pagination_state',raw:{data:[]}},
+    {reason:'pagination_cursor',raw:{data:[],has_more:true,last_id:'fixture-private-cursor\n'}},
+  ])('固定解析分类 $reason 不包含上游内容', ({reason,raw}) => {
+    try { parse(service({protocol:'anthropic_messages'}),raw); expect.fail('本合成结构应拒绝'); }
+    catch (error) {
+      expect(error).toBeInstanceOf(MetadataParseError); expect(error).toMatchObject({reason});
+      const output = String(error) + JSON.stringify(error);
+      expect(output).not.toContain('fixture-private'); expect(output).not.toContain('private_field');
+    }
+  });
   it('标准或未知兼容接口只识别 ID，保留原样且不推测模型名、声明或外链', () => {
     const s = service(); const r = parse(s,{data:[{id:'model/image-high',context_window:999,image_input:true,url:'https://evil.example/',api_key:'fixture'}],next:'https://evil.example/'});
     expect(r.items).toEqual([{remoteModelId:'model/image-high',name:'model/image-high',evidence:[]}]); expect(r.notices).toHaveLength(1);

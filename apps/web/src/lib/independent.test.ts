@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { IndependentCapabilityField, type IndependentModel, type IndependentService } from '@aic/protocol';
-import { capabilityLabels, capabilityText, evidenceApplies, latestRequest, overridePatch } from './independent';
+import { IndependentCapabilityField, IndependentDiscoveryParseFailure, type IndependentModel, type IndependentService } from '@aic/protocol';
+import { capabilityLabels, capabilityText, discoveryParseFailureText, evidenceApplies, latestRequest, overridePatch } from './independent';
 
 describe('独立模型能力编辑', () => {
+  it('固定解析分类有中文说明，旧诊断明确未记录，不推断上游结构', () => {
+    expect(discoveryParseFailureText()).toContain('未记录');
+    expect(discoveryParseFailureText('data_not_array')).toBe('响应不符合已接入的模型列表结构');
+    const descriptions=IndependentDiscoveryParseFailure.options.map(discoveryParseFailureText);
+    expect(new Set(descriptions).size).toBe(5);
+    expect(descriptions.every(text=>/[\u4e00-\u9fff]/.test(text)&&!text.includes('fixture'))).toBe(true);
+  });
   it('16 个协议字段均有中文名称，未知、false、零和空列表各自保留', () => {
     expect(Object.keys(capabilityLabels).sort()).toEqual([...IndependentCapabilityField.options].sort());
     expect(capabilityText(null)).toBe('未知'); expect(capabilityText(false)).toBe('不支持');

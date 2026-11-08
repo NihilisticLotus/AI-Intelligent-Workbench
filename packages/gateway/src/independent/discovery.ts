@@ -7,7 +7,7 @@ import type { Db } from '../db';
 import { AppError, Errors, newId } from '../util';
 import type { IndependentCatalog } from './catalog';
 import { MetadataHttpError, readMetadataJson } from './metadata-http';
-import { MODEL_CATALOG_URL, parseEndpointPage, supplementCatalog } from './metadata-parser';
+import { MODEL_CATALOG_URL, MetadataParseError, parseEndpointPage, supplementCatalog } from './metadata-parser';
 import { supplementOfficial } from './official-metadata';
 
 export class IndependentDiscovery {
@@ -88,6 +88,7 @@ export class IndependentDiscovery {
       this.db.run('UPDATE independent_discoveries SET snapshot_json=?,last_error_json=NULL WHERE service_id=?',JSON.stringify(snapshot),serviceId);
       return this.state(serviceId);
     } catch (error) {
+      if (error instanceof MetadataParseError && diagnostics.stage === 'service_parse') diagnostics.parseFailure = error.reason;
       const message = error instanceof AppError || error instanceof MetadataHttpError ? error.message : '元数据结构无法识别，未替换上次预览';
       if (error instanceof MetadataHttpError && error.status !== null && Number.isInteger(error.status) && error.status >= 100 && error.status <= 599) diagnostics.httpStatus=error.status;
       if (!this.closed && this.db.get('SELECT id FROM independent_services WHERE id=?',serviceId)) this.db.run('UPDATE independent_discoveries SET last_error_json=? WHERE service_id=?',JSON.stringify({message,at:Date.now(),diagnostics}),serviceId);

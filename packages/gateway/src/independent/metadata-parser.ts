@@ -1,10 +1,18 @@
 import {
   CreateIndependentModelBody, IndependentCapabilityEvidence, IndependentCapabilityValues,
   type IndependentCapabilityField, type IndependentDiscoveredModel, type IndependentService,
+  type IndependentDiscoveryParseFailure,
 } from '@aic/protocol';
 import { capabilityScope } from './capabilities';
 
 export const objectOf = (v: unknown): Record<string, unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string,unknown> : {};
+/** 只携带本地校验分类；不把服务返回的值、字段名或错误正文带出解析器。 */
+export class MetadataParseError extends Error {
+  constructor(readonly reason: IndependentDiscoveryParseFailure) {
+    super({data_not_array:'未知模型列表结构',data_limit:'未知模型列表结构',duplicate_id:'模型列表包含重复 ID',pagination_state:'Messages 模型列表缺少分页状态',pagination_cursor:'Messages 分页游标不正确'}[reason]);
+    this.name = 'MetadataParseError';
+  }
+}
 const atPath = (value: unknown, path: string) => path.split('.').reduce<unknown>((v, key) => objectOf(v)[key], value);
 export function evidenceBuilder(service: IndependentService, modelId: string, sourceUrl: string, version: string, at: number, kind: 'endpoint' | 'catalog' | 'official' = 'endpoint') {
   // 证据 URL 沿用既有无查询协议；分页参数不属于能力来源身份，实际固定目录参数由解析器版本限定。
@@ -56,7 +64,8 @@ export function supplementCatalog(service: IndependentService, items: Independen
 /** 已知传输不等于已知元数据扩展；OpenAI 兼容仅保证读取 ID。 */
 export function parseEndpointPage(service: IndependentService, raw: unknown, sourceUrl: string, digest: string, at = Date.now()) {
   const root = objectOf(raw);
-  if (!Array.isArray(root.data) || root.data.length > 10_000) throw new Error('未知模型列表结构');
+  if (!Array.isArray(root.data)) throw new MetadataParseError('data_not_array');
+  if (root.data.length > 10_000) throw new MetadataParseError('data_limit');
   const url = new URL(service.baseUrl);
   const deepseek = service.protocol === 'chat_completions' && url.origin === 'https://api.deepseek.com' && ['/', '/v1', '/v1/'].includes(url.pathname);
   const openrouter = service.protocol === 'chat_completions' && url.origin === 'https://openrouter.ai' && ['/api/v1','/api/v1/'].includes(url.pathname);
@@ -67,7 +76,7 @@ export function parseEndpointPage(service: IndependentService, raw: unknown, sou
     const r = objectOf(row); const id = r.id;
     const parsed = CreateIndependentModelBody.safeParse({ remoteModelId: id, name: typeof (r.display_name ?? r.name) === 'string' ? String(r.display_name ?? r.name).slice(0,100) : typeof id === 'string' ? id.slice(0,100) : '' });
     if (!parsed.success || typeof id !== 'string' || /[\x00-\x1f\x7f]/.test(id)) { skipped++; continue; }
-    if (seen.has(id)) throw new Error('模型列表包含重复 ID'); seen.add(id);
+    if (seen.has(id)) throw new MetadataParseError('duplicate_id'); seen.add(id);
     const b = evidenceBuilder(service, id, sourceUrl, `endpoint-v1:${digest}`, at);
     if (knownAnthropic) {
       b.add('inputLimit', r.max_input_tokens, 'max_input_tokens'); b.add('outputLimit', r.max_tokens, 'max_tokens');
@@ -89,9 +98,9 @@ export function parseEndpointPage(service: IndependentService, raw: unknown, sou
     }
     items.push({ ...parsed.data, evidence: b.evidence });
   }
-  if (anthropic && typeof root.has_more !== 'boolean') throw new Error('Messages 模型列表缺少分页状态');
+  if (anthropic && typeof root.has_more !== 'boolean') throw new MetadataParseError('pagination_state');
   const next = anthropic && root.has_more === true ? root.last_id : null;
-  if (next !== null && (typeof next !== 'string' || !next || next.length > 200 || /[\x00-\x1f\x7f]/.test(next))) throw new Error('Messages 分页游标不正确');
+  if (anthropic && root.has_more === true && (typeof next !== 'string' || !next || next.length > 200 || /[\x00-\x1f\x7f]/.test(next))) throw new MetadataParseError('pagination_cursor');
   // 非标准分页不能静默声称发现完整；保留本页并明确提示。
   const notices = !anthropic && (root.has_more === true || root.next !== undefined || root.next_cursor !== undefined) ? ['服务返回未识别的分页字段，仅预览本页；未抓取远端链接'] : [];
   if (anthropic && !knownAnthropic) notices.push('当前 API 版本未接入能力解析，仅识别模型 ID 与名称');

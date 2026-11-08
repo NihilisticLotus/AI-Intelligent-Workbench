@@ -1,0 +1,32 @@
+Browser tab: 24, Title: "AI Console", URL: "http://127.0.0.1:17890/#/agents".
+0 AXWebArea AI Console, URL: 127.0.0.1:17890/#/agents
+	1 container 获取模型与能力：解析分类本机验收（虚构）
+		2 heading 获取模型与能力：解析分类本机验收（虚构）, Value: 2
+			3 text 获取模型与能力：解析分类本机验收（虚构）
+		4 button 关闭
+		5 text 先选择识别范围，再生成预览并勾选导入；不会发送模型消息。
+		6 container
+			7 text 当前地址： http://127.0.0.1:10230/api/v1  · 配置修订  1
+		8 container
+			9 text 识别范围
+			10 pop up button (collapsed, settable) 识别范围, Value: 获取服务模型列表, ID: discovery-source, Secondary Actions: Expand
+				11 menu
+					12 (selected) 获取服务模型列表
+					13 识别已添加模型（无需服务目录）
+			14 text 获取此服务的模型列表和能力声明，最多 10 次服务请求；勾选公共目录后最多再加 1 次匿名请求。
+			15 checkbox (settable, integer) Description: 同时读取 models.dev 公共目录（不携带服务密钥）, Value: 0
+			16 text 公共目录需精确核对高级信息中的服务商标识、协议、模型 ID 与地址；有独立 API 版本或套餐而目录未说明时，不套用能力。未知保持未知，服务接口声明优先。
+			17 button 获取最新预览, ID: discovery-refresh
+			18 button 载入最新配置与缓存
+		19 container
+			20 text 上次获取失败（ 2026/11/8 23:36:57 ）： 元数据结构无法识别，未替换上次预览 。旧预览保留，需重新获取成功后导入。
+		27 container
+			28 button (expanded) 查看本次获取诊断, Secondary Actions: Collapse
+				29 text 查看本次获取诊断
+			30 text 失败阶段： 解析服务模型列表  · HTTP 状态： 200 解析校验： 响应不符合已接入的模型列表结构 服务请求尝试  1  次 · 公共目录请求尝试  0  次 · 已解析  0  页 次数表示工作台发起的读取尝试，不证明上游收到或计费。诊断不包含响应正文、响应头或密钥。
+		23 text 还没有发现预览。选择识别范围并点击上方按钮开始；不会自动获取。
+		24 button 关闭
+		25 button (disabled) 导入所选（0）
+			26 text 导入所选（ 0 ）
+
+The focused UI element is 28 button (expanded) 查看本次获取诊断, Secondary Actions: Collapse

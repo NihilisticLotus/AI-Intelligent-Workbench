@@ -783,14 +783,17 @@ export const IndependentDiscoverySnapshot = z.object({
   fetchedAt: Ts, expiresAt: Ts, includeCatalog: z.boolean(), notices: z.array(z.string().max(300)).max(32),
 }).strict();
 export type IndependentDiscoverySnapshot = z.infer<typeof IndependentDiscoverySnapshot>;
-// 诊断只包含固定阶段、尝试计数与已确认状态，不接收上游正文、字段名或响应头。
+export const IndependentDiscoveryParseFailure = z.enum(['data_not_array', 'data_limit', 'duplicate_id', 'pagination_state', 'pagination_cursor']);
+export type IndependentDiscoveryParseFailure = z.infer<typeof IndependentDiscoveryParseFailure>;
+// 诊断只包含固定分类、尝试计数与已确认状态，不接收上游正文、字段名或响应头。
 export const IndependentDiscoveryDiagnostics = z.object({
   stage: z.enum(['prepare', 'service_request', 'service_parse', 'catalog_request', 'snapshot']),
   serviceRequests: z.number().int().nonnegative().max(10),
   publicCatalogRequests: z.number().int().nonnegative().max(1),
   parsedPages: z.number().int().nonnegative().max(10),
   httpStatus: z.number().int().min(100).max(599).nullable(),
-}).strict();
+  parseFailure: IndependentDiscoveryParseFailure.optional(),
+}).strict().refine(v => v.parseFailure === undefined || (v.stage === 'service_parse' && v.httpStatus === 200 && v.serviceRequests > 0), '解析分类必须对应已收到的服务模型列表');
 export type IndependentDiscoveryDiagnostics = z.infer<typeof IndependentDiscoveryDiagnostics>;
 export const IndependentDiscoveryState = z.object({
   snapshot: IndependentDiscoverySnapshot.nullable(), stale: z.boolean(),

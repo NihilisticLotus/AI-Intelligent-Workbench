@@ -1,5 +1,12 @@
 // 能力值只按协议解释；不根据模型名猜窗口、图片或思考档位。
-import { IndependentCapabilityPatch, type IndependentCapabilityField, type IndependentModel, type IndependentService } from '@aic/protocol';
+import { IndependentCapabilityPatch, type IndependentCapabilityField, type IndependentModel, type IndependentService, type IndependentDiscoveryParseFailure } from '@aic/protocol';
+
+const discoveryParseFailureLabels = {
+  data_not_array: '响应不符合已接入的模型列表结构', data_limit: '本页模型条目超过解析上限',
+  duplicate_id: '本页模型标识重复', pagination_state: '分页状态缺失或格式不符', pagination_cursor: '分页游标缺失或格式不符',
+} satisfies Record<IndependentDiscoveryParseFailure, string>;
+export const discoveryParseFailureText = (reason?: IndependentDiscoveryParseFailure) => reason
+  ? discoveryParseFailureLabels[reason] : '未记录具体校验原因；不会从历史错误推断';
 
 export const capabilityLabels = {
   contextWindow: '上下文总窗口（令牌）', inputLimit: '最大输入（令牌）', outputLimit: '最大输出（令牌）',

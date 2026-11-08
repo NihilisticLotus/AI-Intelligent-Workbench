@@ -21,7 +21,7 @@ describe('模型发现预览与追加导入', () => {
     const model=s.independent.createModel(service.id,{remoteModelId:'m',name:'人工模型'});s.independent.setDefault({selection:{serviceId:service.id,modelId:model.id}});
     const before=JSON.stringify({service:s.independent.getService(service.id),models:s.independent.listModels(service.id),defaults:s.independent.getDefault()});
     expect((await t.api('POST',route+'/discovery',{token,body})).status).toBe(502);expect(calls).toBe(1);
-    const cached=await t.api('GET',route+'/discovery',{token});expect(cached.json.snapshot).toBeNull();expect(cached.json.lastError.diagnostics).toEqual({stage:'service_parse',serviceRequests:1,publicCatalogRequests:0,parsedPages:0,httpStatus:200});
+    const cached=await t.api('GET',route+'/discovery',{token});expect(cached.json.snapshot).toBeNull();expect(cached.json.lastError.diagnostics).toEqual({stage:'service_parse',serviceRequests:1,publicCatalogRequests:0,parsedPages:0,httpStatus:200,parseFailure:'data_not_array'});
     expect(JSON.stringify({service:s.independent.getService(service.id),models:s.independent.listModels(service.id),defaults:s.independent.getDefault()})).toBe(before);
     const persisted=JSON.stringify(s.db.all('SELECT * FROM independent_discoveries'))+JSON.stringify(s.db.all('SELECT * FROM events'));
     for(const secret of ['fixture-body-secret','fixture-response-secret','fixture-key-secret','private_field']){expect(persisted).not.toContain(secret);expect(cached.text).not.toContain(secret);}
@@ -32,6 +32,19 @@ describe('模型发现预览与追加导入', () => {
     const good=await s.independentDiscovery.refresh(service.id,body);s.db.run('UPDATE independent_discoveries SET attempted_at=0');fail=true;
     await expect(s.independentDiscovery.refresh(service.id,body)).rejects.toThrow('503');expect(calls).toBe(3);
     const state=s.independentDiscovery.state(service.id);expect(state.snapshot).toEqual(good.snapshot);expect(state.stale).toBe(true);expect(state.lastError?.diagnostics).toEqual({stage:'service_request',serviceRequests:2,publicCatalogRequests:0,parsedPages:1,httpStatus:503});
+  });
+  it('解析失败保留旧快照，分类与上游正文分离；旧诊断重开不补分类', async () => {
+    let fail=false;const {s,service,t,route}=await setup(async()=>({json:fail?{data:[{id:'fixture-private-model'},{id:'fixture-private-model'}],private_field:'fixture-private-body'}:{data:[{id:'old'}]},digest:'fixture'}));
+    const good=await s.independentDiscovery.refresh(service.id,body);s.db.run('UPDATE independent_discoveries SET attempted_at=0');fail=true;
+    await expect(s.independentDiscovery.refresh(service.id,body)).rejects.toThrow('元数据结构无法识别');
+    const state=s.independentDiscovery.state(service.id);expect(state.snapshot).toEqual(good.snapshot);expect(state.lastError?.diagnostics?.parseFailure).toBe('duplicate_id');
+    const row=s.db.get('SELECT last_error_json FROM independent_discoveries WHERE service_id=?',service.id)!;
+    expect(JSON.stringify(row)).not.toContain('fixture-private');expect(JSON.stringify(row)).not.toContain('private_field');
+    const old={message:'旧的通用错误',at:1,diagnostics:{stage:'service_parse',serviceRequests:1,publicCatalogRequests:0,parsedPages:0,httpStatus:200}};
+    s.db.run('UPDATE independent_discoveries SET last_error_json=? WHERE service_id=?',JSON.stringify(old),service.id);
+    const dir=t.dataDir;await t.gw.close();gw=await startGw({metadataReader:async()=>{throw new Error('不得联网');}},dir);const token=await gw.pair();
+    expect((await gw.api('GET',route+'/discovery',{token})).json.lastError).toEqual(old);
+    expect(gw.gw.services.db.get('SELECT last_error_json FROM independent_discoveries WHERE service_id=?',service.id)?.last_error_json).toBe(JSON.stringify(old));
   });
   it('连接无响应与发请求前缺密钥分别记录未知状态和零尝试', async () => {
     const reader=vi.fn(async()=>{throw new MetadataHttpError('元数据连接失败');});const {s,service}=await setup(reader);

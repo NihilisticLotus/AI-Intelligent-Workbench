@@ -60,3 +60,7 @@
 | [ISSUE-0048](ISSUE-0048-codex-proxy-text-error.md) | Codex 代理模型拒绝正文在自动压缩后仍显示待验收 | fixed | bug | 2026-11-08 | 2026-11-08 |
 
 | [ISSUE-0049](ISSUE-0049-terminal-error-redaction.md) | Gateway 兜底终端错误输出绕过脱敏 | fixed | bug | 2026-11-08 | 2026-11-08 |
+
+| [ISSUE-0050](ISSUE-0050-discovery-parse-failure-diagnostics.md) | 目录解析失败缺少固定校验分类 | investigating | 技术债 | 2026-11-08 | |
+
+| [ISSUE-0051](ISSUE-0051-model-pagination-null-cursor.md) | Messages 模型分页的空游标被当作列表结束 | investigating | bug | 2026-11-08 | |

@@ -4,6 +4,14 @@ import { CreateIndependentServiceBody, IndependentBaseUrl, IndependentService, I
 const service = { name: '服务一', protocol: 'chat_completions', baseUrl: 'https://example.com/api/v1', authentication: 'api_key', apiVersion: null, providerId: null, plan: null, enabled: true };
 const evidence = { id: 'e', field: 'imageInput', value: false, kind: 'endpoint', scope: { serviceId: 's', configRevision: 1, protocol: 'chat_completions', apiVersion: null, providerId: null, plan: null, remoteModelId: 'model' }, sourceUrl: 'https://example.com/api/v1/models', sourceVersion: 'fixture-v1', fieldPath: 'data.image', observedAt: 1, expiresAt: 2 };
 describe('独立模型配置协议', () => {
+  it('解析失败分类只追加可选字段，拒绝任意文本和错误阶段推断', () => {
+    const old = {stage:'service_parse',serviceRequests:1,publicCatalogRequests:0,parsedPages:0,httpStatus:200};
+    expect(IndependentDiscoveryDiagnostics.parse(old)).toEqual(old);
+    for (const parseFailure of ['data_not_array','data_limit','duplicate_id','pagination_state','pagination_cursor'])
+      expect(IndependentDiscoveryDiagnostics.parse({...old,parseFailure}).parseFailure).toBe(parseFailure);
+    for (const change of [{parseFailure:'fixture-private-body'},{parseFailure:null},{parseFailure:{body:'fixture'}},{parseFailure:'data_not_array',stage:'service_request'},{parseFailure:'data_not_array',httpStatus:null},{parseFailure:'data_not_array',serviceRequests:0}])
+      expect(IndependentDiscoveryDiagnostics.safeParse({...old,...change}).success).toBe(false);
+  });
   it('识别范围只追加可选字段，旧请求与旧快照原样保留，已有模型允许零网络读取', () => {
     const body={expectedConfigRevision:1,includeCatalog:false};
     expect(DiscoverIndependentModelsBody.parse(body)).toEqual(body);

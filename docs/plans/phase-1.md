@@ -1214,6 +1214,8 @@ ISSUE-0044 的离线反例确认：仅保存任务预算也会重写绑定创建
 一次真实目录结构失败暴露了后续定位证据不足。本节只补齐安全诊断，不放宽列表解析、不增加探测或真实调用，不从历史通用错误反推其 HTTP 状态。
 
 - 协议仅追加可选 `IndependentDiscoveryState.lastError.diagnostics`，类型在 protocol：stage 为 prepare / service_request / service_parse / catalog_request / snapshot，另有 serviceRequests（0～10）、publicCatalogRequests（0～1）、parsedPages（0～10）与 httpStatus（100～599 或 null）。固定枚举没有任意上游文本、字段名、URL、正文或响应头。
+- 追加可选 parseFailure 固定分类：data_not_array / data_limit / duplicate_id / pagination_state / pagination_cursor，分别表示本地列表结构不符、单页超限、单页重复 ID、分页状态及游标校验失败；仅明确触发该解析器分支时记录，并要求 service_parse / HTTP 200 / 至少一次服务尝试。其他错误不推断该分类，不增加上游字段名、值或正文。旧诊断缺少分类时原样读取，网页明确“未记录具体校验原因”；此信息不证明原智谱失败的具体原因（2026-11-08，ISSUE-0050）。
+- Messages 声明 has_more=true 时必须有合法非空字符串游标；明确 null 同样拒绝，不能当作列表结束。只有 has_more=false 才按无下一页收尾（2026-11-08，ISSUE-0051）。
 - 在调用元数据客户端前增加读取尝试计数；只在模型页解析成功后增加 parsedPages。次数不证明请求已送达、供应商收到或计费。HTTP 客户端只把已收到响应的状态及固定错误带出；读取未完成或连接失败时不猜状态。服务列表读取成功后解析失败可确认 HTTP 200，但不是模型目录成功。
 - 新失败在原 last_error_json 中追加诊断，不迁移或补写历史记录；缓存读取不联网。保留原成功快照、失效和退避规则，公共目录失败仍只追加固定提示，不自动追加请求或套用旧能力。关闭 / 取消仍不能晚到写入。
 - 网页保留错误焦点和失败提示，新增默认折叠的“查看本次获取诊断”。有诊断时显示中文阶段、已确认状态 / 未确认、请求尝试和已解析页数，并解释计数边界；无诊断的历史错误明确“阶段、次数和 HTTP 状态未确认”，不借查看诊断重试或导入。原型同步范围说明。

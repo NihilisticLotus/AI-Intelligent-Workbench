@@ -163,3 +163,18 @@ usage 按每次请求存输入、输出、推理、缓存读写等原始可得�
 - [GLM-5.3](https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3)、[GLM-5.3-Flash](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash)：前者文本，后者支持图片 / 视频 / 文本 / 文件输入与文本输出；均把上下文标为 1M，没有精确整数，不把它自行换算为 1000000 或 1048576。Chat 的思考说明与 Responses 参数不能混用；暂不录入 thinkingCanDisable。
 
 新增内置适配仅对应以上精确服务 / 模型，核对时间固定，7 天后标过期；本地预览不会重新获取资料或更新日期。实际上下文、账号可用性、目录返回结构和新导入能力下的付费生成未验证。实现与界面规则见 phase-1 9.32，实际结果见 step-1.3 最新节。
+
+## 2026-11-09 智谱 GLM Coding Plan 补记
+
+用户说明“智谱真实补验”服务用的是 GLM Coding Plan 的 Key，并提供了官方“开始前”截图（Codex 用 https://open.bigmodel.cn/api/v1，其他 OpenAI 兼容工具用 /api/coding/paas/v4，Claude Code 用 /api/anthropic）。本次只用 curl 读取公开文档页面（WebFetch 报模型路由错误），没有带 Key 请求任何接口。
+
+- [套餐概览](https://docs.bigmodel.cn/cn/coding-plan/overview)：可用模型是 GLM-5.3、GLM-5.3-Flash；调用 GLM-5.2 / 5.1 自动切到 GLM-5.3，GLM-5-Turbo / 4.7 自动切到 GLM-5.3-Flash。原文：“套餐仅限在官方支持的指定工具与产品环境中使用。在除规定工具外调用 API，不可享用 Coding 套餐的额度。”
+- [接入工具](https://docs.bigmodel.cn/cn/coding-plan/tool/others)：端点表与用户截图一致（Responses 为 /api/v1）。原文：“GLM Coding Plan 仅限在以下官方支持的指定工具与产品环境中使用，用户不得将订阅权益用于以下范围之外的工具或场景。”列表里有 ZCode、Claude Code、Codex、CodeBuddy、WorkBuddy、Cursor、Cline 等，**没有 AI Console**。
+- [快速开始](https://docs.bigmodel.cn/cn/coding-plan/quick-start)：同样写明“仅限在官方支持的指定工具与产品环境中使用”，并说明套餐 Key、团队 Key 与标准 API Key 互不通用。
+- 这些页面都没有提到模型列表接口（/models）。
+
+对工作台的含义：
+
+1. 服务配置本身（Responses + /api/v1）与官方给 Codex 的写法一致，不是地址填错。
+2. Coding Plan 的模型是固定的两款，官方没有提供目录接口说明。2026-11-09 的真实读取拿到 HTTP 200 但只有 1 个非 data、非错误字段，这和“该端点不按 OpenAI 兼容格式提供模型列表”相符，但没有直接证据，仍不推断。对这个服务，“识别已有模型（无需服务目录）”比“获取服务模型列表”更合适：它已能用内置官方资料识别 glm-5.3 / glm-5.3-flash，不发请求。
+3. **使用条款**：工作台的独立 Agent 不在官方工具列表里。用 Coding Plan Key 从独立 Agent 调用，按原文属于“范围之外的工具或场景”，至少“不可享用 Coding 套餐的额度”，是否还有其他后果文档没有写明。第三方 Agent（Codex、Claude Code、CodeBuddy、ZCode）用它们自己的设置接入 Coding Plan，在列表内。是否继续用这把 Key 做独立 Agent 的真实验证，需要用户决定；在此之前不再发起带这把 Key 的请求。

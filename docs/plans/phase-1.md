@@ -560,7 +560,7 @@ ErrorCode 增加：`agent.auth_required`、`agent.quota_exceeded`、`agent.crash
 | 自有服务与认证 | 独立 Agent 可管理多个服务 / 模型、能力来源 / 未知 / 冲突、发现预览与人工修订，Key 由产品 DPAPI 保存；第三方旧配置停用，可单独清理工作台密钥并保留历史绑定；两份真实旧工作台密钥已按授权清理，目录保留不操作（ISSUE-0028 fixed、9.30） |
 | 网页 | 统一 Agent / 模型 / 思考强度选择器；粘贴 / 选择 / 拖入附件、草稿与能力拦截；独立任务策略 / 预算、私有审批详情、原始记录 / 人工总结与中断核对；失败后停止片段进度。工作副本、交接和 1.4 的完整界面改版尚未提供 |
 | 用量 | ACP `session.usage` 已有基础读取；独立任务显示实际返回 token、输入估算与累计次数 / 人工金额预留。供应商实际金额仍未知；1.4 的每轮展示、上下文明细与额度调研未完成 |
-| 测试 | 最近源码 `4e9d197`：protocol 54 / gateway 480 / adapters 72 / web 102，合计 708 通过、3 项真实冒烟默认跳过；typecheck / build 通过。后续仅文档与获批真实补验证据，未重复运行 |
+| 测试 | 当前失败标记修正源码（基线 `0450f19`）：protocol 54 / gateway 484 / adapters 72 / web 102，合计 712 通过、3 项真实冒烟默认跳过；typecheck / build 通过。后续仅文档与获批真实补验证据，未重复运行 |
 
 ### 7.2 1.2 没验证或没修完的（并入 1.3）
 
@@ -729,6 +729,7 @@ ErrorCode 增加：`agent.auth_required`、`agent.quota_exceeded`、`agent.crash
 2. 上游拒绝模型：Codex 选 gpt-5.5 时，回复正文是上游 400 原文（“The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account”），任务进入“待验收”。处理：
    - 适配器在回合结束时，如果这一轮只有一段消息、没有工具调用，并且文本匹配已知的上游错误模式（`model is not supported`、`upstream_status: HTTP 4\d\d`、`API Error: Request rejected`），把它当成错误：发 `error`（`agent.failed`，或额度类的 `agent.quota_exceeded`），任务暂停而不是“待验收”；原文保留在消息里。
    - 这个“文本里的错误”规则放在一个表里（`errors.ts` 的 `TEXT_ERROR_PATTERNS`），每条都有测试，避免误判正常回复：只在整段回复以这些前缀开头、长度小于 600 字时才判定。
+   - 会话内切换被上游明确拒绝也写入失败记录：仅当请求另一模型、返回 invalid_value、实际模型没有切过去时，归到运行会话账号并发布状态；模型已生效后的思考强度失败、额度错误不标记模型不支持。保留原配置和错误，不自动重发（2026-11-08 完成审计，ISSUE-0046）。
    - 模型列表：不做按账号过滤（ACP 拿不到账号能用哪些模型）。选了一次失败的模型后，在这个账号下记住“上次失败：不支持”，切换器里这个模型后面标灰字“上次失败”，鼠标悬停显示原因。存在 `agent_caps.catalog_json` 旁边的新列不划算，用新表 `model_failures(agent, profile_id, model, reason, at)`（和 9.9.2 的 `attachments` 表放在同一个迁移 v5 里，只追加）。
 
 ### 9.7 E：工具行标题更新（ISSUE-0011）

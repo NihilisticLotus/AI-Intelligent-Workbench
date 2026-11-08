@@ -75,6 +75,61 @@ const PERM = (id: string) => ({
 });
 
 describe('真实形态的 Agent（假 ACP 进程）', () => {
+  it('上游正文拒绝默认模型：暂停、保留原文，并按实际模型和账号发布失败标记', async () => {
+    const upstream = "The 'alpha' model is not supported when using Codex with a ChatGPT account";
+    const sc = scenario({ config: CONFIG, turns: [{ steps: [{ update: { sessionUpdate: 'agent_message_chunk', content: text(upstream) } }] }] });
+    const { token, projectId, ws } = await setup(sc);
+    const task = (await t!.api('POST', '/tasks', { token, body: { projectId, prompt: '合成失败回归', agent: 'claude', permission: 'readonly' } })).json as Task;
+    await ws.waitEvent(statusIs(task.id, 'paused'), 10_000);
+    const events = ws.events().filter((e) => e.taskId === task.id);
+    expect(events.some((e) => e.type === 'task.updated' && e.data.task.status === 'review')).toBe(false);
+    expect(events.filter((e) => e.type === 'message.delta').map((e) => e.data.text).join('')).toBe(upstream);
+    expect(events.find((e) => e.type === 'error')?.data.error.code).toBe(ErrorCode.AgentFailed);
+    const profileId = t!.gw.services.profiles.defaultRow('claude').id;
+    const failure = t!.gw.services.db.get('SELECT profile_id,model,reason FROM model_failures WHERE agent=?', 'claude');
+    expect(failure).toMatchObject({ profile_id: profileId, model: 'alpha' });
+    const agents = (await t!.api('GET', '/agents', { token })).json.items;
+    expect(agents.find((a: { kind: string }) => a.kind === 'claude').modelFailures).toEqual([expect.objectContaining({ profileId, model: 'alpha', reason: expect.stringContaining('not supported') })]);
+    expect(sc.log().filter((l) => l.method === 'session/prompt')).toHaveLength(1);
+  });
+
+  it('会话内切换被上游拒绝：保留原模型，并将失败标记归到实际账号', async () => {
+    const sc = scenario({ config: CONFIG, setErrors: { 'model:beta': { code: -32602, message: 'Invalid model: beta' } } });
+    const { token, projectId, ws } = await setup(sc);
+    const task = (await t!.api('POST', '/tasks', { token, body: { projectId, prompt: '合成切换失败', agent: 'claude', permission: 'readonly' } })).json as Task;
+    await ws.waitEvent(statusIs(task.id, 'review'), 10_000);
+    const result = await ws.call({ op: 'switch', data: { taskId: task.id, model: 'beta' } });
+    expect(result.ok).toBe(false);
+    expect(t!.gw.services.tasks.get(task.id)).toMatchObject({ model: 'alpha', status: 'review' });
+    const profileId = t!.gw.services.profiles.defaultRow('claude').id;
+    expect(t!.gw.services.db.get('SELECT profile_id,model FROM model_failures WHERE agent=?', 'claude')).toEqual({ profile_id: profileId, model: 'beta' });
+    const info = (await t!.api('GET', '/agents', { token })).json.items.find((a: { kind: string }) => a.kind === 'claude');
+    expect(info.modelFailures).toEqual([expect.objectContaining({ profileId, model: 'beta' })]);
+    expect(sc.log().filter((l) => l.method === 'session/prompt')).toHaveLength(1);
+  });
+
+  it('模型切换成功但强度被拒绝，不把新模型标成不支持', async () => {
+    const sc = scenario({ config: CONFIG, setErrors: { 'effort:xhigh': { code: -32602, message: 'Invalid effort: xhigh' } } });
+    const { token, projectId, ws } = await setup(sc);
+    const task = (await t!.api('POST', '/tasks', { token, body: { projectId, prompt: '合成强度失败', agent: 'claude', permission: 'readonly' } })).json as Task;
+    await ws.waitEvent(statusIs(task.id, 'review'), 10_000);
+    const result = await ws.call({ op: 'switch', data: { taskId: task.id, model: 'beta', effort: 'xhigh' } });
+    expect(result.ok).toBe(false);
+    expect(t!.gw.services.tasks.get(task.id).model).toBe('beta');
+    expect(t!.gw.services.db.all('SELECT * FROM model_failures')).toEqual([]);
+    expect(sc.log().filter((l) => l.method === 'session/prompt')).toHaveLength(1);
+  });
+
+  it('额度正文只暂停，不把仍可用的模型标成不支持', async () => {
+    const sc = scenario({ config: CONFIG, turns: [{ steps: [{ update: { sessionUpdate: 'agent_message_chunk', content: text('API Error: Request rejected (429) · upstream account quota usage limit has been reached') } }] }] });
+    const { token, projectId, ws } = await setup(sc);
+    const task = (await t!.api('POST', '/tasks', { token, body: { projectId, prompt: '合成额度回归', agent: 'claude', permission: 'readonly' } })).json as Task;
+    await ws.waitEvent(statusIs(task.id, 'paused'), 10_000);
+    expect(ws.events().find((e) => e.taskId === task.id && e.type === 'error')?.data).toMatchObject({ error: { code: ErrorCode.AgentQuotaExceeded } });
+    expect(t!.gw.services.db.all('SELECT * FROM model_failures')).toEqual([]);
+    expect(sc.log().filter((l) => l.method === 'session/prompt')).toHaveLength(1);
+  });
+
   it('假 ACP sleep 不发事件时提醒并发送 session/cancel', async () => {
     const sc=scenario({config:CONFIG,turns:[{steps:[{sleep:60_000}]}]});
     const {projectId,gw}=await setup(sc,{noResponseNoticeMs:100,noResponseCancelMs:300});

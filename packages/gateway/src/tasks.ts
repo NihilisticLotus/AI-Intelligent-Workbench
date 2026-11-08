@@ -824,6 +824,13 @@ export class TaskService {
         await live.conn.setConfig({ ...(opts.model !== undefined ? { model: opts.model } : {}), ...(opts.effort !== undefined ? { effort: opts.effort } : {}) });
       } catch (e) {
         writeBack();
+        // 模型仍是旧值且上游明确拒绝时才记失败；模型已生效后的强度错误不污染模型列表。
+        const after = live.conn.config?.();
+        if (e instanceof AgentError && e.reason === 'invalid_value' && opts.model !== undefined
+          && opts.model !== st?.model && after && after.model !== opts.model) {
+          this.db.run('INSERT INTO model_failures (agent,profile_id,model,reason,at) VALUES (?,?,?,?,?) ON CONFLICT(agent,profile_id,model) DO UPDATE SET reason=excluded.reason,at=excluded.at', cur.agent, live.profileId ?? cur.profile_id ?? '', opts.model, e.body.message, now());
+          this.agentSvc?.pushStatus(cur.agent);
+        }
         this.emitUpdated(taskId);
         throw e;
       }

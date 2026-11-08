@@ -51,3 +51,6 @@
 | [ISSUE-0044](ISSUE-0044-same-binding-continuation.md) | 同模型重新保存配置导致私有续传失效 | fixed | bug | 2026-11-08 | 2026-11-08 |
 
 | [ISSUE-0045](ISSUE-0045-gateway-down-notice-visibility.md) | 服务停止提示不明显且占位仍写重新连接 | fixed | bug | 2026-11-08 | 2026-11-08 |
+
+
+| [ISSUE-0046](ISSUE-0046-switch-model-failure-marker.md) | 会话内切换被拒绝后缺少失败模型标记 | investigating | bug | 2026-11-08 | |

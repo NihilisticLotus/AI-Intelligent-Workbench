@@ -39,5 +39,5 @@
 | [ISSUE-0033](ISSUE-0033-discovery-conflict-submit.md) | 模型发现冲突后仍可重复提交旧预览 | fixed | bug | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0034](ISSUE-0034-interrupted-tool-continuation.md) | 工具明确中断后仍继续请求模型 | fixed | bug | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0035](ISSUE-0035-concurrent-hardlink-write.md) | 文件共享锁不能阻止校验后的并发硬链接 | fixed | 安全边界 | 2026-11-08 | 2026-11-08 |
-| [ISSUE-0036](ISSUE-0036-model-cancel-resource-barrier.md) | 模型取消在连接收尾前释放会话资格 | investigating | bug | 2026-11-08 | |
-| [ISSUE-0037](ISSUE-0037-model-terminal-consistency.md) | 矛盾的 Responses 终态仍可能返回工具调用 | investigating | bug | 2026-11-08 | |
+| [ISSUE-0036](ISSUE-0036-model-cancel-resource-barrier.md) | 模型取消在连接收尾前释放会话资格 | fixed | bug | 2026-11-08 | 2026-11-08 |
+| [ISSUE-0037](ISSUE-0037-model-terminal-consistency.md) | 矛盾的 Responses 终态仍可能返回工具调用 | fixed | bug | 2026-11-08 | 2026-11-08 |

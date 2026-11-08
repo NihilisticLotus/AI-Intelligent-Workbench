@@ -55,7 +55,7 @@ export class IndependentDiscovery {
           diagnostics.stage='prepare'; diagnostics.httpStatus=null;
           this.check(serviceId,body.expectedConfigRevision); if(controller.signal.aborted) throw new MetadataHttpError('元数据读取已取消或超时');
           diagnostics.stage='service_request'; diagnostics.serviceRequests++; requestCount++;
-          const result = await this.read({url:new URL(url),base,publicCatalog:false,headers,signal:controller.signal});
+          const result = await this.read({url:new URL(url),base,publicCatalog:false,headers,signal:controller.signal,addressPolicy:this.catalog.getNetwork()});
           // 元数据客户端只在 HTTP 200 且有限 JSON 读取成功时返回。
           diagnostics.httpStatus=200; diagnostics.stage='service_parse';
           const page = parseEndpointPage(service,result.json,url.href,result.digest); pageCount++; diagnostics.parsedPages=pageCount; skipped += page.skipped; notices.push(...page.notices);

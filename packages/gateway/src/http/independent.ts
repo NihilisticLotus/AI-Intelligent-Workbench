@@ -1,6 +1,6 @@
 // 独立目录经统一鉴权 REST；元数据网络和解密由独立发现服务处理。
 import { Hono } from 'hono';
-import { CreateIndependentServiceBody, PatchIndependentServiceBody, CreateIndependentModelBody, PatchIndependentModelBody, PatchIndependentOverridesBody, IndependentDefault, DiscoverIndependentModelsBody, ImportIndependentModelsBody } from '@aic/protocol';
+import { CreateIndependentServiceBody, PatchIndependentServiceBody, CreateIndependentModelBody, PatchIndependentModelBody, PatchIndependentOverridesBody, IndependentDefault, IndependentNetworkSettings, DiscoverIndependentModelsBody, ImportIndependentModelsBody } from '@aic/protocol';
 import type { Services } from '../services';
 import { readBody, type Env } from './app';
 
@@ -22,5 +22,7 @@ export function independentRoutes(s: Services) {
   r.patch('/independent/services/:serviceId/models/:modelId/overrides', async (c) => c.json(catalog.overrides(c.req.param('serviceId'), c.req.param('modelId'), await readBody(c, PatchIndependentOverridesBody), c.get('device').id)));
   r.get('/independent/default', (c) => c.json(catalog.getDefault()));
   r.put('/independent/default', async (c) => c.json(catalog.setDefault(await readBody(c, IndependentDefault), c.get('device').id)));
+  r.get('/independent/network', (c) => c.json(catalog.getNetwork()));
+  r.put('/independent/network', async (c) => c.json(catalog.setNetwork(await readBody(c, IndependentNetworkSettings), c.get('device').id)));
   return r;
 }

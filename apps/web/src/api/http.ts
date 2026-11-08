@@ -9,7 +9,7 @@ import {
 } from '@aic/protocol';
 import { z } from 'zod';
 import {
-  IndependentService, IndependentModel, IndependentDefault, IndependentDiscoveryState, ImportIndependentModelsResult,
+  IndependentService, IndependentModel, IndependentDefault, IndependentNetworkSettings, IndependentDiscoveryState, ImportIndependentModelsResult,
   IndependentTaskState, IndependentHistoryPage, IndependentApprovalDetail, type IndependentTaskOptions, type IndependentCheckpointBody,
   type CreateIndependentServiceBody, type PatchIndependentServiceBody, type CreateIndependentModelBody,
   type PatchIndependentModelBody, type PatchIndependentOverridesBody, type DiscoverIndependentModelsBody, type ImportIndependentModelsBody,
@@ -184,6 +184,8 @@ export class HttpClient {
   patchIndependentOverrides(sid: string, mid: string, body: PatchIndependentOverridesBody) { return this.request('PATCH', `/independent/services/${encodeURIComponent(sid)}/models/${encodeURIComponent(mid)}/overrides`, { body, parse: IndependentModel }); }
   independentDefault() { return this.request('GET', '/independent/default', { parse: IndependentDefault }); }
   putIndependentDefault(body: IndependentDefault) { return this.request('PUT', '/independent/default', { body, parse: IndependentDefault }); }
+  independentNetwork() { return this.request('GET', '/independent/network', { parse: IndependentNetworkSettings }); }
+  putIndependentNetwork(body: IndependentNetworkSettings) { return this.request('PUT', '/independent/network', { body, parse: IndependentNetworkSettings }); }
   independentDiscovery(id: string) { return this.request('GET', `/independent/services/${encodeURIComponent(id)}/discovery`, { parse: IndependentDiscoveryState }); }
   discoverIndependentModels(id: string, body: DiscoverIndependentModelsBody) { return this.request('POST', `/independent/services/${encodeURIComponent(id)}/discovery`, { body, parse: IndependentDiscoveryState }); }
   importIndependentModels(id: string, body: ImportIndependentModelsBody) { return this.request('POST', `/independent/services/${encodeURIComponent(id)}/models/import`, { body, parse: ImportIndependentModelsResult }); }

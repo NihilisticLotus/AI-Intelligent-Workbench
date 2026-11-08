@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createServer, type Server, type RequestListener } from 'node:http';
 import type { lookup } from 'node:dns';
 import { gzipSync, brotliCompressSync } from 'node:zlib';
-import { isPublicMetadataAddress, metadataAddressAllowed, parseMetadataJson, readMetadataJson } from '../src/independent/metadata-http';
+import { isFakeIpProxyAddress, isPublicMetadataAddress, metadataAddressAllowed, parseMetadataJson, readMetadataJson } from '../src/independent/metadata-http';
 
 const servers: Server[] = [];
 afterEach(async () => { for (const s of servers.splice(0)) { s.closeAllConnections(); await new Promise<void>((r) => s.close(() => r())); } });
@@ -51,6 +51,30 @@ describe('受限模型元数据 HTTP', () => {
     let lookups = 0; const resolver = ((_host:unknown,_options:unknown,cb:Function) => {lookups++; cb(null,[{address:'8.8.8.8',family:4},{address:'127.0.0.1',family:4}]);}) as typeof lookup;
     await expect(readMetadataJson({base:new URL('https://example.com/v1'),url:new URL('https://example.com/v1/models'),publicCatalog:false,lookup:resolver})).rejects.toThrow('域名解析到受限地址'); expect(lookups).toBe(1);
   });
+  it('fake-ip 网段默认拒绝；打开后只放行域名解析结果，不放行直接 IP、其他私网、回环或公共目录（ISSUE-0053）', () => {
+    const on = { allowFakeIpProxy: true }, domain = new URL('https://open.example.com/api/v1');
+    expect(isFakeIpProxyAddress('198.18.0.1')).toBe(true); expect(isFakeIpProxyAddress('198.19.255.254')).toBe(true);
+    for (const ip of ['198.17.255.255','198.20.0.1','10.0.0.1','::ffff:198.18.0.1']) expect(isFakeIpProxyAddress(ip)).toBe(false);
+    expect(metadataAddressAllowed(domain, '198.18.0.5', false)).toBe(false);
+    expect(metadataAddressAllowed(domain, '198.18.0.5', false, { allowFakeIpProxy: false })).toBe(false);
+    expect(metadataAddressAllowed(domain, '198.18.0.5', false, on)).toBe(true);
+    expect(metadataAddressAllowed(domain, '198.18.0.5', true, on)).toBe(false); // 公共目录不放行
+    expect(metadataAddressAllowed(new URL('https://198.18.0.5/v1'), '198.18.0.5', false, on)).toBe(false); // 直接填写 IP 不放行
+    for (const ip of ['127.0.0.1','10.1.1.1','192.168.1.1','169.254.169.254','100.64.1.1','::1']) expect(metadataAddressAllowed(domain, ip, false, on)).toBe(false);
+  });
+  it('fake-ip 解析经真实连接路径：关闭时提示可在设置里允许，打开后请求越过地址校验', async () => {
+    const base = new URL('https://proxy.example.com/api/v1'); const url = new URL(base.href + '/models');
+    // lookup 返回 198.18.x，模拟代理 fake-ip；不需要真的连上，只看地址校验的结果
+    const resolver = ((_h:unknown,_o:unknown,cb:Function) => cb(null,[{address:'198.18.0.9',family:4}])) as typeof lookup;
+    await expect(readMetadataJson({base,url,publicCatalog:false,lookup:resolver})).rejects.toThrow('可在设置里允许');
+    await expect(readMetadataJson({base,url,publicCatalog:false,lookup:resolver,addressPolicy:{allowFakeIpProxy:false}})).rejects.toThrow('fake-ip');
+    // 混合结果（fake-ip + 内网）即使打开也拒绝
+    const mixed = ((_h:unknown,_o:unknown,cb:Function) => cb(null,[{address:'198.18.0.9',family:4},{address:'10.0.0.1',family:4}])) as typeof lookup;
+    await expect(readMetadataJson({base,url,publicCatalog:false,lookup:mixed,addressPolicy:{allowFakeIpProxy:true},timeoutMs:1500})).rejects.toThrow('元数据域名解析到受限地址');
+    // 打开后地址校验通过：198.18.0.9 在本机没有可用路由，失败只能发生在连接阶段，错误不再是地址被拒
+    const err = await readMetadataJson({base,url,publicCatalog:false,lookup:resolver,addressPolicy:{allowFakeIpProxy:true},timeoutMs:1500}).then(()=>null,(e)=>e as Error);
+    expect(err).not.toBeNull(); expect(err!.message).not.toMatch(/fake-ip|受限地址|网络规则/);
+  }, 10_000);
   it('localhost 通过被校验的 lookup 连接，不进行第二次解析', async () => {
     const target = await fixture((_req,res) => {res.writeHead(200,{'content-type':'application/json'});res.end('{}');});
     let lookups = 0; const resolver = ((_host:unknown,_options:unknown,cb:Function) => {lookups++;cb(null,[{address:'127.0.0.1',family:4}]);}) as typeof lookup;

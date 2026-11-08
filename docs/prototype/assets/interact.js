@@ -235,6 +235,7 @@
       <label class="check-row"><input type="checkbox" checked> <span>有任务运行时阻止电脑休眠</span></label>
       <label class="check-row"><input type="checkbox" id="lan"> <span>允许局域网内其他设备访问<small>只在“专用网络”下可开启；开启时 Windows 会请求一次管理员确认</small></span></label>
       <div id="lan-info" hidden class="alert info" style="margin:0 0 var(--sp-3)">${ic('devices')}<div class="body"><strong>局域网地址：http://192.168.1.23:17890</strong><p>新设备打开这个地址后，输入电脑上显示的配对码 <b class="mono">482 913</b>（2 分钟内有效）。</p></div></div>
+      <label class="check-row"><input type="checkbox"> <span>允许本机代理的 fake-ip 网段（198.18.x）<small>默认关闭。代理软件的 fake-ip 模式会把供应商域名解析成 198.18.x，工作台默认拒绝这类地址；打开后只放行这一个网段、只放行域名解析结果，只影响工作台自己的独立 Agent</small></span></label>
       <label class="check-row"><input type="checkbox" id="ho-confirm"> <span>交接前让我确认<small>默认关闭：切换到其他 Agent 时自动生成、校验并发送交接内容，事后可在对话里查看和撤销</small></span></label>
       <div class="form-row"><label for="th-mode">思考过程</label><select class="select" id="th-mode"><option value="collapsed">显示，默认折叠（推荐）</option><option value="open">显示，默认展开</option><option value="hidden">不显示</option></select></div>
       <div class="form-row"><label for="cc-all">并发上限</label><select class="select" id="cc-all"><option>每个 Agent 1 个</option><option selected>每个 Agent 2 个</option><option>每个 Agent 3 个</option></select></div>

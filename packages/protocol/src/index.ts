@@ -304,7 +304,7 @@ export const EventEnvelope = z.discriminatedUnion('type', [
   ev('session.notice', z.object({ level: z.enum(['info', 'warn']), text: z.string(), id: Id.optional() })),
   /** 目录变化只带身份，不携带地址、凭据、能力原文或工具内容。 */
   ev('independent.catalog_changed', z.object({
-    scope: z.enum(['service', 'model', 'default']), action: z.enum(['created', 'updated', 'deleted']),
+    scope: z.enum(['service', 'model', 'default', 'network']), action: z.enum(['created', 'updated', 'deleted']),
     serviceId: Id.nullable(), modelId: Id.nullable(),
   }).strict()),
   ev('independent.task_changed', z.object({ revision: z.number().int().positive() }).strict()),
@@ -767,6 +767,12 @@ export type IndependentModel = z.infer<typeof IndependentModel>;
 export const IndependentSelection = z.object({ serviceId: Id, modelId: Id }).strict();
 export type IndependentSelection = z.infer<typeof IndependentSelection>;
 export const IndependentDefault = z.object({ selection: IndependentSelection.nullable() }).strict();
+/**
+ * 独立 Agent 的网络设置（2026-11-09，ISSUE-0053）。allowFakeIpProxy：本机代理 fake-ip 模式把供应商域名解析到 198.18.0.0/15 时，
+ * 是否允许元数据读取和模型请求连接这个网段。默认 false；只放行域名解析结果，不放行直接填写的 IP、其他私网、回环或公共目录。
+ */
+export const IndependentNetworkSettings = z.object({ allowFakeIpProxy: z.boolean() }).strict();
+export type IndependentNetworkSettings = z.infer<typeof IndependentNetworkSettings>;
 export type IndependentDefault = z.infer<typeof IndependentDefault>;
 export const IndependentModelBinding = IndependentSelection.extend({ taskId: Id, configRevision: Revision, modelRevision: Revision, createdAt: Ts }).strict();
 export type IndependentModelBinding = z.infer<typeof IndependentModelBinding>;

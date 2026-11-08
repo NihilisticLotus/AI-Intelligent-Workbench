@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import {
   CreateIndependentServiceBody, PatchIndependentServiceBody, IndependentService, IndependentModel,
   CreateIndependentModelBody, PatchIndependentModelBody, PatchIndependentOverridesBody,
-  IndependentCapabilityEvidence, IndependentDefault, IndependentModelBinding,
+  IndependentCapabilityEvidence, IndependentDefault, IndependentNetworkSettings, IndependentModelBinding,
   type IndependentSelection, type EventOf,
 } from '@aic/protocol';
 import type { Db, Row } from '../db';
@@ -13,6 +13,7 @@ import { AppError, Errors, newId, now } from '../util';
 import { capabilityScope, resolveCapabilities, sameCapabilityScope } from './capabilities';
 
 const DEFAULT_KEY = 'independent.default';
+const NETWORK_KEY = 'independent.network';
 const serviceConfig = (s: Omit<CreateIndependentServiceBody, 'apiKey'>) => ({ name: s.name, protocol: s.protocol, baseUrl: s.baseUrl,
   authentication: s.authentication, apiVersion: s.apiVersion, providerId: s.providerId, plan: s.plan, enabled: s.enabled });
 
@@ -156,6 +157,20 @@ export class IndependentCatalog {
         merged.set(evidenceId, { ...e, id: evidenceId });
       }
       return this.saveEvidence(serviceId, id, [...merged.values()]);
+    }, deviceId);
+  }
+
+  /** 网络设置（ISSUE-0053）：默认不放行 fake-ip 网段；读取失败或旧库没有这一项时按关闭处理 */
+  getNetwork(): IndependentNetworkSettings {
+    const row = this.db.get<{ value: string }>('SELECT value FROM meta WHERE key=?', NETWORK_KEY);
+    const parsed = row ? IndependentNetworkSettings.safeParse((() => { try { return JSON.parse(row.value); } catch { return null; } })()) : null;
+    return parsed?.success ? parsed.data : { allowFakeIpProxy: false };
+  }
+  setNetwork(input: IndependentNetworkSettings, deviceId: string | null = null): IndependentNetworkSettings {
+    const body = IndependentNetworkSettings.parse(input);
+    return this.change({ scope: 'network', action: 'updated', serviceId: null, modelId: null }, () => {
+      this.db.run('INSERT INTO meta(key,value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value', NETWORK_KEY, JSON.stringify(body));
+      return body;
     }, deviceId);
   }
 

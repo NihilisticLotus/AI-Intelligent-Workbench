@@ -1,4 +1,4 @@
-// 设置：外观（日间 / 夜间）、思考过程默认显示方式、设备列表（可吊销）、关于。
+// 设置：外观（日间 / 夜间）、思考过程默认显示方式、设备列表（可吊销）、网络（独立 Agent 的代理网段开关）、关于。
 import { useEffect, useState } from 'react';
 import type { ApiError, Device } from '@aic/protocol';
 import { loadDevices, revokeDevice, useApp } from '../state/app';
@@ -7,6 +7,7 @@ import { ago } from '../lib/format';
 import { ErrorNotice, asApiError, confirmDialog, toastErrorOf } from '../components/ui';
 import { Icon } from '../components/Icon';
 import { toast } from '../state/ui';
+import { NetworkSettingsSection } from './network-settings';
 
 export function SettingsPage() {
   const theme = usePref('theme');
@@ -73,6 +74,8 @@ export function SettingsPage() {
               ))}
             </ul>
           </section>
+
+          <NetworkSettingsSection />
 
           {hello ? (
             <section className="set-sec" aria-labelledby="s-about">

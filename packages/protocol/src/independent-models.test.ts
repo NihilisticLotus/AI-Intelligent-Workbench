@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CreateIndependentServiceBody, IndependentBaseUrl, IndependentService, IndependentCapabilityEvidence, IndependentCapabilityPatch, IndependentDefault, PatchIndependentServiceBody, EventEnvelope, DiscoverIndependentModelsBody, ImportIndependentModelsBody, IndependentDiscoveredModel, IndependentDiscoveryState, IndependentDiscoveryDiagnostics, IndependentDiscoverySnapshot } from './index';
+import { CreateIndependentServiceBody, IndependentBaseUrl, IndependentService, IndependentCapabilityEvidence, IndependentCapabilityPatch, IndependentDefault, PatchIndependentServiceBody, EventEnvelope, DiscoverIndependentModelsBody, ImportIndependentModelsBody, IndependentDiscoveredModel, IndependentDiscoveryState, IndependentDiscoveryDiagnostics, IndependentDiscoverySnapshot, IndependentNetworkSettings } from './index';
 
 const service = { name: '服务一', protocol: 'chat_completions', baseUrl: 'https://example.com/api/v1', authentication: 'api_key', apiVersion: null, providerId: null, plan: null, enabled: true };
 const evidence = { id: 'e', field: 'imageInput', value: false, kind: 'endpoint', scope: { serviceId: 's', configRevision: 1, protocol: 'chat_completions', apiVersion: null, providerId: null, plan: null, remoteModelId: 'model' }, sourceUrl: 'https://example.com/api/v1/models', sourceVersion: 'fixture-v1', fieldPath: 'data.image', observedAt: 1, expiresAt: 2 };
@@ -24,6 +24,11 @@ describe('独立模型配置协议', () => {
     ]) expect(IndependentDiscoveryDiagnostics.safeParse({...base,rootShape}).success).toBe(false);
     expect(IndependentDiscoveryDiagnostics.safeParse({...base,parseFailure:'duplicate_id',rootShape:obj}).success).toBe(false);
     expect(IndependentDiscoveryDiagnostics.safeParse({...base,parseFailure:undefined,rootShape:obj}).success).toBe(false);
+  });
+  it('网络设置只有一个布尔开关，拒绝多余字段和非布尔值；目录变化事件可带 network 范围', () => {
+    expect(IndependentNetworkSettings.parse({allowFakeIpProxy:true})).toEqual({allowFakeIpProxy:true});
+    for (const v of [{},{allowFakeIpProxy:'true'},{allowFakeIpProxy:1},{allowFakeIpProxy:false,cidr:'10.0.0.0/8'}]) expect(IndependentNetworkSettings.safeParse(v).success).toBe(false);
+    expect(EventEnvelope.safeParse({seq:1,ts:1,taskId:null,sessionId:null,type:'independent.catalog_changed',data:{scope:'network',action:'updated',serviceId:null,modelId:null}}).success).toBe(true);
   });
   it('识别范围只追加可选字段，旧请求与旧快照原样保留，已有模型允许零网络读取', () => {
     const body={expectedConfigRevision:1,includeCatalog:false};

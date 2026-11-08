@@ -4,7 +4,7 @@ import { request as httpRequest, Agent as HttpAgent, type IncomingMessage } from
 import { request as httpsRequest, Agent as HttpsAgent } from 'node:https';
 import { isIP } from 'node:net';
 import { IndependentBaseUrl } from '@aic/protocol';
-import { metadataAddressAllowed, parseMetadataJson } from './metadata-http';
+import { metadataAddressAllowed, parseMetadataJson, type AddressPolicy } from './metadata-http';
 
 export class ModelTransportError extends Error {
   constructor(readonly reason: 'request' | 'network' | 'cancelled' | 'timed_out' | 'limit' | 'context' | 'protocol' | 'authentication' | 'quota' | 'upstream' | 'budget', readonly status: number | null = null) {
@@ -69,12 +69,13 @@ export async function postModel(input: {
   base: URL; endpoint: 'chat/completions' | 'responses' | 'messages' | 'responses/input_tokens' | 'messages/count_tokens'; headers: Record<string, string>; body: string;
   signal: AbortSignal; timeoutMs: number; onEvent: (data: string, event: string) => boolean; onJson: (json: unknown) => void;
   lookup?: typeof lookup;
+  addressPolicy?: AddressPolicy;
 }) {
   if (!IndependentBaseUrl.safeParse(input.base.href.replace(/\/$/, '')).success || input.base.search || input.base.hash) throw new ModelTransportError('request');
   if (Buffer.byteLength(input.body) > 24 * 1024 * 1024) throw new ModelTransportError('limit');
   if (input.signal.aborted) throw new ModelTransportError('cancelled');
   const url = new URL(input.base.href.replace(/\/$/, '') + '/' + input.endpoint), host = url.hostname.replace(/^\[|\]$/g, '');
-  if (isIP(host) && !metadataAddressAllowed(input.base, host, false)) throw new ModelTransportError('request');
+  if (isIP(host) && !metadataAddressAllowed(input.base, host, false, input.addressPolicy)) throw new ModelTransportError('request');
   const resolver = input.lookup ?? lookup;
   const agent = url.protocol === 'https:' ? new HttpsAgent({ keepAlive: false, proxyEnv: {} }) : new HttpAgent({ keepAlive: false, proxyEnv: {} });
   const abort = new AbortController(); let timedOut = false; let response: IncomingMessage | undefined;
@@ -88,7 +89,7 @@ export async function postModel(input: {
         agent, method: 'POST', signal: abort.signal, maxHeaderSize: 16 * 1024,
         headers: { ...input.headers, 'Content-Type': 'application/json', Accept: 'text/event-stream, application/json', 'Accept-Encoding': 'identity', 'Content-Length': Buffer.byteLength(input.body) },
         lookup: (hostname, options, callback) => resolver(hostname, { ...options, all: true }, (error, addresses) => {
-          if (error || !addresses?.length || addresses.some((a) => !metadataAddressAllowed(input.base, a.address, false))) return callback(new ModelTransportError('network'), '', 4);
+          if (error || !addresses?.length || addresses.some((a) => !metadataAddressAllowed(input.base, a.address, false, input.addressPolicy))) return callback(new ModelTransportError('network'), '', 4);
           const chosen = addresses[0]!; callback(null, options.all ? addresses : chosen.address, chosen.family);
         }),
       }, (res) => {

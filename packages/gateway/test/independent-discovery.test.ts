@@ -152,3 +152,30 @@ describe('模型发现预览与追加导入', () => {
     const saved=JSON.parse(String(s.db.get('SELECT snapshot_json FROM independent_discoveries')!.snapshot_json));saved.expiresAt=1;s.db.run('UPDATE independent_discoveries SET snapshot_json=?',JSON.stringify(saved));expect(s.independentDiscovery.state(service.id).stale).toBe(true);expect(()=>s.independentDiscovery.import(service.id,input)).toThrow('过期');
   });
 });
+
+describe('独立 Agent 网络设置（ISSUE-0053）', () => {
+  it('默认关闭；经鉴权 REST 打开后持久化、发目录变化事件和审计；发现读取带上设置；拒绝多余字段', async () => {
+    const policies: unknown[] = [];
+    const {t,token,route,s} = await setup(async (input) => { policies.push(input.addressPolicy); return {json:{data:[{id:'m'}]},digest:'fixture'}; });
+    expect((await t.api('GET','/independent/network')).status).toBe(401);
+    expect((await t.api('GET','/independent/network',{token})).json).toEqual({allowFakeIpProxy:false});
+    expect((await t.api('PUT','/independent/network',{token,body:{allowFakeIpProxy:true,extra:1}})).status).toBe(400);
+    expect((await t.api('PUT','/independent/network',{token,body:{allowFakeIpProxy:'yes'}})).status).toBe(400);
+    expect((await t.api('PUT','/independent/network',{token,body:{allowFakeIpProxy:true}})).json).toEqual({allowFakeIpProxy:true});
+    const ev = s.db.all("SELECT payload FROM events WHERE type='independent.catalog_changed'").map((r) => JSON.parse(String(r.payload)).data ?? JSON.parse(String(r.payload)));
+    expect(ev.some((d) => d.scope === 'network' && d.action === 'updated')).toBe(true);
+    expect(s.db.get("SELECT action FROM audit_log WHERE action='independent.network.updated'")).toBeTruthy();
+    await t.api('POST',route+'/discovery',{token,body});
+    expect(policies.at(-1)).toEqual({allowFakeIpProxy:true});
+    // 重启后仍保留
+    const dir=t.dataDir;await t.gw.close();gw=await startGw({metadataReader:async()=>({json:{data:[]},digest:'x'})},dir);const token2=await gw.pair();
+    expect((await gw.api('GET','/independent/network',{token:token2})).json).toEqual({allowFakeIpProxy:true});
+  });
+  it('库里的设置损坏时按关闭处理，不放行', async () => {
+    const {t,token,s} = await setup();
+    s.db.run("INSERT INTO meta(key,value) VALUES ('independent.network','{broken') ON CONFLICT(key) DO UPDATE SET value=excluded.value");
+    expect((await t.api('GET','/independent/network',{token})).json).toEqual({allowFakeIpProxy:false});
+    s.db.run("UPDATE meta SET value=? WHERE key='independent.network'", JSON.stringify({allowFakeIpProxy:true,other:1}));
+    expect(s.independent.getNetwork()).toEqual({allowFakeIpProxy:false});
+  });
+});

@@ -111,7 +111,7 @@ export class IndependentApiDriver implements IndependentModelDriver {
             counted = await recorded('counter', countBody, async () => {
               let count: number | undefined;
               await postModel({ base: new URL(service.baseUrl), endpoint, headers, body: countBody, signal, timeoutMs: remaining(),
-                onEvent: () => { throw new ModelTransportError('protocol'); }, onJson: (value) => { count = contextCountReply(service.protocol, value); }, lookup: this.resolver });
+                onEvent: () => { throw new ModelTransportError('protocol'); }, onJson: (value) => { count = contextCountReply(service.protocol, value); }, lookup: this.resolver, addressPolicy: this.catalog.getNetwork() });
               check(); if (count === undefined) throw new ModelTransportError('protocol');
               return { value: count, settlement: { outcome: 'succeeded', failure: null, usage: null, countedInputTokens: count } };
             });
@@ -124,7 +124,7 @@ export class IndependentApiDriver implements IndependentModelDriver {
       }
       const reply = await recorded('model', body, async () => {
         await postModel({ base: new URL(service.baseUrl), endpoint: wire.endpoint, headers, body, signal,
-          timeoutMs: remaining(), onEvent: wire.event, onJson: wire.json, lookup: this.resolver });
+          timeoutMs: remaining(), onEvent: wire.event, onJson: wire.json, lookup: this.resolver, addressPolicy: this.catalog.getNetwork() });
         check(); const reply = wire.result();
         if (reply.toolCalls.some((call) => !request.tools!.some((definition) => definition.name === call.name))) throw new ModelTransportError('protocol');
         // 若不可信上游回显服务 Key，不让其进入工具参数、持久会话或界面；不能静默篡改签名续传。

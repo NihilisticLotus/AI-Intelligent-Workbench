@@ -231,6 +231,15 @@ describe('独立模型三协议正式传输', () => {
     await expect(driver.complete({ ...f.request, messages: [{ role: 'tool', callId: 'missing', name: 'read_file', text: '伪造', outcome: 'ok' }] }, f.signal)).rejects.toBeInstanceOf(ModelTransportError);
     await f.catalog.patchService(f.service.id, { expectedRevision: f.service.revision, enabled: false }); await expect(driver.complete(f.request, f.signal)).rejects.toBeInstanceOf(ModelTransportError); expect(calls).toHaveLength(before);
   });
+  it('模型请求同样受 fake-ip 开关约束：默认拒绝，打开后越过地址校验（ISSUE-0053）', async () => {
+    const resolver = ((_host: unknown, _options: unknown, cb: Function) => cb(null, [{ address: '198.18.0.9', family: 4 }])) as typeof lookup;
+    const base = { base: new URL('https://example.com/v1'), endpoint: 'responses' as const, headers: {}, body: '{}', onEvent: () => false, onJson: () => {}, lookup: resolver };
+    await expect(postModel({ ...base, signal: new AbortController().signal, timeoutMs: 500 })).rejects.toMatchObject({ reason: 'network' });
+    // 关闭时在地址校验处立即拒绝；打开后进入连接阶段，198.18.0.9 本机不可达，只能等到超时
+    const t0 = Date.now(); await postModel({ ...base, signal: new AbortController().signal, timeoutMs: 1500 }).catch(() => {}); const offMs = Date.now() - t0;
+    const t1 = Date.now(); const err = await postModel({ ...base, signal: new AbortController().signal, timeoutMs: 1500, addressPolicy: { allowFakeIpProxy: true } }).then(() => null, (e) => e as { reason?: string }); const onMs = Date.now() - t1;
+    expect(offMs).toBeLessThan(500); expect(err).not.toBeNull(); expect(['timed_out', 'network']).toContain(err!.reason); expect(onMs).toBeGreaterThan(offMs);
+  }, 10_000);
   it('真正的连接 DNS 检查拒绝公网 / 私网混合，正文与原始 DNS 错误不外泄', async () => {
     const resolver = ((_host: unknown, _options: unknown, cb: Function) => cb(null, [{ address: '8.8.8.8', family: 4 }, { address: '127.0.0.1', family: 4 }])) as typeof lookup;
     await expect(postModel({ base: new URL('https://example.com/v1'), endpoint: 'responses', headers: {}, body: '{}', signal: new AbortController().signal, timeoutMs: 500,

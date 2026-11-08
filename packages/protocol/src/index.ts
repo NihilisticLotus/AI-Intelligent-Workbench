@@ -62,6 +62,7 @@ export const ErrorCode = {
   AttachmentTooMany: 'attachment.too_many',
   AttachmentNotFound: 'attachment.not_found',
   AttachmentBadType: 'attachment.bad_type',
+  AttachmentReadFailed: 'attachment.read_failed',
   AgentNativeConfiguration: 'agent.native_configuration',
   IndependentDiscoveryFailed: 'independent.discovery_failed',
 } as const;
@@ -653,6 +654,12 @@ export type IndependentCommandOutcome = z.infer<typeof IndependentCommandOutcome
 /** 输出仅给工具调用方；不自动写入事件、审计或进程登记。 */
 export const IndependentCommandResult = IndependentCommandOutcome.extend({ stdout: z.string(), stderr: z.string() });
 export type IndependentCommandResult = z.infer<typeof IndependentCommandResult>;
+/** 仅供 Gateway 可信宿主使用；公开命令参数不能提高输出捕获限额。 */
+export interface IndependentCommandHostOptions {
+  cwd: string; signal?: AbortSignal; redact?: readonly string[];
+  onStarted?(process: { pid: number; startedAt: number }): void | Promise<void>;
+  captureLimitBytes?: number;
+}
 
 export const IndependentToolState = z.enum(['pending', 'approved', 'rejected', 'running', 'succeeded', 'failed', 'cancelled', 'interrupted']);
 export type IndependentToolState = z.infer<typeof IndependentToolState>;
@@ -880,11 +887,26 @@ export const IndependentModelRequest = z.object({
 }).strict();
 export type IndependentModelRequest = z.infer<typeof IndependentModelRequest>;
 /** 附件解析由宿主按任务归属提供，传输层不接受路径或远程图片 URL。 */
+const boundedBase64 = (max: number) => z.string().max(max).refine((s) => s.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(s), '需要有效的 base64 编码');
 export const IndependentModelAttachment = z.object({
   attachmentId: Id, name: z.string().max(255), kind: z.enum(['image', 'text']), mime: z.string().max(100),
-  base64: z.string().max(28 * 1024 * 1024).regex(/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/),
+  base64: boundedBase64(28 * 1024 * 1024),
 }).strict();
 export type IndependentModelAttachment = z.infer<typeof IndependentModelAttachment>;
+/** 附件句柄宿主的私有消息，不用于 REST 或公开事件。 */
+export const IndependentAttachmentHostRequest = z.object({
+  dataDirectory: z.string().min(1).max(1000), taskId: Id, attachmentId: Id,
+  sha256: z.string().regex(/^[a-f0-9]{64}$/), size: z.number().int().min(0).max(20 * 1024 * 1024),
+  maxBytes: z.number().int().min(1).max(20 * 1024 * 1024),
+}).strict();
+export type IndependentAttachmentHostRequest = z.infer<typeof IndependentAttachmentHostRequest>;
+export const IndependentAttachmentHostReply = z.discriminatedUnion('ok', [
+  z.object({ ok: z.literal(true), data: boundedBase64(28 * 1024 * 1024), hash: z.string().regex(/^[a-f0-9]{64}$/) }).strict(),
+  z.object({ ok: z.literal(false), reason: z.enum(['forbidden','not_found','busy','conflict','too_large','io_error']) }).strict(),
+]);
+export type IndependentAttachmentHostReply = z.infer<typeof IndependentAttachmentHostReply>;
+export const AttachmentSnapshot = z.object({ info: AttachmentInfo, sha256: z.string().regex(/^[a-f0-9]{64}$/) }).strict();
+export type AttachmentSnapshot = z.infer<typeof AttachmentSnapshot>;
 export const IndependentModelDelta = z.object({ type: z.enum(['text_delta', 'thinking_delta']), text: z.string().max(1024 * 1024) }).strict();
 export type IndependentModelDelta = z.infer<typeof IndependentModelDelta>;
 export interface IndependentModelDriverConfig {

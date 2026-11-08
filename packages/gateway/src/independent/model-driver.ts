@@ -49,13 +49,17 @@ export class IndependentApiDriver implements IndependentModelDriver {
     if (generation.stream === undefined && service.protocol === 'chat_completions' && capability('streamUsage') !== true) generation.stream = false;
     if (capability('streaming') === false) { if (generation.stream === true) throw new ModelTransportError('request'); generation.stream = false; }
     const attachments = new Map<string, IndependentModelAttachment>();
+    let attachmentBytes = 0;
     for (const message of request.messages) if (message.role === 'user') for (const ref of message.attachments) {
       if (attachments.has(ref.attachmentId)) continue;
+      if (attachments.size >= 50) throw new ModelTransportError('limit');
       if (!this.config.loadAttachment) throw new ModelTransportError('request');
       const a = IndependentModelAttachment.parse(await this.config.loadAttachment(request.binding.taskId, ref.attachmentId, signal)); check();
       if (a.attachmentId !== ref.attachmentId) throw new ModelTransportError('request');
       const bytes = Buffer.from(a.base64, 'base64');
       if (bytes.length > (a.kind === 'image' ? 5 * 1024 * 1024 : 512 * 1024)) throw new ModelTransportError('limit');
+      attachmentBytes += bytes.length;
+      if (attachmentBytes > 16 * 1024 * 1024) throw new ModelTransportError('limit');
       if (a.kind === 'image') {
         if (capability('imageInput') !== true || !['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(a.mime)) throw new ModelTransportError('request');
         const sniffed = sniffAttachment(bytes); if (sniffed.kind !== 'image' || sniffed.mime !== a.mime) throw new ModelTransportError('request');

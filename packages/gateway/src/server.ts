@@ -269,7 +269,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
       independentDiscovery.close();
       ws.close();
       agentSvc.shutdown();
-      const graceful = tasks.shutdown();
+      const graceful = Promise.all([tasks.shutdown(), attachments.close()]);
       if (opts.deadlineMs !== undefined) {
         // 两段式：正常收尾最多等 deadlineMs，到点就先同步结束所有 Agent 进程树，再给写库收尾一点时间
         const timedOut = await Promise.race([graceful.then(() => false), delay(opts.deadlineMs).then(() => true)]);

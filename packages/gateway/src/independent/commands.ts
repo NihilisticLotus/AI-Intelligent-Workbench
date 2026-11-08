@@ -4,7 +4,7 @@ import { spawn } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { IndependentCommandSpec, type IndependentCommandResult } from '@aic/protocol';
+import { IndependentCommandSpec, type IndependentCommandResult, type IndependentCommandHostOptions } from '@aic/protocol';
 import { redact } from '@aic/adapters';
 
 /** 只取工具运行需要的系统项，不继承 API Key、代理认证、Node hooks 或 Agent 配置。 */
@@ -22,12 +22,10 @@ export class IndependentCommandExecutor {
   private closed = false;
   constructor(private dataDir: string) {}
 
-  async run(input: IndependentCommandSpec, options: {
-    cwd: string; signal?: AbortSignal; redact?: readonly string[];
-    /** 完成持久化登记后才向宿主发送命令；失败或取消则不发送。 */
-    onStarted?(process: { pid: number; startedAt: number }): void | Promise<void>;
-  }): Promise<IndependentCommandResult> {
+  async run(input: IndependentCommandSpec, options: IndependentCommandHostOptions): Promise<IndependentCommandResult> {
     const spec = IndependentCommandSpec.parse(input);
+    const captureLimit = options.captureLimitBytes ?? spec.maxOutputBytes;
+    if (!Number.isInteger(captureLimit) || captureLimit < 1024 || captureLimit > 32 * 1024 * 1024) throw new Error('可信宿主输出限额无效');
     const at = performance.now();
     const empty = (reason: IndependentCommandResult['reason'], stderr = ''): IndependentCommandResult =>
       ({ reason, exitCode: null, stdout: '', stderr, outputBytes: 0, truncated: false, durationMs: performance.now() - at });
@@ -61,8 +59,7 @@ export class IndependentCommandExecutor {
     let settled = false;
     let accepted = 0;
     let observed = 0;
-    let stdout = Buffer.alloc(0);
-    let stderr = Buffer.alloc(0);
+    const stdout: Buffer[] = [], stderr: Buffer[] = [];
     let startupError = '';
     let frameBuffer = '';
     let commandStarted = false;
@@ -85,10 +82,10 @@ export class IndependentCommandExecutor {
     const capture = (target: 'stdout' | 'stderr', chunk: Buffer) => {
       if (settled) return;
       observed += chunk.length;
-      const part = chunk.subarray(0, Math.max(0, spec.maxOutputBytes - accepted));
+      const part = chunk.subarray(0, Math.max(0, captureLimit - accepted));
       accepted += part.length;
-      if (target === 'stdout') stdout = Buffer.concat([stdout, part]); else stderr = Buffer.concat([stderr, part]);
-      if (observed > spec.maxOutputBytes) stop('output_limit');
+      if (part.length) (target === 'stdout' ? stdout : stderr).push(Buffer.from(part));
+      if (observed > captureLimit) stop('output_limit');
     };
     // 宿主把命令输出编码成帧，命令无法用正文伪造退出消息，也不会与 PowerShell 诊断混流。
     child.stdout.on('data', (chunk: Buffer) => {
@@ -121,8 +118,8 @@ export class IndependentCommandExecutor {
       options.signal?.removeEventListener('abort', abort);
       this.active.delete(entry);
       cleanup();
-      const clean = (buffer: Buffer) => {
-        let text = redact(buffer.toString('utf8'), options.redact);
+      const clean = (buffers: Buffer[]) => {
+        let text = redact(Buffer.concat(buffers).toString('utf8'), options.redact);
         // 上限或中断可能把密钥截成前缀，不能把已知密钥的这段尾巴返回调用方。
         for (const secret of options.redact ?? []) {
           if (secret.length < 6) continue;
@@ -134,7 +131,7 @@ export class IndependentCommandExecutor {
       };
       resolveCompletion({ reason: stopReason ?? (hostError ? commandStarted ? 'interrupted' : 'start_failed' : code === 0 && commandExit !== undefined ? 'completed' : 'interrupted'), exitCode: commandExit ?? null,
         stdout: clean(stdout), stderr: startupError || clean(stderr), outputBytes: observed,
-        truncated: observed > spec.maxOutputBytes, durationMs: performance.now() - at });
+        truncated: observed > captureLimit, durationMs: performance.now() - at });
     });
     return completion;
   }

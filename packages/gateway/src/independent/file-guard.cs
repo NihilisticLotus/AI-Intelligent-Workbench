@@ -117,6 +117,34 @@ public sealed class AicFileGuard : IDisposable {
         try { Utf8.GetString(bytes); } catch { throw Error("binary"); }
     }
     public Blob ReadFile(string relative) { return ReadFileWithin(relative, Limit); }
+    // 附件仅来自数据库上传身份；允许私有数据根，仍不允许原生凭据目录或任意文件名。
+    public static Blob ReadAttachment(string dataDirectory, string taskId, string attachmentId, string expectedHash, long expectedSize, int maximum) {
+        if (!Regex.IsMatch(taskId ?? "", "^[A-Za-z0-9_-]+$") || !Regex.IsMatch(attachmentId ?? "", "^att_[A-Za-z0-9_-]+$")
+            || !Regex.IsMatch(expectedHash ?? "", "^[a-f0-9]{64}$") || maximum < 1 || maximum > 20 * 1024 * 1024 || expectedSize < 0 || expectedSize > maximum
+            || !Regex.IsMatch(dataDirectory ?? "", "^[a-zA-Z]:\\\\") || dataDirectory.IndexOf('/') >= 0) throw Error("forbidden");
+        string directory = Path.GetFullPath(dataDirectory).TrimEnd('\\'), drive = Path.GetPathRoot(directory);
+        uint kind = GetDriveTypeW(drive);
+        if (directory.Length <= 3 || (kind != 2 && kind != 3)) throw Error("forbidden");
+        List<SafeFileHandle> held = new List<SafeFileHandle>();
+        try {
+            string current = drive; held.Add(Open(current, true, false, false));
+            foreach (string part in (directory.Substring(drive.Length) + "\\attachments\\" + taskId).Split('\\')) {
+                if (!String.Equals(part, ".aic-data", StringComparison.OrdinalIgnoreCase)) Component(part);
+                current = Path.Combine(current, part); held.Add(Open(current, true, false, false));
+            }
+            string target = Path.Combine(current, attachmentId);
+            using (SafeFileHandle handle = Open(target, false, false, false)) {
+                using (FileStream stream = new FileStream(handle, FileAccess.Read)) {
+                    if (stream.Length != expectedSize || stream.Length > maximum) throw Error("conflict");
+                    byte[] bytes = new byte[(int)expectedSize]; int position = 0, read;
+                    while (position < bytes.Length && (read = stream.Read(bytes, position, bytes.Length - position)) > 0) position += read;
+                    string hash = Hash(bytes);
+                    if (position != bytes.Length || hash != expectedHash) throw Error("conflict");
+                    return new Blob { Bytes = bytes, Hash = hash };
+                }
+            }
+        } finally { foreach (SafeFileHandle handle in held) handle.Dispose(); }
+    }
     public Blob ReadFileWithin(string relative, int maximum) {
         string target = Target(relative); List<SafeFileHandle> held = Parents(target, false);
         try { using (SafeFileHandle handle = Open(target, false, false, false)) {

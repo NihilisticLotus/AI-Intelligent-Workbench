@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, linkSync, renameSync, symlinkSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeAdapter } from '@aic/adapters';
 import { AttachmentService, sniffAttachment } from '../src/attachments';
@@ -52,6 +52,15 @@ describe('附件接口和迁移 v5', () => {
     s.db.run('UPDATE attachments SET size = 1 WHERE id = ?', a.id);
     for (let i=1;i<50;i++) s.attachments.upload(task.id,'x',Buffer.from('a'));
     expect((await upload(token, task.id, Buffer.from('a'))).status).toBe(400);
+  });
+  it.each(['hash','size','junction','hardlink'])('下载拒绝上传后 %s 变化，不跟随外部路径或返回原文', async (mode) => {
+    const { token, task, s } = await setup(), a = s.attachments.upload(task.id, '附件', Buffer.from('original')), file = s.attachments.get(task.id, a.id).path;
+    if (mode === 'hash' || mode === 'size') writeFileSync(file, mode === 'hash' ? 'modified' : 'different size');
+    else if (mode === 'hardlink') linkSync(file, path.join(t!.dataDir, 'external-fixture'));
+    else { const outside = path.join(t!.dataDir, 'moved-fixture'); renameSync(path.dirname(file), outside); writeFileSync(path.join(outside,a.id), 'external-fixture'); symlinkSync(outside, path.dirname(file), 'junction'); }
+    const reply = await t!.api('GET', `/tasks/${task.id}/attachments/${a.id}`, { token });
+    expect(reply.status).toBe(409); expect(reply.json.code).toBe('attachment.read_failed'); expect(reply.text).not.toContain('external-fixture'); expect(reply.text).not.toContain(t!.dataDir);
+    for (const headers of [{ host: 'evil.example' }, { origin: 'https://evil.example' }] as Record<string,string>[]) expect((await t!.api('GET', `/tasks/${task.id}/attachments/${a.id}`, { token, headers })).status).toBe(403);
   });
   it('deferPrompt 不启动，附件纯消息、归属和看图限制', async () => {
     const { task, s } = await setup(); expect(task.status).toBe('draft'); expect(s.events.read({ after: 0, taskId: task.id, limit: 100 }).some((e) => e.type === 'message.user')).toBe(false);

@@ -1,12 +1,14 @@
 // 附件只按服务端生成的 id 存盘；类型和尺寸来自内容，客户端 MIME 不参与判断。
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { ErrorCode, type AttachmentInfo, type PromptAttachment } from '@aic/protocol';
+import { ErrorCode, AttachmentSnapshot, type AttachmentInfo, type PromptAttachment } from '@aic/protocol';
 import { redact } from '@aic/adapters';
 import type { Db } from './db';
 import { AppError, Errors, newId } from './util';
+import { AttachmentFileReader } from './attachment-reader';
+import { IndependentCommandExecutor } from './independent/commands';
 const MB = 1024 * 1024;
 export const attachmentError = (status: number, code: string, message: string) => new AppError(status, { code, message, actions: [] });
 export function cleanFilename(raw: string): string {
@@ -45,7 +47,10 @@ type Row = { id: string; task_id: string; name: string; mime: string; size: numb
 const info = (r: Row): AttachmentInfo => ({ id: r.id, name: r.name, mime: r.mime, size: r.size, kind: r.kind, width: r.width, height: r.height, createdAt: r.created_at });
 export class AttachmentService {
   private root: string;
-  constructor(private db: Db, dataDir: string) { this.root = path.resolve(dataDir, 'attachments'); }
+  private reader?: AttachmentFileReader;
+  private closed = false;
+  private stopping = new AbortController();
+  constructor(private db: Db, private dataDir: string, private executor?: IndependentCommandExecutor) { this.root = path.resolve(dataDir, 'attachments'); }
   private file(taskId: string, id: string) {
     if (!/^[\w-]+$/.test(taskId) || !/^att_[\w-]+$/.test(id)) throw attachmentError(404, ErrorCode.AttachmentNotFound, '找不到附件');
     return path.join(this.root, taskId, id);
@@ -70,7 +75,28 @@ export class AttachmentService {
     if (!row || !existsSync(file)) throw attachmentError(404, ErrorCode.AttachmentNotFound, '附件不存在或已过期，请重新添加');
     return { info: info(row), path: file };
   }
-  read(taskId: string, id: string) { const a = this.get(taskId, id); return { ...a, bytes: readFileSync(a.path) }; }
+  /** 只查询本任务上传的元数据，独立宿主不通过 get / read 跟随磁盘路径。 */
+  snapshot(taskId: string, id: string) {
+    this.file(taskId, id);
+    const row = this.db.get<Row & { sha256: string }>('SELECT * FROM attachments WHERE id=? AND task_id=?', id, taskId);
+    if (!row) throw attachmentError(404, ErrorCode.AttachmentNotFound, '附件不存在或已过期，请重新添加');
+    return AttachmentSnapshot.parse({ info: info(row), sha256: row.sha256 });
+  }
+  async read(taskId: string, id: string, signal = new AbortController().signal, maxBytes = 20 * MB) {
+    const snapshot = this.snapshot(taskId, id);
+    signal = AbortSignal.any([signal, this.stopping.signal]);
+    try {
+      if (this.closed || signal.aborted) throw new Error('附件读取已停止');
+      this.executor ??= new IndependentCommandExecutor(this.dataDir);
+      this.reader ??= new AttachmentFileReader(this.dataDir, this.executor);
+      const bytes = await this.reader.read(taskId, snapshot, signal, maxBytes);
+      if (this.closed || signal.aborted || JSON.stringify(this.snapshot(taskId, id)) !== JSON.stringify(snapshot)) throw new Error('附件身份变化');
+      return { info: snapshot.info, bytes };
+    } catch {
+      throw attachmentError(409, ErrorCode.AttachmentReadFailed, signal.aborted ? '附件读取已取消' : '附件内容已变化、被占用或无法安全读取，请重新添加');
+    }
+  }
+  async close() { this.closed = true; this.stopping.abort(); await this.executor?.close(); }
   resolve(taskId: string, ids: string[] = []): { infos: AttachmentInfo[]; inputs: PromptAttachment[] } {
     if (ids.length > 10) throw attachmentError(400, ErrorCode.AttachmentTooMany, '每条消息最多 10 个附件');
     const found = [...new Set(ids)].map((id) => this.get(taskId, id));

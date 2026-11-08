@@ -20,8 +20,8 @@ export function taskRoutes(s: Services) {
     const a = s.attachments.upload(c.req.param('id'), name, Buffer.from(await c.req.arrayBuffer()));
     return c.json(a, 201);
   });
-  r.get('/tasks/:id/attachments/:attId', (c) => {
-    const a = s.attachments.read(c.req.param('id'), c.req.param('attId'));
+  r.get('/tasks/:id/attachments/:attId', async (c) => {
+    const a = await s.attachments.read(c.req.param('id'), c.req.param('attId'), c.req.raw.signal);
     c.header('Content-Type', a.info.mime); c.header('X-Content-Type-Options', 'nosniff');
     if (a.info.kind !== 'image') c.header('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(a.info.name)}`);
     return c.body(new Uint8Array(a.bytes));

@@ -162,6 +162,16 @@ describe('独立模型三协议正式传输', () => {
     for (const attachmentId of ['image','other']) await expect(f.driver({ loadAttachment: async () => ({ attachmentId, name: '图', kind: 'image', mime: 'image/png', base64: 'AAAA' }) }).complete(request, f.signal)).rejects.toBeInstanceOf(ModelTransportError);
     expect(calls).toHaveLength(0);
   });
+  it('单次附件解码总量与唯一数量有界，超限不发送模型请求', async () => {
+    const f = await fixture('chat_completions', undefined, { imageInput: true });
+    const bytes = Buffer.alloc(5 * 1024 * 1024); Buffer.from([137,80,78,71,13,10,26,10]).copy(bytes); bytes.writeUInt32BE(1,16); bytes.writeUInt32BE(1,20);
+    const large = vi.fn(async (_task: string, attachmentId: string) => ({ attachmentId, name: '图', kind: 'image' as const, mime: 'image/png', base64: bytes.toString('base64') }));
+    await expect(f.driver({ loadAttachment: large }).complete({ ...f.request, messages: [{ role: 'user', text: '', attachments: [0,1,2,3].map((i) => ({ attachmentId: `image-${i}` })) }] }, f.signal)).rejects.toMatchObject({ reason: 'limit' });
+    expect(large).toHaveBeenCalledTimes(4); expect(calls).toHaveLength(0);
+    const small = vi.fn(async (_task: string, attachmentId: string) => ({ attachmentId, name: '文本', kind: 'text' as const, mime: 'text/plain', base64: 'eA==' }));
+    const messages = Array.from({ length: 51 }, (_v,i) => ({ role: 'user' as const, text: '', attachments: [{ attachmentId: `text-${i}` }] }));
+    await expect(f.driver({ loadAttachment: small }).complete({ ...f.request, messages }, f.signal)).rejects.toMatchObject({ reason: 'limit' }); expect(small).toHaveBeenCalledTimes(50); expect(calls).toHaveLength(0);
+  });
   it('流回显密钥分片经脱敏，最终回复和工具参数含 Key 时拒绝持久化', async () => {
     const seen: string[] = []; const f = await fixture('chat_completions', (_req, res) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end(sse({ choices: [{ index: 0, delta: { content: 'fixture-model-' }, finish_reason: null }] }) + sse({ choices: [{ index: 0, delta: { content: 'secret' }, finish_reason: 'stop' }] }) + sse('[DONE]')); });
     await expect(f.driver({ onDelta: (_b, d) => seen.push(d.text) }).complete(f.request, f.signal)).rejects.toMatchObject({ reason: 'protocol' }); expect(seen.join('')).toBe('***');

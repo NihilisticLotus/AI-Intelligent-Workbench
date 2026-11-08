@@ -146,6 +146,12 @@ button.task-row { width: 100%; border: 0; background: none; text-align: left; fo
 /* 输入区工具条：权限级别按钮的提示态 */
 .compose-bar .btn[disabled], .compose-bar .perm-chip[disabled] { opacity: 0.5; cursor: not-allowed; filter: none; }
 .composer .offline-note { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); padding: 6px 12px; border-radius: var(--r-card); background: var(--bg-2); font-size: var(--fs-13); color: var(--fg-2); }
+.composer .offline-note.is-down { align-items: flex-start; padding: 12px; background: var(--err-weak); color: var(--fg-1); line-height: 1.5; }
+.composer .offline-note > svg.i { flex: none; }
+.composer .offline-note.is-down > svg.i { margin-top: 2px; color: var(--err); }
+.composer .offline-copy { flex: 1; min-width: 0; }
+.composer .offline-copy strong { display: block; margin-bottom: 4px; font-size: var(--fs-14); }
+.composer .offline-note .btn { flex: none; align-self: center; }
 .switcher button[disabled] { cursor: not-allowed; color: var(--fg-3); }
 .popover.switch-pop { bottom: calc(100% + 8px); left: 0; }
 .popover .opt[aria-disabled="true"] { cursor: default; color: var(--fg-3); }

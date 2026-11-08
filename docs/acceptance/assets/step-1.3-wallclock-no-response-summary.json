@@ -1,0 +1,28 @@
+{
+  "taskId": "t_-VEriPhuiKmy",
+  "status": "paused",
+  "sessionStartedAt": 1794120140667,
+  "firstNoticeAfterMs": 60668,
+  "noticeElapsedMs": [
+    60668,
+    180954,
+    301231,
+    421544,
+    541862
+  ],
+  "noticeIdentityCount": 1,
+  "errorElapsedMs": [
+    600517
+  ],
+  "errorCodes": [
+    "agent.no_response"
+  ],
+  "userMessages": 1,
+  "promptCalls": 1,
+  "cancelCalls": 1,
+  "toolStarts": 0,
+  "approvals": 0,
+  "independentServices": 0,
+  "independentRequests": 0,
+  "workspaceFiles": []
+}

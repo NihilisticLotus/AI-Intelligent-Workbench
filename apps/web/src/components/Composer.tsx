@@ -111,7 +111,9 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
     }catch(e){cancelPendingSwitch(task.id);setSendErr(asApiError(e));}
   };
 
-  const placeholder = !online ? '正在重新连接，恢复后可以继续发送'
+  const serviceStopped = conn === 'down';
+  const placeholder = serviceStopped ? '工作台服务已停止，重新启动后可以继续发送'
+    : !online ? '正在重新连接，恢复后可以继续发送'
     : task.status === 'waiting' ? '有审批等你处理，处理后 Agent 会继续'
     : working ? 'Agent 正在工作，完成后可以继续对话；需要时可以点“停止”'
     : blocking ? '处理上面的提示后，发一条消息就能继续（会自动恢复会话）'
@@ -122,7 +124,13 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
     <div className="composer">
       <div className="composer-inner">
         {!online ? (
-          <div className="offline-note" role="status"><Icon name="refresh" />{conn==='down'?'工作台服务已停止，对话不会丢。双击桌面上的“启动 AI Console”可以重新打开；打开后这里会自动恢复。':'和服务的连接断开了，正在重新连接…恢复后会自动补齐对话。'}{conn==='down'&&platform.restartGateway?<button type="button" className="btn" onClick={()=>void platform.restartGateway!()}>重新启动</button>:null}</div>
+          <div className={'offline-note' + (serviceStopped ? ' is-down' : '')} role={serviceStopped ? 'alert' : 'status'}>
+            <Icon name={serviceStopped ? 'alert' : 'refresh'} />
+            <div className="offline-copy">
+              {serviceStopped ? <><strong>工作台服务已停止</strong><span>对话不会丢。双击桌面上的“启动 AI Console”可以重新打开；打开后这里会自动恢复。</span></> : '和服务的连接断开了，正在重新连接…恢复后会自动补齐对话。'}
+            </div>
+            {serviceStopped && platform.restartGateway ? <button type="button" className="btn" onClick={() => void platform.restartGateway!()}>重新启动</button> : null}
+          </div>
         ) : null}
         {blocking && !working ? <div className="composer-error"><TaskError error={blocking} task={task} compact /></div> : null}
         {sendErr ? <div className="composer-error"><ErrorNotice error={sendErr} ctx={{ taskId: task.id, kind: task.agent, busy: working }} onDismiss={() => setSendErr(null)} onAction={() => setSendErr(null)} /></div> : null}

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { type IndependentDiscoveryState, type IndependentModel, type IndependentService } from '@aic/protocol';
+import { type IndependentDiscoveryDiagnostics, type IndependentDiscoveryState, type IndependentModel, type IndependentService } from '@aic/protocol';
 import { api } from '../state/app';
 import { Dialog, ErrorNotice, asApiError } from '../components/ui';
 import { capabilityLabels, capabilityText, latestRequest, sourceLabels } from '../lib/independent';
 import { toast } from '../state/ui';
 import { ApiRequestError } from '../api/http';
+
+const discoveryStageLabels = {prepare:'检查配置与准备请求',service_request:'读取服务目录',service_parse:'解析服务模型列表',catalog_request:'读取公共目录',snapshot:'核对并保存预览'} satisfies Record<IndependentDiscoveryDiagnostics['stage'],string>;
 
 /** 打开只读取缓存；网络获取和追加导入均需用户明确点击。 */
 export function IndependentDiscoveryDialog({ initialService, close, saved }: {initialService:IndependentService;close:()=>void;saved:()=>Promise<void>}) {
@@ -49,6 +51,11 @@ export function IndependentDiscoveryDialog({ initialService, close, saved }: {in
     {error?<div ref={errorRef} tabIndex={-1}><ErrorNotice error={error}/></div>:null}
     {conflict?<p className="form-problem">旧预览已停止提交。请点击“载入最新配置与缓存”，核对地址后重新获取并勾选。</p>:null}
     {state?.lastError?<p className="form-problem">上次获取失败（{new Date(state.lastError.at).toLocaleString('zh-CN')}）：{state.lastError.message}。旧预览保留，需重新获取成功后导入。</p>:null}
+    {state?.lastError?<details><summary>查看本次获取诊断</summary>{state.lastError.diagnostics?<>
+      <p>失败阶段：{discoveryStageLabels[state.lastError.diagnostics.stage]} · HTTP 状态：{state.lastError.diagnostics.httpStatus ?? '未确认'}</p>
+      <p>服务请求尝试 {state.lastError.diagnostics.serviceRequests} 次 · 公共目录请求尝试 {state.lastError.diagnostics.publicCatalogRequests} 次 · 已解析 {state.lastError.diagnostics.parsedPages} 页</p>
+      <p className="form-note">次数表示工作台发起的读取尝试，不证明上游收到或计费。诊断不包含响应正文、响应头或密钥。</p>
+    </>:<p className="form-note">这条历史记录未包含诊断，阶段、次数和 HTTP 状态未确认。不会自动重试获取。</p>}</details>:null}
     {snapshot?<>
       <p role="status">{snapshot.items.length} 个候选 · {snapshot.pageCount} 页 · {snapshot.requestCount} 次请求 · 获取 {new Date(snapshot.fetchedAt).toLocaleString('zh-CN')} · 失效 {new Date(snapshot.expiresAt).toLocaleString('zh-CN')}{stale?' · 预览不可导入（过期、配置变化或上次获取失败）':''}</p>
       {snapshot.notices.length?<ul>{snapshot.notices.map((notice)=><li key={notice}>{notice}</li>)}</ul>:null}

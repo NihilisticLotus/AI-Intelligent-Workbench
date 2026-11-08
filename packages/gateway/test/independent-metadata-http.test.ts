@@ -36,6 +36,10 @@ describe('受限模型元数据 HTTP', () => {
     let calls = 0; const target = await fixture((_req,res) => { calls++; res.writeHead(302, {location:'/secret'}); res.end('fixture-key'); });
     await expect(readMetadataJson({...target,publicCatalog:false,headers:{Authorization:'Bearer fixture-key'}})).rejects.toThrow('重定向已拒绝'); expect(calls).toBe(1);
   });
+  it.each(['invalid-json','invalid-type'])('已收到 HTTP 200 的 %s 读取失败保留状态且丢弃正文与响应头', async(kind) => {
+    const target=await fixture((_req,res)=>{res.writeHead(200,{'content-type':kind==='invalid-type'?'text/html':'application/json','x-private-fixture':'fixture-header-secret'});res.end('fixture-body-secret');});
+    await expect(readMetadataJson({...target,publicCatalog:false})).rejects.toMatchObject({status:200,message:kind==='invalid-type'?'元数据接口未返回 JSON':'元数据内容无法识别'});
+  });
   it('地址、公共目录认证与固定目录路径在连接前拒绝', async () => {
     const target = await fixture((_req,res) => res.end());
     await expect(readMetadataJson({...target,url:new URL('/other/models',target.base),publicCatalog:false})).rejects.toThrow('请求目标');

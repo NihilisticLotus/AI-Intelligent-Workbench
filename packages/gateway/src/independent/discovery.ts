@@ -1,7 +1,7 @@
 // 发现只读取元数据；预览与导入分开，任何目录内容都不能更改请求目标。
 import {
   DiscoverIndependentModelsBody, IndependentDiscoveryState, IndependentDiscoverySnapshot, ImportIndependentModelsBody,
-  ErrorCode, type IndependentDiscoveredModel,
+  ErrorCode, type IndependentDiscoveredModel, type IndependentDiscoveryDiagnostics,
 } from '@aic/protocol';
 import type { Db } from '../db';
 import { AppError, Errors, newId } from '../util';
@@ -33,6 +33,7 @@ export class IndependentDiscovery {
     if (row && Date.now() - Number(row.attempted_at) < (row.last_error_json ? 30_000 : 10_000)) throw Errors.rateLimited('获取过于频繁，请稍后重试');
     const controller = new AbortController(); this.running.set(serviceId,controller);
     const timer = setTimeout(() => controller.abort(),30_000); timer.unref();
+    const diagnostics: IndependentDiscoveryDiagnostics = {stage:'prepare',serviceRequests:0,publicCatalogRequests:0,parsedPages:0,httpStatus:null};
     try {
       this.db.run('INSERT INTO independent_discoveries(service_id,attempted_at) VALUES (?,?) ON CONFLICT(service_id) DO UPDATE SET attempted_at=excluded.attempted_at',serviceId,Date.now());
       const {key} = await this.catalog.discoveryCredentials(serviceId,body.expectedConfigRevision);
@@ -46,9 +47,13 @@ export class IndependentDiscovery {
       const items: IndependentDiscoveredModel[] = []; const notices: string[] = []; const ids = new Set<string>(); const cursors = new Set<string>();
       let skipped = 0; let pageCount = 0; let requestCount = 0;
       for (;;) {
+        diagnostics.stage='prepare'; diagnostics.httpStatus=null;
         this.check(serviceId,body.expectedConfigRevision); if(controller.signal.aborted) throw new MetadataHttpError('元数据读取已取消或超时');
-        requestCount++; const result = await this.read({url:new URL(url),base,publicCatalog:false,headers,signal:controller.signal});
-        const page = parseEndpointPage(service,result.json,url.href,result.digest); pageCount++; skipped += page.skipped; notices.push(...page.notices);
+        diagnostics.stage='service_request'; diagnostics.serviceRequests++; requestCount++;
+        const result = await this.read({url:new URL(url),base,publicCatalog:false,headers,signal:controller.signal});
+        // 元数据客户端只在 HTTP 200 且有限 JSON 读取成功时返回。
+        diagnostics.httpStatus=200; diagnostics.stage='service_parse';
+        const page = parseEndpointPage(service,result.json,url.href,result.digest); pageCount++; diagnostics.parsedPages=pageCount; skipped += page.skipped; notices.push(...page.notices);
         for (const item of page.items) {
           if (ids.has(item.remoteModelId)) throw new MetadataHttpError('模型分页重复 ID，未保存本次预览'); ids.add(item.remoteModelId);
           if (items.length < 500) items.push(item); else skipped++;
@@ -60,13 +65,16 @@ export class IndependentDiscovery {
       }
       if (skipped) notices.push(`有 ${skipped} 个条目无效或超过上限，未加入预览`);
       if (body.includeCatalog) {
+        diagnostics.stage='prepare'; diagnostics.httpStatus=null;
         this.check(serviceId,body.expectedConfigRevision);
         if (controller.signal.aborted) throw new MetadataHttpError('元数据读取已取消或超时');
         try {
-          requestCount++; const result = await this.read({base:new URL('https://models.dev'),url:new URL(MODEL_CATALOG_URL),publicCatalog:true,signal:controller.signal});
+          diagnostics.stage='catalog_request'; diagnostics.httpStatus=null; diagnostics.publicCatalogRequests++; requestCount++;
+          const result = await this.read({base:new URL('https://models.dev'),url:new URL(MODEL_CATALOG_URL),publicCatalog:true,signal:controller.signal});
           notices.push(...supplementCatalog(service,items,result.json,result.digest));
         } catch { notices.push('公共目录读取失败或结构不兼容，仅保留本次接口声明；没有降级套用旧目录'); }
       }
+      diagnostics.stage='snapshot'; diagnostics.httpStatus=null;
       this.check(serviceId,body.expectedConfigRevision);
       if (controller.signal.aborted) throw new MetadataHttpError('元数据读取已取消或超时');
       const at = Date.now(); const snapshot = IndependentDiscoverySnapshot.parse({id:newId('ids'),serviceId,configRevision:service.configRevision,items,skipped,pageCount,requestCount,fetchedAt:at,expiresAt:at+24*60*60*1000,includeCatalog:body.includeCatalog,notices:[...new Set(notices)].slice(0,32)});
@@ -74,7 +82,8 @@ export class IndependentDiscovery {
       return this.state(serviceId);
     } catch (error) {
       const message = error instanceof AppError || error instanceof MetadataHttpError ? error.message : '元数据结构无法识别，未替换上次预览';
-      if (!this.closed && this.db.get('SELECT id FROM independent_services WHERE id=?',serviceId)) this.db.run('UPDATE independent_discoveries SET last_error_json=? WHERE service_id=?',JSON.stringify({message,at:Date.now()}),serviceId);
+      if (error instanceof MetadataHttpError && error.status !== null && Number.isInteger(error.status) && error.status >= 100 && error.status <= 599) diagnostics.httpStatus=error.status;
+      if (!this.closed && this.db.get('SELECT id FROM independent_services WHERE id=?',serviceId)) this.db.run('UPDATE independent_discoveries SET last_error_json=? WHERE service_id=?',JSON.stringify({message,at:Date.now(),diagnostics}),serviceId);
       if (error instanceof AppError) throw error;
       throw new AppError(502,{code:ErrorCode.IndependentDiscoveryFailed,message,actions:[]});
     } finally {clearTimeout(timer);this.running.delete(serviceId);}

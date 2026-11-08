@@ -1,9 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { CreateIndependentServiceBody, IndependentBaseUrl, IndependentService, IndependentCapabilityEvidence, IndependentCapabilityPatch, IndependentDefault, PatchIndependentServiceBody, EventEnvelope, DiscoverIndependentModelsBody, ImportIndependentModelsBody, IndependentDiscoveredModel } from './index';
+import { CreateIndependentServiceBody, IndependentBaseUrl, IndependentService, IndependentCapabilityEvidence, IndependentCapabilityPatch, IndependentDefault, PatchIndependentServiceBody, EventEnvelope, DiscoverIndependentModelsBody, ImportIndependentModelsBody, IndependentDiscoveredModel, IndependentDiscoveryState, IndependentDiscoveryDiagnostics } from './index';
 
 const service = { name: '服务一', protocol: 'chat_completions', baseUrl: 'https://example.com/api/v1', authentication: 'api_key', apiVersion: null, providerId: null, plan: null, enabled: true };
 const evidence = { id: 'e', field: 'imageInput', value: false, kind: 'endpoint', scope: { serviceId: 's', configRevision: 1, protocol: 'chat_completions', apiVersion: null, providerId: null, plan: null, remoteModelId: 'model' }, sourceUrl: 'https://example.com/api/v1/models', sourceVersion: 'fixture-v1', fieldPath: 'data.image', observedAt: 1, expiresAt: 2 };
 describe('独立模型配置协议', () => {
+  it('发现诊断可选且有界，不接受响应正文、任意阶段或秘密字段', () => {
+    const old = {snapshot:null,stale:true,lastError:{message:'历史失败',at:1}};
+    expect(IndependentDiscoveryState.parse(old)).toEqual(old);
+    const diagnostics = {stage:'service_parse',serviceRequests:1,publicCatalogRequests:0,parsedPages:0,httpStatus:200};
+    expect(IndependentDiscoveryState.parse({...old,lastError:{...old.lastError,diagnostics}}).lastError?.diagnostics).toEqual(diagnostics);
+    for (const change of [{stage:'fixture-secret'},{serviceRequests:11},{publicCatalogRequests:2},{parsedPages:-1},{httpStatus:600},{body:'fixture-secret'},{headers:{Authorization:'fixture-secret'}}]) expect(IndependentDiscoveryDiagnostics.safeParse({...diagnostics,...change}).success).toBe(false);
+  });
   it('发现请求须明确修订与公共目录选择，导入只接受快照身份和唯一勾选项', () => {
     expect(DiscoverIndependentModelsBody.safeParse({expectedConfigRevision:1}).success).toBe(false);
     expect(DiscoverIndependentModelsBody.parse({expectedConfigRevision:1,includeCatalog:false}).includeCatalog).toBe(false);

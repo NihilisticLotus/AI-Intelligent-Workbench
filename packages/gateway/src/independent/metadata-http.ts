@@ -93,7 +93,7 @@ export async function readMetadataJson(input: {
           for await (const chunk of body) { size += chunk.length; if (size > maxBytes) throw new MetadataHttpError('解压后元数据超过体积限制'); chunks.push(Buffer.from(chunk)); }
           if (!res.complete) throw new MetadataHttpError('元数据响应不完整');
           const bytes = Buffer.concat(chunks); resolve({ json: parseMetadataJson(bytes,publicCatalog ? 1_000_000 : 500_000), digest: createHash('sha256').update(bytes).digest('hex') });
-        })().catch((error) => { res.destroy(); decoder?.destroy(); reject(error instanceof MetadataHttpError ? error : new MetadataHttpError('元数据内容无法识别')); });
+        })().catch((error) => { res.destroy(); decoder?.destroy(); reject(new MetadataHttpError(error instanceof MetadataHttpError ? error.message : '元数据内容无法识别',res.statusCode ?? null)); });
       });
       request.on('error', (error) => reject(error instanceof MetadataHttpError ? error : new MetadataHttpError(controller.signal.aborted ? '元数据读取已取消或超时' : '元数据连接失败')));
       request.end();

@@ -782,9 +782,18 @@ export const IndependentDiscoverySnapshot = z.object({
   fetchedAt: Ts, expiresAt: Ts, includeCatalog: z.boolean(), notices: z.array(z.string().max(300)).max(32),
 }).strict();
 export type IndependentDiscoverySnapshot = z.infer<typeof IndependentDiscoverySnapshot>;
+// 诊断只包含固定阶段、尝试计数与已确认状态，不接收上游正文、字段名或响应头。
+export const IndependentDiscoveryDiagnostics = z.object({
+  stage: z.enum(['prepare', 'service_request', 'service_parse', 'catalog_request', 'snapshot']),
+  serviceRequests: z.number().int().nonnegative().max(10),
+  publicCatalogRequests: z.number().int().nonnegative().max(1),
+  parsedPages: z.number().int().nonnegative().max(10),
+  httpStatus: z.number().int().min(100).max(599).nullable(),
+}).strict();
+export type IndependentDiscoveryDiagnostics = z.infer<typeof IndependentDiscoveryDiagnostics>;
 export const IndependentDiscoveryState = z.object({
   snapshot: IndependentDiscoverySnapshot.nullable(), stale: z.boolean(),
-  lastError: z.object({ message: z.string().max(300), at: Ts }).strict().nullable(),
+  lastError: z.object({ message: z.string().max(300), at: Ts, diagnostics: IndependentDiscoveryDiagnostics.optional() }).strict().nullable(),
 }).strict();
 export type IndependentDiscoveryState = z.infer<typeof IndependentDiscoveryState>;
 export const ImportIndependentModelsBody = z.object({

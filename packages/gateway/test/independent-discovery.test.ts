@@ -15,6 +15,36 @@ async function setup(reader: typeof readMetadataJson = async () => ({json:{data:
   const route = `/independent/services/${service.id}`; return {t:gw,token,service,route,s:gw.gw.services};
 }
 describe('模型发现预览与追加导入', () => {
+  it('实际 HTTP 200 结构失败持久化阶段和一次尝试，不保存正文或改模型', async () => {
+    let calls=0;const server=createServer((_req,res)=>{calls++;res.writeHead(200,{'content-type':'application/json','x-private-fixture':'fixture-response-secret'});res.end('{"error":"fixture-body-secret","private_field":"fixture-key-secret"}');});servers.push(server);await new Promise<void>((r)=>server.listen(0,'127.0.0.1',r));
+    const {s,t,token,route,service}=await setup(readMetadataJson,{protocol:'responses',baseUrl:`http://127.0.0.1:${(server.address() as {port:number}).port}/api/v1`});
+    const model=s.independent.createModel(service.id,{remoteModelId:'m',name:'人工模型'});s.independent.setDefault({selection:{serviceId:service.id,modelId:model.id}});
+    const before=JSON.stringify({service:s.independent.getService(service.id),models:s.independent.listModels(service.id),defaults:s.independent.getDefault()});
+    expect((await t.api('POST',route+'/discovery',{token,body})).status).toBe(502);expect(calls).toBe(1);
+    const cached=await t.api('GET',route+'/discovery',{token});expect(cached.json.snapshot).toBeNull();expect(cached.json.lastError.diagnostics).toEqual({stage:'service_parse',serviceRequests:1,publicCatalogRequests:0,parsedPages:0,httpStatus:200});
+    expect(JSON.stringify({service:s.independent.getService(service.id),models:s.independent.listModels(service.id),defaults:s.independent.getDefault()})).toBe(before);
+    const persisted=JSON.stringify(s.db.all('SELECT * FROM independent_discoveries'))+JSON.stringify(s.db.all('SELECT * FROM events'));
+    for(const secret of ['fixture-body-secret','fixture-response-secret','fixture-key-secret','private_field']){expect(persisted).not.toContain(secret);expect(cached.text).not.toContain(secret);}
+    expect((await t.api('POST',route+'/discovery',{token,body})).status).toBe(429);expect(calls).toBe(1);
+  });
+  it('第二页 HTTP 失败记录两次尝试与一页已解析，保留旧成功快照', async () => {
+    let calls=0;let fail=false;const {s,service}=await setup(async()=>{calls++;if(!fail)return {json:{data:[{id:'old'}],has_more:false},digest:'fixture'};if(calls===2)return {json:{data:[{id:'new'}],has_more:true,last_id:'new'},digest:'fixture'};throw new MetadataHttpError('元数据接口返回 HTTP 503',503);},{protocol:'anthropic_messages',apiVersion:'2026-10-21'});
+    const good=await s.independentDiscovery.refresh(service.id,body);s.db.run('UPDATE independent_discoveries SET attempted_at=0');fail=true;
+    await expect(s.independentDiscovery.refresh(service.id,body)).rejects.toThrow('503');expect(calls).toBe(3);
+    const state=s.independentDiscovery.state(service.id);expect(state.snapshot).toEqual(good.snapshot);expect(state.stale).toBe(true);expect(state.lastError?.diagnostics).toEqual({stage:'service_request',serviceRequests:2,publicCatalogRequests:0,parsedPages:1,httpStatus:503});
+  });
+  it('连接无响应与发请求前缺密钥分别记录未知状态和零尝试', async () => {
+    const reader=vi.fn(async()=>{throw new MetadataHttpError('元数据连接失败');});const {s,service}=await setup(reader);
+    await expect(s.independentDiscovery.refresh(service.id,body)).rejects.toThrow('连接失败');expect(s.independentDiscovery.state(service.id).lastError?.diagnostics).toEqual({stage:'service_request',serviceRequests:1,publicCatalogRequests:0,parsedPages:0,httpStatus:null});
+    const other=await s.independent.createService({name:'缺密钥',protocol:'responses',baseUrl:'https://example.com/v1',authentication:'api_key',apiVersion:null,providerId:null,plan:null,enabled:true});
+    await expect(s.independentDiscovery.refresh(other.id,body)).rejects.toThrow('尚未保存');expect(reader).toHaveBeenCalledOnce();expect(s.independentDiscovery.state(other.id).lastError?.diagnostics).toEqual({stage:'prepare',serviceRequests:0,publicCatalogRequests:0,parsedPages:0,httpStatus:null});
+  });
+  it('旧失败记录读取不补写推断诊断，重新打开仍保持原值', async () => {
+    const {s,service,t,route}=await setup();await s.independentDiscovery.refresh(service.id,body);
+    const old={message:'历史固定失败',at:1};s.db.run('UPDATE independent_discoveries SET last_error_json=? WHERE service_id=?',JSON.stringify(old),service.id);
+    const dir=t.dataDir;await t.gw.close();gw=await startGw({metadataReader:async()=>{throw new Error('不应联网');}},dir);const token=await gw.pair();
+    const state=await gw.api('GET',route+'/discovery',{token});expect(state.json.lastError).toEqual(old);expect(state.json.stale).toBe(true);
+  });
   it('实际本机接口发现、缓存与导入均走 REST，不修改默认或原模型', async () => {
     let calls=0; const server=createServer((req,res)=>{calls++;expect(req.url).toBe('/v1/models');res.writeHead(200,{'content-type':'application/json'});res.end('{"data":[{"id":"m"},{"id":"n"}]}');});servers.push(server);await new Promise<void>((r)=>server.listen(0,'127.0.0.1',r));
     const baseUrl=`http://127.0.0.1:${(server.address() as {port:number}).port}/v1`;

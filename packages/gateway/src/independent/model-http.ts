@@ -7,9 +7,9 @@ import { IndependentBaseUrl } from '@aic/protocol';
 import { metadataAddressAllowed, parseMetadataJson } from './metadata-http';
 
 export class ModelTransportError extends Error {
-  constructor(readonly reason: 'request' | 'network' | 'cancelled' | 'timed_out' | 'limit' | 'protocol' | 'authentication' | 'quota' | 'upstream', readonly status: number | null = null) {
+  constructor(readonly reason: 'request' | 'network' | 'cancelled' | 'timed_out' | 'limit' | 'context' | 'protocol' | 'authentication' | 'quota' | 'upstream', readonly status: number | null = null) {
     const messages = { request: '模型请求参数或能力不满足条件', network: '模型服务连接失败', cancelled: '模型连接已取消', timed_out: '模型连接已超时',
-      limit: '模型传输内容超过本地限制', protocol: '模型服务返回不完整或无法识别的协议内容', authentication: '模型服务拒绝认证，请核对该服务设置',
+      limit: '模型传输内容超过本地限制', context: '输入量未知或超过上下文预算，请核对输入限制或整理会话', protocol: '模型服务返回不完整或无法识别的协议内容', authentication: '模型服务拒绝认证，请核对该服务设置',
       quota: '模型服务额度或请求频率受限', upstream: '模型服务暂时无法完成请求' };
     super(messages[reason]);
   }
@@ -17,6 +17,22 @@ export class ModelTransportError extends Error {
 export const modelJson = (raw: string) => {
   try { return parseMetadataJson(Buffer.from(raw), 100_000); } catch { throw new ModelTransportError('protocol'); }
 };
+
+/** 边编码边限额，重复大图引用不能先拼出无限大的 JSON 再检查。 */
+export function modelBody(value: unknown, limit = 24 * 1024 * 1024) {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 24 * 1024 * 1024) throw new ModelTransportError('request');
+  const parts: string[] = []; let bytes = 0;
+  const put = (part: string) => { bytes += Buffer.byteLength(part); if (bytes > limit) throw new ModelTransportError('limit'); parts.push(part); };
+  const encode = (v: unknown) => {
+    if (v === null || typeof v === 'string' || typeof v === 'boolean' || typeof v === 'number' && Number.isFinite(v)) { put(JSON.stringify(v)); return; }
+    if (Array.isArray(v)) { put('['); for (let i = 0; i < v.length; i++) { if (i) put(','); encode(v[i] ?? null); } put(']'); return; }
+    if (v && typeof v === 'object') { put('{'); let first = true; for (const [key, item] of Object.entries(v)) {
+      if (item === undefined) continue; if (!first) put(','); first = false; put(JSON.stringify(key)); put(':'); encode(item);
+    } put('}'); return; }
+    throw new ModelTransportError('request');
+  };
+  encode(value); return parts.join('');
+}
 
 /** SSE 行按 UTF-8、CR / LF 和多行 data 解析；事件不是工具执行授权。 */
 export class ModelSse {
@@ -50,7 +66,7 @@ export class ModelSse {
 }
 
 export async function postModel(input: {
-  base: URL; endpoint: 'chat/completions' | 'responses' | 'messages'; headers: Record<string, string>; body: string;
+  base: URL; endpoint: 'chat/completions' | 'responses' | 'messages' | 'responses/input_tokens' | 'messages/count_tokens'; headers: Record<string, string>; body: string;
   signal: AbortSignal; timeoutMs: number; onEvent: (data: string, event: string) => boolean; onJson: (json: unknown) => void;
   lookup?: typeof lookup;
 }) {

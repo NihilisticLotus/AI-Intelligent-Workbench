@@ -868,6 +868,24 @@ export const IndependentContextCheckpoint = z.object({
   summary: IndependentText, createdAt: Ts,
 }).strict();
 export type IndependentContextCheckpoint = z.infer<typeof IndependentContextCheckpoint>;
+/** 发送前的输入检查策略；本地上限和图片估算不是模型规格或供应商账单。 */
+export const IndependentContextPolicy = z.object({
+  mode: z.enum(['local', 'endpoint']),
+  safetyTokens: z.number().int().min(0).max(1_000_000).optional(),
+  localInputLimit: z.number().int().positive().max(1_000_000_000).optional(),
+  imageTokensPerImage: z.number().int().positive().max(100_000_000).optional(),
+}).strict();
+export type IndependentContextPolicy = z.infer<typeof IndependentContextPolicy>;
+export const IndependentContextReport = z.object({
+  requestHash: z.string().regex(/^[a-f0-9]{64}$/), method: z.enum(['local_bytes', 'endpoint']),
+  estimatedInputTokens: z.number().int().nonnegative().max(1_000_000_000_000).nullable(),
+  imageCount: z.number().int().nonnegative().max(20_000), imageTokensPerImage: z.number().int().positive().max(100_000_000).nullable(),
+  outputTokens: z.number().int().positive().max(10_000_000), safetyTokens: z.number().int().min(0).max(1_000_000),
+  modelInputLimit: z.number().int().positive().nullable(), contextWindow: z.number().int().positive().nullable(),
+  localInputLimit: z.number().int().positive().nullable(), counterRequests: z.number().int().min(0).max(1),
+  status: z.enum(['ready', 'input_unknown', 'limits_unknown', 'input_exceeded', 'window_exceeded']),
+}).strict();
+export type IndependentContextReport = z.infer<typeof IndependentContextReport>;
 /** 内部模型传输参数；不猜测档位或将一种协议的预算转换成另一种。 */
 export const IndependentGenerationOptions = z.object({
   effort: z.string().min(1).max(100).optional(), stream: z.boolean().optional(),
@@ -911,6 +929,9 @@ export const IndependentModelDelta = z.object({ type: z.enum(['text_delta', 'thi
 export type IndependentModelDelta = z.infer<typeof IndependentModelDelta>;
 export interface IndependentModelDriverConfig {
   tools?: IndependentModelToolDefinition[]; generation?: IndependentGenerationOptions;
+  context?: IndependentContextPolicy;
+  /** 同步交给可信宿主持久化；失败时不能继续生成，不作为公开内容事件。 */
+  onContext?: (binding: IndependentModelBinding, report: IndependentContextReport) => void;
   loadAttachment?: (taskId: string, attachmentId: string, signal: AbortSignal) => Promise<IndependentModelAttachment>;
   onDelta?: (binding: IndependentModelBinding, delta: IndependentModelDelta) => void;
   timeoutMs?: number;

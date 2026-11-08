@@ -5,6 +5,7 @@ import {
 } from '@aic/protocol';
 import { Errors } from '../util';
 import { IndependentConversationStore } from './conversation';
+import { ModelTransportError } from './model-http';
 
 /** 隔离迟到返回，不将 AbortSignal 当作底层网络 / 进程已收尾的证明。 */
 function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
@@ -88,11 +89,12 @@ export class IndependentTurnEngine {
       try {
         reply = IndependentAssistantMessage.parse(await abortable(this.model.complete({ binding: turn.binding, ...context,
           maxOutputTokens: turn.limits.maxOutputTokens - turn.outputTokens! }, signal), signal));
-      } catch {
+      } catch (error) {
         // 正式传输可等待实际连接收尾，不能在 abortable 先返回时释放会话运行资格。
         await this.model.waitForIdle?.(turn.binding);
         if (signal.aborted) return finish(stopped());
         try { await this.model.checkBinding(turn.binding); } catch { return finish('configuration_changed'); }
+        if (error instanceof ModelTransportError && error.reason === 'context') return finish('context_limit');
         return finish('model_error');
       }
       if (isStopped()) return finish(stopped());

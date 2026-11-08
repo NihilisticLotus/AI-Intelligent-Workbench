@@ -1,24 +1,28 @@
 // 独立模型驱动只使用固定任务目录凭据；没有 SDK 认证发现、环境 Key 或其他服务兜底。
 import type { lookup } from 'node:dns';
-import { IndependentModelRequest, IndependentModelAttachment, IndependentGenerationOptions, IndependentModelToolDefinition,
+import { IndependentModelRequest, IndependentModelAttachment, IndependentGenerationOptions, IndependentModelToolDefinition, IndependentContextPolicy,
   type IndependentModelDriver, type IndependentModelDriverConfig, type IndependentModelBinding, type IndependentCapabilityField } from '@aic/protocol';
 import { StreamRedactor } from '@aic/adapters';
 import { sniffAttachment } from '../attachments';
 import { IndependentCatalog } from './catalog';
-import { ModelTransportError, postModel } from './model-http';
+import { ModelTransportError, modelBody, postModel } from './model-http';
 import { modelWire } from './model-wire';
+import { contextCounter, contextCountReply, contextInput, contextReport } from './context';
 
 export class IndependentApiDriver implements IndependentModelDriver {
   private active = new Map<string, Promise<unknown>>();
   private config: IndependentModelDriverConfig;
   constructor(private catalog: IndependentCatalog, config: IndependentModelDriverConfig = {}, private resolver?: typeof lookup) {
     this.config = { ...config, tools: config.tools ? structuredClone(config.tools.map((t) => IndependentModelToolDefinition.parse(t))) : undefined,
-      generation: config.generation ? IndependentGenerationOptions.parse(config.generation) : undefined };
+      generation: config.generation ? IndependentGenerationOptions.parse(config.generation) : undefined,
+      context: config.context ? IndependentContextPolicy.parse(config.context) : undefined };
     if (config.timeoutMs !== undefined && (!Number.isInteger(config.timeoutMs) || config.timeoutMs < 1 || config.timeoutMs > 600_000)) throw new ModelTransportError('request');
   }
   checkBinding(binding: IndependentModelBinding) {
-    const current = this.catalog.bound(binding.taskId);
-    if (Object.keys(current).some((key) => current[key as keyof typeof current] !== binding[key as keyof typeof current])) throw new ModelTransportError('request');
+    try {
+      const current = this.catalog.bound(binding.taskId);
+      if (Object.keys(current).some((key) => current[key as keyof typeof current] !== binding[key as keyof typeof current])) throw new ModelTransportError('request');
+    } catch { throw new ModelTransportError('request'); }
   }
   complete(input: IndependentModelRequest, signal: AbortSignal) {
     let request: IndependentModelRequest;
@@ -71,15 +75,32 @@ export class IndependentApiDriver implements IndependentModelDriver {
     const emit = (delta: Parameters<NonNullable<IndependentModelDriverConfig['onDelta']>>[1]) => {
       check(); const text = redactor.push(delta.type, delta.text); if (text) this.config.onDelta?.(request.binding, { type: delta.type, text });
     };
-    const wire = modelWire(request, service, model, attachments, emit); check();
+    const wire = modelWire(request, service, model, attachments, emit), body = modelBody(wire.body); check();
     const headers: Record<string, string> = {};
     if (service.protocol === 'anthropic_messages') {
       if (!service.apiVersion || !/^\d{4}-\d{2}-\d{2}$/.test(service.apiVersion)) throw new ModelTransportError('request');
       headers['anthropic-version'] = service.apiVersion; if (key) headers['x-api-key'] = key;
     } else if (key) headers.Authorization = `Bearer ${key}`;
+    const deadline = performance.now() + (this.config.timeoutMs ?? 120_000);
+    const remaining = () => { check(); const ms = Math.ceil(deadline - performance.now()); if (ms < 1) throw new ModelTransportError('timed_out'); return ms; };
     try {
-      await postModel({ base: new URL(service.baseUrl), endpoint: wire.endpoint, headers, body: JSON.stringify(wire.body), signal,
-        timeoutMs: this.config.timeoutMs ?? 120_000, onEvent: wire.event, onJson: wire.json, lookup: this.resolver });
+      if (this.config.context) {
+        const policy = this.config.context; let counted: number | undefined;
+        if (policy.mode === 'endpoint') {
+          const endpoint = contextCounter(service.protocol);
+          if (contextReport(service.protocol, wire.body, model, policy).status !== 'limits_unknown') {
+            await postModel({ base: new URL(service.baseUrl), endpoint, headers,
+              body: modelBody(contextInput(service.protocol, wire.body)), signal, timeoutMs: remaining(),
+              onEvent: () => { throw new ModelTransportError('protocol'); }, onJson: (value) => { counted = contextCountReply(service.protocol, value); }, lookup: this.resolver });
+            check();
+          }
+        }
+        const report = contextReport(service.protocol, wire.body, model, policy, counted);
+        this.config.onContext?.(structuredClone(request.binding), structuredClone(report)); check();
+        if (report.status !== 'ready') throw new ModelTransportError('context');
+      }
+      await postModel({ base: new URL(service.baseUrl), endpoint: wire.endpoint, headers, body, signal,
+        timeoutMs: remaining(), onEvent: wire.event, onJson: wire.json, lookup: this.resolver });
       check(); const reply = wire.result();
       if (reply.toolCalls.some((call) => !request.tools!.some((definition) => definition.name === call.name))) throw new ModelTransportError('protocol');
       // 若不可信上游回显服务 Key，不让其进入工具参数、持久会话或界面；不能静默篡改签名续传。

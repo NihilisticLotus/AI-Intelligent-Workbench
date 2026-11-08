@@ -6,8 +6,8 @@
 
 | 文档 | 说明 |
 |---|---|
-| [design/design.md](design/design.md) | 架构设计 v0.4.21：第三方设置归属、独立任务、自有循环、三协议、预算与恢复；DeepSeek Harness 参考、文件工具版本、同配置续传兼容、旧工作台密钥清理及有限目录诊断 |
-| [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.10：统一选择器、附件、独立服务与模型、能力来源、任务策略 / 预算、私有审批、恢复、失败片段收尾、旧密钥清理、目录诊断及明显的服务停止提示 |
+| [design/design.md](design/design.md) | 架构设计 v0.4.22：第三方设置归属、独立任务、自有循环、三协议、预算与恢复；DeepSeek Harness 参考、文件工具版本、旧密钥清理、有限诊断及已有模型官方能力预览 |
+| [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.11：统一选择器、附件、独立服务与模型、能力来源、任务策略 / 预算、私有审批、恢复、目录诊断、服务停止提示及已有模型能力预览 |
 | [prototype/index.html](prototype/index.html) | 可点击原型（双击打开）：工作台、看板、Agent、资产、生成、自动化、监控、能力 |
 
 ## 调研
@@ -34,6 +34,6 @@
 | 目录 | 说明 |
 |---|---|
 | [acceptance/](acceptance/) | 每一步的验收记录 |
-| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 稳定、补验与输入框：部分通过；独立 Agent 真实文本、创建审批、流式替换、Flash 图片 / 换模型续接及 HTTP 取消 / 重启恢复通过；Windows 拖入与演示通知已获人工确认、内嵌受控停服提示 1618ms；真实目录识别失败、旧工具根因未知，CodeBuddy 原生十分钟最小化后的真实审批、Windows 通知、无刷新卡片及拒绝已通过（ISSUE-0014 fixed）；Claude 与干净 Windows 环境仍有未验证项。两份旧工作台密钥已按授权清理，目录和历史保留，详见各追加节与问题单 |
+| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 稳定、补验与输入框：部分通过；独立 Agent 真实文本、创建审批、流式替换、Flash 图片 / 换模型续接及 HTTP 取消 / 重启恢复通过；Windows 拖入与演示通知已获人工确认、内嵌受控停服提示 1618ms；已有模型零上游官方能力预览与人工值保留通过，真实目录识别仍失败、精确上下文未知、旧工具根因未知，CodeBuddy 原生十分钟最小化后的真实审批、Windows 通知、无刷新卡片及拒绝已通过（ISSUE-0014 fixed）；Claude 与干净 Windows 环境仍有未验证项。两份旧工作台密钥已按授权清理，目录和历史保留，详见各追加节与问题单 |
 | [devlog/](devlog/) | 开发笔记，每月一个文件，只追加 |
 | [issues/](issues/README.md) | 问题收纳：总表 + 每个问题一个文件 |

@@ -8,6 +8,7 @@ import { AppError, Errors, newId } from '../util';
 import type { IndependentCatalog } from './catalog';
 import { MetadataHttpError, readMetadataJson } from './metadata-http';
 import { MODEL_CATALOG_URL, parseEndpointPage, supplementCatalog } from './metadata-parser';
+import { supplementOfficial } from './official-metadata';
 
 export class IndependentDiscovery {
   private running = new Map<string,AbortController>(); private closed = false;
@@ -36,34 +37,40 @@ export class IndependentDiscovery {
     const diagnostics: IndependentDiscoveryDiagnostics = {stage:'prepare',serviceRequests:0,publicCatalogRequests:0,parsedPages:0,httpStatus:null};
     try {
       this.db.run('INSERT INTO independent_discoveries(service_id,attempted_at) VALUES (?,?) ON CONFLICT(service_id) DO UPDATE SET attempted_at=excluded.attempted_at',serviceId,Date.now());
-      const {key} = await this.catalog.discoveryCredentials(serviceId,body.expectedConfigRevision);
-      const base = new URL(service.baseUrl); const url = new URL(`${base.href.replace(/\/$/,'')}/models`);
-      const headers: Record<string,string> = {};
-      if (service.protocol === 'anthropic_messages') {
-        if (!service.apiVersion || !/^\d{4}-\d{2}-\d{2}$/.test(service.apiVersion)) throw Errors.badRequest('Messages 发现需要明确填写日期格式的 API 版本');
-        headers['anthropic-version'] = service.apiVersion; if(key) headers['x-api-key'] = key;
-        url.searchParams.set('limit','100');
-      } else if (key) headers.Authorization = `Bearer ${key}`;
       const items: IndependentDiscoveredModel[] = []; const notices: string[] = []; const ids = new Set<string>(); const cursors = new Set<string>();
       let skipped = 0; let pageCount = 0; let requestCount = 0;
-      for (;;) {
-        diagnostics.stage='prepare'; diagnostics.httpStatus=null;
-        this.check(serviceId,body.expectedConfigRevision); if(controller.signal.aborted) throw new MetadataHttpError('元数据读取已取消或超时');
-        diagnostics.stage='service_request'; diagnostics.serviceRequests++; requestCount++;
-        const result = await this.read({url:new URL(url),base,publicCatalog:false,headers,signal:controller.signal});
-        // 元数据客户端只在 HTTP 200 且有限 JSON 读取成功时返回。
-        diagnostics.httpStatus=200; diagnostics.stage='service_parse';
-        const page = parseEndpointPage(service,result.json,url.href,result.digest); pageCount++; diagnostics.parsedPages=pageCount; skipped += page.skipped; notices.push(...page.notices);
-        for (const item of page.items) {
-          if (ids.has(item.remoteModelId)) throw new MetadataHttpError('模型分页重复 ID，未保存本次预览'); ids.add(item.remoteModelId);
-          if (items.length < 500) items.push(item); else skipped++;
+      if (body.source === 'configured') {
+        items.push(...this.catalog.listModels(serviceId).map(model => ({ remoteModelId: model.remoteModelId, name: model.name, evidence: [] })));
+        notices.push('仅识别已添加模型的能力，不请求服务列表、不读取密钥，不验证账号权限或完整模型列表；勾选公共目录时另有一次无认证读取');
+      } else {
+        const {key} = await this.catalog.discoveryCredentials(serviceId,body.expectedConfigRevision);
+        const base = new URL(service.baseUrl); const url = new URL(`${base.href.replace(/\/$/,'')}/models`);
+        const headers: Record<string,string> = {};
+        if (service.protocol === 'anthropic_messages') {
+          if (!service.apiVersion || !/^\d{4}-\d{2}-\d{2}$/.test(service.apiVersion)) throw Errors.badRequest('Messages 发现需要明确填写日期格式的 API 版本');
+          headers['anthropic-version'] = service.apiVersion; if(key) headers['x-api-key'] = key;
+          url.searchParams.set('limit','100');
+        } else if (key) headers.Authorization = `Bearer ${key}`;
+        for (;;) {
+          diagnostics.stage='prepare'; diagnostics.httpStatus=null;
+          this.check(serviceId,body.expectedConfigRevision); if(controller.signal.aborted) throw new MetadataHttpError('元数据读取已取消或超时');
+          diagnostics.stage='service_request'; diagnostics.serviceRequests++; requestCount++;
+          const result = await this.read({url:new URL(url),base,publicCatalog:false,headers,signal:controller.signal});
+          // 元数据客户端只在 HTTP 200 且有限 JSON 读取成功时返回。
+          diagnostics.httpStatus=200; diagnostics.stage='service_parse';
+          const page = parseEndpointPage(service,result.json,url.href,result.digest); pageCount++; diagnostics.parsedPages=pageCount; skipped += page.skipped; notices.push(...page.notices);
+          for (const item of page.items) {
+            if (ids.has(item.remoteModelId)) throw new MetadataHttpError('模型分页重复 ID，未保存本次预览'); ids.add(item.remoteModelId);
+            if (items.length < 500) items.push(item); else skipped++;
+          }
+          if (!page.next) break;
+          if (cursors.has(page.next)) throw new MetadataHttpError('模型分页游标重复，未保存本次预览'); cursors.add(page.next);
+          if (pageCount >= 10 || items.length >= 500) {notices.push('已达到 10 页或 500 个模型的预览上限，列表可能不完整');break;}
+          url.searchParams.set('after_id',page.next);
         }
-        if (!page.next) break;
-        if (cursors.has(page.next)) throw new MetadataHttpError('模型分页游标重复，未保存本次预览'); cursors.add(page.next);
-        if (pageCount >= 10 || items.length >= 500) {notices.push('已达到 10 页或 500 个模型的预览上限，列表可能不完整');break;}
-        url.searchParams.set('after_id',page.next);
+        if (skipped) notices.push(`有 ${skipped} 个条目无效或超过上限，未加入预览`);
       }
-      if (skipped) notices.push(`有 ${skipped} 个条目无效或超过上限，未加入预览`);
+      notices.push(...supplementOfficial(service,items));
       if (body.includeCatalog) {
         diagnostics.stage='prepare'; diagnostics.httpStatus=null;
         this.check(serviceId,body.expectedConfigRevision);
@@ -72,12 +79,12 @@ export class IndependentDiscovery {
           diagnostics.stage='catalog_request'; diagnostics.httpStatus=null; diagnostics.publicCatalogRequests++; requestCount++;
           const result = await this.read({base:new URL('https://models.dev'),url:new URL(MODEL_CATALOG_URL),publicCatalog:true,signal:controller.signal});
           notices.push(...supplementCatalog(service,items,result.json,result.digest));
-        } catch { notices.push('公共目录读取失败或结构不兼容，仅保留本次接口声明；没有降级套用旧目录'); }
+        } catch { notices.push('公共目录读取失败或结构不兼容，仅保留本次已识别资料；没有降级套用旧目录'); }
       }
       diagnostics.stage='snapshot'; diagnostics.httpStatus=null;
       this.check(serviceId,body.expectedConfigRevision);
       if (controller.signal.aborted) throw new MetadataHttpError('元数据读取已取消或超时');
-      const at = Date.now(); const snapshot = IndependentDiscoverySnapshot.parse({id:newId('ids'),serviceId,configRevision:service.configRevision,items,skipped,pageCount,requestCount,fetchedAt:at,expiresAt:at+24*60*60*1000,includeCatalog:body.includeCatalog,notices:[...new Set(notices)].slice(0,32)});
+      const at = Date.now(); const snapshot = IndependentDiscoverySnapshot.parse({id:newId('ids'),serviceId,configRevision:service.configRevision,...(body.source ? {source:body.source} : {}),items,skipped,pageCount,requestCount,fetchedAt:at,expiresAt:at+24*60*60*1000,includeCatalog:body.includeCatalog,notices:[...new Set(notices)].slice(0,32)});
       this.db.run('UPDATE independent_discoveries SET snapshot_json=?,last_error_json=NULL WHERE service_id=?',JSON.stringify(snapshot),serviceId);
       return this.state(serviceId);
     } catch (error) {

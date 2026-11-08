@@ -772,12 +772,13 @@ export const IndependentModelBinding = IndependentSelection.extend({ taskId: Id,
 export type IndependentModelBinding = z.infer<typeof IndependentModelBinding>;
 
 // 独立发现只返回规范化的候选与证据，不接受远端路由或认证模板。
-export const DiscoverIndependentModelsBody = z.object({ expectedConfigRevision: Revision, includeCatalog: z.boolean() }).strict();
+export const DiscoverIndependentModelsBody = z.object({ expectedConfigRevision: Revision, includeCatalog: z.boolean(), source: z.enum(['service', 'configured']).optional() }).strict();
 export type DiscoverIndependentModelsBody = z.infer<typeof DiscoverIndependentModelsBody>;
 export const IndependentDiscoveredModel = CreateIndependentModelBody.extend({ evidence: z.array(IndependentCapabilityEvidence).max(256) }).strict();
 export type IndependentDiscoveredModel = z.infer<typeof IndependentDiscoveredModel>;
 export const IndependentDiscoverySnapshot = z.object({
   id: Id, serviceId: Id, configRevision: Revision, items: z.array(IndependentDiscoveredModel).max(500),
+  source: DiscoverIndependentModelsBody.shape.source,
   skipped: z.number().int().nonnegative(), pageCount: z.number().int().nonnegative().max(10), requestCount: z.number().int().nonnegative().max(11),
   fetchedAt: Ts, expiresAt: Ts, includeCatalog: z.boolean(), notices: z.array(z.string().max(300)).max(32),
 }).strict();

@@ -152,3 +152,14 @@ usage 按每次请求存输入、输出、推理、缓存读写等原始可得�
 - 网络实现依据 Node 24.14 的 [HTTP](https://nodejs.org/download/release/v24.14.0/docs/api/http.html) 和 [net.BlockList](https://nodejs.org/download/release/v24.14.0/docs/api/net.html)；本机实际连接 / 压缩 / DNS / 超时测试另记验收，不以 API 文档替代运行证据。
 
 本轮未读取第三方凭据、未改第三方设置、未新增依赖、未发真实模型消息。用户 API 的列表、套餐、真实能力、完整独立执行器及付费验证继续未验证；实现和 GUI 结果见 [step-1.3](../acceptance/step-1.3.md)。
+
+
+## 2026-11-08 智谱 Responses 官方资料核对
+
+本次只浏览公开文档，没有读取服务密钥、模型目录或生成接口。依据：
+
+- [Responses 指南](https://docs.bigmodel.cn/cn/guide/develop/responses/introduction)：基础地址是 open.bigmodel.cn/api/v1；端点表没有列出模型目录，但缺少条目不足以证明 /models 不支持，更不能解释此前实际结构失败。该协议默认 max，none / minimal、low / medium、xhigh 有独立映射说明，不沿用 Chat 档位。
+- [创建 Response](https://docs.bigmodel.cn/api-reference/response/%E5%88%9B%E5%BB%BA-response)：明确 max_output_tokens 上限 131072，提供 tools 与 stream。这里取协议声明，不据此推断账号权限、流用量或结构化输出支持。
+- [GLM-5.3](https://docs.bigmodel.cn/cn/guide/models/text/glm-5.3)、[GLM-5.3-Flash](https://docs.bigmodel.cn/cn/guide/models/vlm/glm-5.3-flash)：前者文本，后者支持图片 / 视频 / 文本 / 文件输入与文本输出；均把上下文标为 1M，没有精确整数，不把它自行换算为 1000000 或 1048576。Chat 的思考说明与 Responses 参数不能混用；暂不录入 thinkingCanDisable。
+
+新增内置适配仅对应以上精确服务 / 模型，核对时间固定，7 天后标过期；本地预览不会重新获取资料或更新日期。实际上下文、账号可用性、目录返回结构和新导入能力下的付费生成未验证。实现与界面规则见 phase-1 9.32，实际结果见 step-1.3 最新节。

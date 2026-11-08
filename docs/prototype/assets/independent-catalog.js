@@ -22,8 +22,18 @@
     root.querySelectorAll('[data-default]').forEach((b) => b.onclick = () => { const [i, j] = b.dataset.default.split(':').map(Number); selected = { service: services[i], model: services[i].models[j] }; render(); });
     root.querySelectorAll('[data-discover]').forEach((b) => b.onclick = () => {
       const service = services[Number(b.dataset.discover)];
-      const candidates = [{id:'demo-vision',name:'图片候选（虚构）',context:'32000',image:'true',effort:'low, medium',auto:true},{id:'demo-unknown',name:'未知候选（虚构）',context:'',image:'',effort:'',auto:true}];
-      window.aicModal({title:'获取模型与能力（原型）',body:`<p>这里只显示虚构候选，不请求网络。正式版由用户明确获取，最多 10 次服务列表请求及可选 1 次匿名目录请求，不发模型消息。</p><p>导入只追加所选项，已有名称、人工值和默认值保留；正式版可核对逐字段来源、冲突、获取时间和过期状态。</p><p class="muted">正式版失败时可展开“查看本次获取诊断”：固定阶段、尝试计数、已解析页数与 HTTP 状态；旧记录保持未确认，不展示上游正文 / 响应头，不自动重试。此原型只演示成功候选。</p><div class="form-row"><label for="pic-search">搜索候选</label><input id="pic-search" class="input" type="search"></div>${candidates.map((m,i)=>`<label data-candidate-row="${i}" style="display:block;padding:12px"><input type="checkbox" data-candidate="${i}"> ${esc(m.name)} · ${esc(m.id)} · ${m.context ? '窗口 32000，图片支持，low / medium（模拟目录）' : '能力未知'}</label>`).join('')}`,onOpen(d){d.querySelector('#pic-search').oninput=(e)=>{const q=e.target.value.toLowerCase();d.querySelectorAll('[data-candidate-row]').forEach((row)=>{const m=candidates[Number(row.dataset.candidateRow)];row.style.display=(m.id+m.name).toLowerCase().includes(q)?'block':'none';});};},actions:[{label:'取消'},{label:'导入勾选项',kind:'primary',onClick(d){
+      let candidates = [];
+      window.aicModal({title:'获取模型与能力（原型）',body:`<p>这里只演示虚构资料，不请求网络。正式版获取服务列表最多 10 次服务请求；识别已有模型不访问服务、不读取密钥，可选公共目录另有 1 次匿名读取，不发模型消息。</p><div class="form-row"><label for="pic-source">识别范围</label><select id="pic-source" class="select"><option value="service">获取服务模型列表</option><option value="configured">识别已添加模型（无需服务目录）</option></select></div><p>正式版内置官方资料只精确匹配已核对服务、协议和模型；显示固定核对时间与有效期，未知仍未知，不证明账号可用。已有名称、人工值、启停和默认值保留。</p><button id="pic-preview" class="btn primary">生成演示预览</button><p id="pic-preview-status" role="status">尚未生成预览；本原型不联网</p><p class="muted">正式版失败时可展开“查看本次获取诊断”：固定阶段、尝试计数、已解析页数与 HTTP 状态；旧记录保持未确认，不展示上游正文 / 响应头，不自动重试。</p><div class="form-row"><label for="pic-search">搜索候选</label><input id="pic-search" class="input" type="search"></div><div id="pic-candidates"></div>`,onOpen(d){
+        const filter=()=>{const q=d.querySelector('#pic-search').value.toLowerCase();d.querySelectorAll('[data-candidate-row]').forEach(row=>{const m=candidates[Number(row.dataset.candidateRow)];row.style.display=(m.id+m.name).toLowerCase().includes(q)?'block':'none';});};
+        d.querySelector('#pic-search').oninput=filter;
+        d.querySelector('#pic-source').onchange=()=>{candidates=[];d.querySelector('#pic-candidates').innerHTML='';d.querySelector('#pic-preview-status').textContent='识别范围已改变，请重新生成演示预览';};
+        d.querySelector('#pic-preview').onclick=()=>{
+          const configured=d.querySelector('#pic-source').value==='configured';
+          candidates=configured?service.models.map(m=>({...m})): [{id:'demo-vision',name:'图片候选（虚构）',context:'32000',image:'true',effort:'low, medium',auto:true},{id:'demo-unknown',name:'未知候选（虚构）',context:'',image:'',effort:'',auto:true}];
+          d.querySelector('#pic-preview-status').textContent=configured?'已有模型能力预览（不含完整服务列表）；示例服务无已核对官方资料，保留人工 / 未知':'虚构服务列表预览；不代表真实模型';
+          d.querySelector('#pic-candidates').innerHTML=candidates.map((m,i)=>`<label data-candidate-row="${i}" style="display:block;padding:12px"><input type="checkbox" data-candidate="${i}"> ${esc(m.name)} · ${esc(m.id)} · ${configured?'保留已有记录':m.context?'窗口 32000，图片支持，low / medium（模拟目录）':'能力未知'}</label>`).join('');filter();
+        };
+      },actions:[{label:'取消'},{label:'导入勾选项',kind:'primary',onClick(d){
         const checked=[...d.querySelectorAll('[data-candidate]:checked')];if(!checked.length){window.aicToast('请先勾选候选模型','attn');return false;}
         checked.forEach((input)=>{const m=candidates[Number(input.dataset.candidate)];if(!service.models.some((old)=>old.id===m.id))service.models.push({...m});});render();
       }}]});

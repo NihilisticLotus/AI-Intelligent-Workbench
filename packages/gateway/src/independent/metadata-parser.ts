@@ -6,7 +6,7 @@ import { capabilityScope } from './capabilities';
 
 export const objectOf = (v: unknown): Record<string, unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string,unknown> : {};
 const atPath = (value: unknown, path: string) => path.split('.').reduce<unknown>((v, key) => objectOf(v)[key], value);
-export function evidenceBuilder(service: IndependentService, modelId: string, sourceUrl: string, version: string, at: number, kind: 'endpoint' | 'catalog' = 'endpoint') {
+export function evidenceBuilder(service: IndependentService, modelId: string, sourceUrl: string, version: string, at: number, kind: 'endpoint' | 'catalog' | 'official' = 'endpoint') {
   // 证据 URL 沿用既有无查询协议；分页参数不属于能力来源身份，实际固定目录参数由解析器版本限定。
   const source = new URL(sourceUrl); source.search = '';
   const evidence: IndependentCapabilityEvidence[] = [];

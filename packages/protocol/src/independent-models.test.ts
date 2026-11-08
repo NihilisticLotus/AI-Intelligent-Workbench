@@ -1,9 +1,19 @@
 import { describe, expect, it } from 'vitest';
-import { CreateIndependentServiceBody, IndependentBaseUrl, IndependentService, IndependentCapabilityEvidence, IndependentCapabilityPatch, IndependentDefault, PatchIndependentServiceBody, EventEnvelope, DiscoverIndependentModelsBody, ImportIndependentModelsBody, IndependentDiscoveredModel, IndependentDiscoveryState, IndependentDiscoveryDiagnostics } from './index';
+import { CreateIndependentServiceBody, IndependentBaseUrl, IndependentService, IndependentCapabilityEvidence, IndependentCapabilityPatch, IndependentDefault, PatchIndependentServiceBody, EventEnvelope, DiscoverIndependentModelsBody, ImportIndependentModelsBody, IndependentDiscoveredModel, IndependentDiscoveryState, IndependentDiscoveryDiagnostics, IndependentDiscoverySnapshot } from './index';
 
 const service = { name: '服务一', protocol: 'chat_completions', baseUrl: 'https://example.com/api/v1', authentication: 'api_key', apiVersion: null, providerId: null, plan: null, enabled: true };
 const evidence = { id: 'e', field: 'imageInput', value: false, kind: 'endpoint', scope: { serviceId: 's', configRevision: 1, protocol: 'chat_completions', apiVersion: null, providerId: null, plan: null, remoteModelId: 'model' }, sourceUrl: 'https://example.com/api/v1/models', sourceVersion: 'fixture-v1', fieldPath: 'data.image', observedAt: 1, expiresAt: 2 };
 describe('独立模型配置协议', () => {
+  it('识别范围只追加可选字段，旧请求与旧快照原样保留，已有模型允许零网络读取', () => {
+    const body={expectedConfigRevision:1,includeCatalog:false};
+    expect(DiscoverIndependentModelsBody.parse(body)).toEqual(body);
+    expect(DiscoverIndependentModelsBody.parse({...body,source:'configured'}).source).toBe('configured');
+    for(const source of ['automatic',null,1])expect(DiscoverIndependentModelsBody.safeParse({...body,source}).success).toBe(false);
+    expect(DiscoverIndependentModelsBody.safeParse({...body,source:'configured',apiKey:'fixture'}).success).toBe(false);
+    const old={id:'s',serviceId:'service',configRevision:1,items:[],skipped:0,pageCount:0,requestCount:0,fetchedAt:1,expiresAt:2,includeCatalog:false,notices:[]};
+    expect(IndependentDiscoverySnapshot.parse(old)).toEqual(old);
+    expect(IndependentDiscoverySnapshot.parse({...old,source:'configured'}).requestCount).toBe(0);
+  });
   it('发现诊断可选且有界，不接受响应正文、任意阶段或秘密字段', () => {
     const old = {snapshot:null,stale:true,lastError:{message:'历史失败',at:1}};
     expect(IndependentDiscoveryState.parse(old)).toEqual(old);

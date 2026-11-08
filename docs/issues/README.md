@@ -41,5 +41,5 @@
 | [ISSUE-0035](ISSUE-0035-concurrent-hardlink-write.md) | 文件共享锁不能阻止校验后的并发硬链接 | fixed | 安全边界 | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0036](ISSUE-0036-model-cancel-resource-barrier.md) | 模型取消在连接收尾前释放会话资格 | fixed | bug | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0037](ISSUE-0037-model-terminal-consistency.md) | 矛盾的 Responses 终态仍可能返回工具调用 | fixed | bug | 2026-11-08 | 2026-11-08 |
-| [ISSUE-0038](ISSUE-0038-large-base64-stack.md) | 合法大附件触发 base64 校验栈溢出 | investigating | bug | 2026-11-08 | |
-| [ISSUE-0039](ISSUE-0039-attachment-read-path.md) | 附件下载跟随目录联接且未复核上传摘要 | investigating | 安全边界 | 2026-11-08 | |
+| [ISSUE-0038](ISSUE-0038-large-base64-stack.md) | 合法大附件触发 base64 校验栈溢出 | fixed | bug | 2026-11-08 | 2026-11-08 |
+| [ISSUE-0039](ISSUE-0039-attachment-read-path.md) | 附件下载跟随目录联接且未复核上传摘要 | fixed | 安全边界 | 2026-11-08 | 2026-11-08 |

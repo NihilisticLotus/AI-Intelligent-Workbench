@@ -1,0 +1,52 @@
+{
+  "checkedAt": "2026-11-08T13:36:19.864Z",
+  "sourceCommit": "2857f15",
+  "task": {
+    "id": "t_EJ6sTe3BpAHD",
+    "agent": "codex",
+    "status": "review",
+    "permission_level": "readonly",
+    "model": "gpt-6-luna",
+    "effort": "low",
+    "profile_id": null
+  },
+  "createdModel": null,
+  "createdEffort": null,
+  "userMessages": 2,
+  "allPromptsMatch": true,
+  "assistantMessages": [
+    "OK",
+    "OK"
+  ],
+  "sessions": 1,
+  "sessionProfiles": [
+    "pf_local_codex"
+  ],
+  "sessionStarts": 1,
+  "configs": [
+    {
+      "model": "gpt-5.6-sol",
+      "effort": "low"
+    },
+    {
+      "model": "gpt-6-luna",
+      "effort": "low"
+    }
+  ],
+  "lunaReported": true,
+  "tools": 0,
+  "approvals": 0,
+  "errors": 0,
+  "modelFailures": [],
+  "syntheticFiles": [
+    "AGENTS.md",
+    "CLAUDE.md"
+  ],
+  "otherGenerationMessages": 0,
+  "independentV2RequestCount": 11,
+  "realFailedModelMarkerVerified": false,
+  "additionalManualReserveCny": 2,
+  "cumulativeManualReserveCny": 20,
+  "actualCost": null,
+  "internalRequests": null
+}

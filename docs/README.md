@@ -34,6 +34,6 @@
 | 目录 | 说明 |
 |---|---|
 | [acceptance/](acceptance/) | 每一步的验收记录 |
-| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 稳定、补验与输入框：部分通过；独立 Agent 真实文本对话通过，工具兼容失败已停，视觉未验证；[ISSUE-0042](issues/ISSUE-0042-bigmodel-responses-tool-failure.md)、[ISSUE-0043](issues/ISSUE-0043-terminal-fragment-progress.md) 记录本轮发现，旧配置清理仍待完成 |
+| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 稳定、补验与输入框：部分通过；独立 Agent 真实文本与新任务完整响应文件审批通过，原流式兼容仍调查、视觉未验证；[ISSUE-0042](issues/ISSUE-0042-bigmodel-responses-tool-failure.md)、[ISSUE-0043](issues/ISSUE-0043-terminal-fragment-progress.md) 记录本轮发现，旧配置清理仍待完成 |
 | [devlog/](devlog/) | 开发笔记，每月一个文件，只追加 |
 | [issues/](issues/README.md) | 问题收纳：总表 + 每个问题一个文件 |

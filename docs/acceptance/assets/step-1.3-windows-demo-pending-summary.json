@@ -1,0 +1,51 @@
+{
+  "task": {
+    "id": "t_ILbtDCFqfxhx",
+    "agent": "fake",
+    "status": "waiting",
+    "model": "demo-fast",
+    "permission": "ask"
+  },
+  "elapsedBeforeSendMs": 610025,
+  "firstApprovalAfterTimerMs": 611993,
+  "userMessages": 1,
+  "approvalRequests": 2,
+  "approvals": [
+    {
+      "id": "a_BVk-uW3hQYdv",
+      "status": "allowed",
+      "created_at": 1794122980038,
+      "decided_at": 1794122988973
+    },
+    {
+      "id": "a_UAeWoeJJfhxP",
+      "status": "pending",
+      "created_at": 1794122989958,
+      "decided_at": null
+    }
+  ],
+  "decisions": [
+    {
+      "at": 1794122988974,
+      "status": "allowed",
+      "optionId": "allow",
+      "deviceName": "Chrome 浏览器（本机）"
+    }
+  ],
+  "toolStarts": 4,
+  "errors": 0,
+  "usageEvents": 0,
+  "realGenerations": 0,
+  "scope": "内置演示；原生通知与 Chrome 观察等待用户反馈",
+  "workspaceFiles": [
+    "AGENTS.md",
+    "CLAUDE.md"
+  ],
+  "controllerDeviceCleanup": {
+    "deviceName": "1.3 零模型 Windows 补验控制器",
+    "revoked": true,
+    "oldTokenCheck": 401,
+    "localTokenFileRemoved": true,
+    "at": 1794123134500
+  }
+}

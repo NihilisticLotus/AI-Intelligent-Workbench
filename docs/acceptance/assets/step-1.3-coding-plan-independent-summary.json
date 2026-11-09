@@ -1,0 +1,43 @@
+{
+  "checkedAt": "2026-11-09T14:05:42.092Z",
+  "sourceCommit": "94393c4",
+  "task": "t_oBmPkoUf1d_u",
+  "project": "独立 Agent 单条补验（临时空目录）",
+  "attemptsTotal": 31,
+  "taskAttempts": [
+    {
+      "ordinal": 1,
+      "state": "succeeded",
+      "reservedMicros": 200000,
+      "currency": "CNY",
+      "outcome": "succeeded",
+      "usage": {
+        "inputTokens": 100,
+        "outputTokens": 3,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": null
+      }
+    }
+  ],
+  "otherTasksAttempts": 30,
+  "taskStatus": {
+    "status": "review",
+    "agent": "independent",
+    "permission_level": "readonly"
+  },
+  "userMessages": 1,
+  "toolEvents": 0,
+  "errorEvents": 0,
+  "service": {
+    "id": "isv_EcIJVwi76kfS",
+    "config_revision": 1
+  },
+  "network": {
+    "allowFakeIpProxy": true
+  },
+  "manualReserve": {
+    "additionalCny": 0.2,
+    "cumulativeCny": 25.2,
+    "actualCost": null
+  }
+}

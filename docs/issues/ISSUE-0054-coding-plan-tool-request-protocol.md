@@ -57,3 +57,4 @@
 
 - 2026-11-09 开启：Coding Plan 授权下的独立 Agent 真实补验第 1 条消息即 protocol 失败，按停止条件结束整轮。
 - 2026-11-09 离线加入 protocol 固定细分（本单提交见下一条）后，同任务再发 1 条复现：failed / protocol / **reasoning_missing**。智谱返回工具调用时附带的 reasoning 没有 encrypted_content；官方文档的思维链输入是明文 reasoning_text。原因已定位，修法属于设计取舍（A / B / C 见处理方式），等用户决定。本轮真实请求共 2 次，均失败，已停止。
+- 2026-11-09 细分实现提交 **87d85af**。

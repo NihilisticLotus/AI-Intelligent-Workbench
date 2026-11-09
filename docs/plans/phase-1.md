@@ -1248,3 +1248,10 @@ ISSUE-0044 的离线反例确认：仅保存任务预算也会重写绑定创建
 - 网页设置页新增“网络”一节和开关，默认关闭，说明写明范围、代理能看到访问的供应商、第三方 Agent 不受影响。原型设置弹窗、ui-design 5.10、design v0.4.27 同步。
 - 测试：地址规则单元（默认 / 关闭 / 打开 / 公共目录 / 直接 IP / 其他私网与回环）；连接路径（关闭提示、混合拒绝、打开后进入连接阶段）；模型请求同规则；REST 鉴权、校验、持久化、事件与审计、重启保留、损坏按关闭。
 - 打开开关只是放行连接，不代表目录或对话能成功；真实结果仍需用户批准一次读取。
+
+### 9.34 protocol 失败的固定细分（2026-11-09，ISSUE-0054）
+
+- protocol 只增 `IndependentProtocolDetail`（shape / error_payload / unknown_item / tool_arguments / reasoning_missing / status_mismatch / event_order / duplicate_result / no_result / invalid_json / transport / message_invalid），`IndependentRequestSettlement.protocolDetail` 可选、只配 protocol 失败，旧记录不回填。
+- Gateway 的每处严格校验失败都带分类，driver 结算时写入请求账本；不保存上游正文、字段值或工具参数，不放宽任何校验。
+- 网页独立任务“请求记录”显示失败原因与细分；旧记录写“未记录细分”。
+- 首次真实使用即定位 ISSUE-0054：智谱 Responses 带工具调用时 reasoning 缺少 encrypted_content。续传方式的调整待用户决定，不在本节范围。

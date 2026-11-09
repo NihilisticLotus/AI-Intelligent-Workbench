@@ -3,6 +3,7 @@ import type { Task, IndependentTaskOptions, IndependentTaskState, IndependentHis
 import { api, useApp } from '../state/app';
 import { Dialog, ErrorNotice, asApiError, openDialog } from './ui';
 import { toast } from '../state/ui';
+import { requestFailureText } from '../lib/independent';
 import { IndependentTaskConfig } from './independent-task-config';
 
 const idle = (task: Task) => !['running','waiting','queued','merged','discarded'].includes(task.status);
@@ -63,7 +64,7 @@ export function IndependentTaskPanel({ task }: { task: Task }) {
       {state.lastTurn ? <p className="hint">最近回合：模型 {state.lastTurn.modelCalls}/{state.lastTurn.limits.maxModelCalls} 次，工具 {state.lastTurn.toolCalls}/{state.lastTurn.limits.maxToolCalls} 次，输出 {state.lastTurn.outputTokens ?? '未知'}/{state.lastTurn.limits.maxOutputTokens}；状态 {state.lastTurn.status === 'running' ? '执行中' : state.lastTurn.status === 'completed' ? '已完成' : '已停止'}。</p> : null}
       {state.checkpoint ? <details><summary>当前人工总结（截至第 {state.checkpoint.throughSeq} 条）</summary><pre>{state.checkpoint.summary}</pre><p className="hint">来源摘要：{state.checkpoint.sourceHash}。完整原文可在“原始记录与人工总结”中回查。</p></details> : null}
       {state.requests.length ? <details><summary>请求记录（最近 20 条，共 {state.requests.length} 条）</summary><div className="independent-table-scroll"><table><thead><tr><th>序号</th><th>类型</th><th>状态</th><th>输入 / 输出</th><th>预留</th></tr></thead><tbody>
-        {state.requests.slice(-20).reverse().map((r) => <tr key={r.id}><td>{r.ordinal}</td><td>{r.attempt.kind === 'counter' ? '计数' : '生成'}</td><td>{requestText[r.status]}</td><td>{r.settlement?.usage?.inputTokens ?? r.settlement?.countedInputTokens ?? '未知'} / {r.settlement?.usage?.outputTokens ?? '未知'}</td><td>{r.reservedMicros ?? '未设'} {r.currency ?? ''}</td></tr>)}
+        {state.requests.slice(-20).reverse().map((r) => <tr key={r.id}><td>{r.ordinal}</td><td>{r.attempt.kind === 'counter' ? '计数' : '生成'}</td><td>{requestText[r.status]}{requestFailureText(r.settlement) ? `（${requestFailureText(r.settlement)}）` : ''}</td><td>{r.settlement?.usage?.inputTokens ?? r.settlement?.countedInputTokens ?? '未知'} / {r.settlement?.usage?.outputTokens ?? '未知'}</td><td>{r.reservedMicros ?? '未设'} {r.currency ?? ''}</td></tr>)}
       </tbody></table></div></details> : null}
       {state.tools.length ? <details><summary>工具记录（最近 {state.tools.length} 条）</summary><ul>{state.tools.map((t) => <li key={t.id}>{t.toolName === 'command' ? '命令' : '文件修改'}：{toolText[t.state]}{t.fileOutcome ? `；${t.fileOutcome.path}；${t.fileOutcome.message}` : ''}{t.outcome ? `；退出码 ${t.outcome.exitCode ?? '未知'}；输出 ${t.outcome.outputBytes} 字节${t.outcome.truncated ? '（已截断）' : ''}` : ''}</li>)}</ul></details> : null}
     </> : <p role="status">正在读取独立任务状态…</p>}

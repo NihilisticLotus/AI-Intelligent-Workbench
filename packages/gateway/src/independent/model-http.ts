@@ -3,11 +3,12 @@ import { lookup } from 'node:dns';
 import { request as httpRequest, Agent as HttpAgent, type IncomingMessage } from 'node:http';
 import { request as httpsRequest, Agent as HttpsAgent } from 'node:https';
 import { isIP } from 'node:net';
-import { IndependentBaseUrl } from '@aic/protocol';
+import { IndependentBaseUrl, type IndependentProtocolDetail } from '@aic/protocol';
 import { metadataAddressAllowed, parseMetadataJson, type AddressPolicy } from './metadata-http';
 
 export class ModelTransportError extends Error {
-  constructor(readonly reason: 'request' | 'network' | 'cancelled' | 'timed_out' | 'limit' | 'context' | 'protocol' | 'authentication' | 'quota' | 'upstream' | 'budget', readonly status: number | null = null) {
+  /** detail 只在 reason 为 protocol 时使用（ISSUE-0054）：固定分类，不含上游内容 */
+  constructor(readonly reason: 'request' | 'network' | 'cancelled' | 'timed_out' | 'limit' | 'context' | 'protocol' | 'authentication' | 'quota' | 'upstream' | 'budget', readonly status: number | null = null, readonly detail?: IndependentProtocolDetail) {
     const messages = { request: '模型请求参数或能力不满足条件', network: '模型服务连接失败', cancelled: '模型连接已取消', timed_out: '模型连接已超时',
       limit: '模型传输内容超过本地限制', context: '输入量未知或超过上下文预算，请核对输入限制或整理会话', protocol: '模型服务返回不完整或无法识别的协议内容', authentication: '模型服务拒绝认证，请核对该服务设置',
       quota: '模型服务额度或请求频率受限', upstream: '模型服务暂时无法完成请求', budget: '本任务的请求次数或人工金额预留不足，请核对预算后再继续' };
@@ -15,7 +16,7 @@ export class ModelTransportError extends Error {
   }
 }
 export const modelJson = (raw: string) => {
-  try { return parseMetadataJson(Buffer.from(raw), 100_000); } catch { throw new ModelTransportError('protocol'); }
+  try { return parseMetadataJson(Buffer.from(raw), 100_000); } catch { throw new ModelTransportError('protocol', null, 'invalid_json'); }
 };
 
 /** 边编码边限额，重复大图引用不能先拼出无限大的 JSON 再检查。 */
@@ -53,7 +54,7 @@ export class ModelSse {
     return false;
   }
   push(chunk: Uint8Array, final = false) {
-    let text: string; try { text = this.decoder.decode(chunk, { stream: !final }); } catch { throw new ModelTransportError('protocol'); }
+    let text: string; try { text = this.decoder.decode(chunk, { stream: !final }); } catch { throw new ModelTransportError('protocol', null, 'transport'); }
     for (const ch of text) {
       this.bytes += Buffer.byteLength(ch); if (this.bytes > 1024 * 1024) throw new ModelTransportError('limit');
       if (this.cr) { this.cr = false; if (ch === '\n') continue; }
@@ -97,9 +98,9 @@ export async function postModel(input: {
         void (async () => {
           const status = res.statusCode ?? 0;
           if (status !== 200) throw new ModelTransportError(status === 401 || status === 403 ? 'authentication' : status === 402 || status === 429 ? 'quota' : 'upstream', status);
-          if (res.headers['content-encoding'] && res.headers['content-encoding'] !== 'identity') throw new ModelTransportError('protocol');
+          if (res.headers['content-encoding'] && res.headers['content-encoding'] !== 'identity') throw new ModelTransportError('protocol', null, 'transport');
           const mime = String(res.headers['content-type'] ?? ''); const sse = /^text\/event-stream(?:\s*;|$)/i.test(mime);
-          if (!sse && !/^application\/(?:[\w.+-]+\+)?json(?:\s*;|$)/i.test(mime)) throw new ModelTransportError('protocol');
+          if (!sse && !/^application\/(?:[\w.+-]+\+)?json(?:\s*;|$)/i.test(mime)) throw new ModelTransportError('protocol', null, 'transport');
           const max = 16 * 1024 * 1024; if (Number(res.headers['content-length']) > max) throw new ModelTransportError('limit');
           const parser = new ModelSse(input.onEvent); let bytes = 0; const chunks: Buffer[] = [];
           for await (const chunk of res) {
@@ -107,9 +108,9 @@ export async function postModel(input: {
             if (sse) { if (parser.push(chunk)) { resolve(); res.destroy(); return; } }
             else chunks.push(Buffer.from(chunk));
           }
-          if (sse) { parser.push(new Uint8Array(), true); throw new ModelTransportError('protocol'); }
-          if (!res.complete) throw new ModelTransportError('protocol');
-          let value: unknown; try { value = parseMetadataJson(Buffer.concat(chunks), 100_000); } catch { throw new ModelTransportError('protocol'); }
+          if (sse) { parser.push(new Uint8Array(), true); throw new ModelTransportError('protocol', null, 'no_result'); }
+          if (!res.complete) throw new ModelTransportError('protocol', null, 'transport');
+          let value: unknown; try { value = parseMetadataJson(Buffer.concat(chunks), 100_000); } catch { throw new ModelTransportError('protocol', null, 'invalid_json'); }
           input.onJson(value); resolve();
         })().catch((error) => { res.destroy(); reject(error); });
       });

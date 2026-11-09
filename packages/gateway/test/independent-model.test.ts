@@ -287,3 +287,43 @@ describe('独立模型三协议正式传输', () => {
     const reply = await f.driver().complete(f.request, f.signal); expect(reply.text).toBe(text); expect(reply.continuation).toBeUndefined();
   });
 });
+
+// ISSUE-0054：protocol 失败带固定细分，经真实回环 HTTP 与正式 driver；只断言分类，不带上游内容
+describe('protocol 失败的固定细分', () => {
+  const reasoningNoCipher = { type: 'reasoning', id: 'rs-1', summary: [] };
+  const okCall = { ...fn, arguments: '{"path":"a.txt","startLine":1,"maxLines":10}' };
+  it.each([
+    ['unknown_item', responses([{ type: 'web_search_call', id: 'x', status: 'completed' }])],
+    ['reasoning_missing', responses([reasoningNoCipher, okCall])],
+    ['tool_arguments', responses([{ ...fn, arguments: '{not json' }])],
+    ['status_mismatch', responses([{ ...okCall, status: 'in_progress' }])],
+    ['error_payload', { ...responses([]), error: { code: 'fixture-private-code', message: 'fixture-private-text' } }],
+    ['shape', { ...responses([]), output: 'fixture-private-not-a-list' }],
+  ] as const)('完整响应 %s', async (detail, body) => {
+    const f = await fixture('responses', (_req, res) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(body)); });
+    const err = await f.driver({ tools: [tool] }).complete(f.request, f.signal).then(() => null, (e) => e as ModelTransportError);
+    expect(err).toBeInstanceOf(ModelTransportError); expect(err!.reason).toBe('protocol'); expect(err!.detail).toBe(detail);
+    expect(JSON.stringify(err) + String(err)).not.toContain('fixture-private');
+  });
+  it.each([
+    ['status_mismatch', sse({ type: 'response.completed', response: responses([], 'failed') }, 'response.completed')],
+    ['event_order', sse({ type: 'response.output_text.delta', delta: 'x' }, 'response.completed')],
+    ['error_payload', sse({ type: 'error', message: 'fixture-private' }, 'error')],
+    ['no_result', sse({ type: 'response.output_text.delta', delta: '半截' }, 'response.output_text.delta')],
+    ['invalid_json', 'data: {broken\n\n'],
+  ] as const)('流式 %s', async (detail, stream) => {
+    const f = await fixture('responses', (_req, res) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end(stream); });
+    const err = await f.driver({ tools: [tool] }).complete(f.request, f.signal).then(() => null, (e) => e as ModelTransportError);
+    expect(err?.reason).toBe('protocol'); expect(err?.detail).toBe(detail);
+  });
+  it('细分写进请求账本结算；非 protocol 失败不带细分', async () => {
+    const settled: unknown[] = [];
+    const accounting = { reserve: () => 'r1', settle: (_id: string, s: unknown) => { settled.push(s); } };
+    const f = await fixture('responses', (_req, res) => { res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(responses([reasoningNoCipher, okCall]))); });
+    await f.driver({ tools: [tool], accounting } as never).complete(f.request, f.signal).catch(() => {});
+    expect(settled.at(-1)).toEqual({ outcome: 'failed', failure: 'protocol', usage: null, countedInputTokens: null, protocolDetail: 'reasoning_missing' });
+    const g = await fixture('responses', (_req, res) => { res.writeHead(503, { 'Content-Type': 'application/json' }); res.end('{}'); });
+    await g.driver({ tools: [tool], accounting } as never).complete(g.request, g.signal).catch(() => {});
+    expect(settled.at(-1)).toEqual({ outcome: 'failed', failure: 'upstream', usage: null, countedInputTokens: null });
+  });
+});

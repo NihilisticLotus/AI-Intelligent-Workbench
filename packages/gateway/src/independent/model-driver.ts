@@ -94,7 +94,10 @@ export class IndependentApiDriver implements IndependentModelDriver {
       try { check(); result = await run(); }
       catch (error) {
         const reason = error instanceof ModelTransportError ? IndependentRequestFailure.safeParse(error.reason) : undefined;
-        if (id !== undefined) accounting!.settle(id, { outcome: 'failed', failure: reason?.success ? reason.data : 'protocol', usage: null, countedInputTokens: null });
+        const failure = reason?.success ? reason.data : 'protocol';
+        // protocol 失败附带固定分类（ISSUE-0054）；其他失败或旧错误不带
+        const detail = failure === 'protocol' && error instanceof ModelTransportError ? error.detail : undefined;
+        if (id !== undefined) accounting!.settle(id, { outcome: 'failed', failure, usage: null, countedInputTokens: null, ...(detail ? { protocolDetail: detail } : {}) });
         throw error;
       }
       // 结算落盘失败不能再伪造 failed 或重发；遗留 reserved 交给显式恢复处理。

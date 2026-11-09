@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { IndependentCapabilityField, IndependentDiscoveryParseFailure, type IndependentModel, type IndependentService } from '@aic/protocol';
-import { capabilityLabels, capabilityText, discoveryParseFailureText, discoveryRootShapeText, evidenceApplies, latestRequest, overridePatch } from './independent';
+import { capabilityLabels, capabilityText, discoveryParseFailureText, discoveryRootShapeText, evidenceApplies, requestFailureText, latestRequest, overridePatch } from './independent';
 
 describe('独立模型能力编辑', () => {
   it('固定解析分类有中文说明，旧诊断明确未记录，不推断上游结构', () => {
@@ -16,6 +16,13 @@ describe('独立模型能力编辑', () => {
     expect(discoveryRootShapeText({root:'object',data:'object',errorMarker:false,topLevelKeys:1})).toContain('data 字段：对象；没有常见错误标记字段');
     expect(discoveryRootShapeText({root:'array',data:null,errorMarker:null,topLevelKeys:null})).toBe('响应根是数组，不是对象');
     for (const text of [discoveryRootShapeText({root:'object',data:'missing',errorMarker:true,topLevelKeys:2})]) expect(text).not.toMatch(/认证|密钥|欠费|权限/);
+  });
+  it('请求失败原因：protocol 显示细分，旧记录写未记录细分，成功不显示', () => {
+    expect(requestFailureText(null)).toBeNull();
+    expect(requestFailureText({ failure: null })).toBeNull();
+    expect(requestFailureText({ failure: 'upstream' })).toBe('服务暂时不可用');
+    expect(requestFailureText({ failure: 'protocol' })).toBe('返回内容无法识别（未记录细分）');
+    expect(requestFailureText({ failure: 'protocol', protocolDetail: 'reasoning_missing' })).toBe('返回内容无法识别：缺少可续传的思考内容');
   });
   it('16 个协议字段均有中文名称，未知、false、零和空列表各自保留', () => {
     expect(Object.keys(capabilityLabels).sort()).toEqual([...IndependentCapabilityField.options].sort());

@@ -1,5 +1,5 @@
 // 能力值只按协议解释；不根据模型名猜窗口、图片或思考档位。
-import { IndependentCapabilityPatch, type IndependentCapabilityField, type IndependentModel, type IndependentService, type IndependentDiscoveryParseFailure, type IndependentDiscoveryRootShape } from '@aic/protocol';
+import { IndependentCapabilityPatch, type IndependentCapabilityField, type IndependentModel, type IndependentService, type IndependentDiscoveryParseFailure, type IndependentDiscoveryRootShape, type IndependentRequestFailure, type IndependentProtocolDetail } from '@aic/protocol';
 
 const discoveryParseFailureLabels = {
   data_not_array: '响应不符合已接入的模型列表结构', data_limit: '本页模型条目超过解析上限',
@@ -68,4 +68,17 @@ export function evidenceApplies(service: IndependentService, model: IndependentM
 export function latestRequest() {
   let version = 0;
   return { begin: () => ++version, current: (id: number) => id === version, invalidate: () => { version++; } };
+}
+
+const requestFailureLabels = { request: '请求参数或能力不满足', network: '连接失败', cancelled: '已取消', timed_out: '超时', limit: '超过本地传输限制', context: '输入超出预算',
+  protocol: '返回内容无法识别', authentication: '认证失败', quota: '额度或频率受限', upstream: '服务暂时不可用', interrupted: '中断' } satisfies Record<IndependentRequestFailure, string>;
+const protocolDetailLabels = { shape: '结构不是预期类型', error_payload: '响应里带有错误', unknown_item: '未知的输出类型', tool_arguments: '工具参数不合规', reasoning_missing: '缺少可续传的思考内容',
+  status_mismatch: '状态与内容不一致', event_order: '流式事件顺序异常', duplicate_result: '收到重复结果', no_result: '流结束但没有终态', invalid_json: '不是合法 JSON',
+  transport: '内容编码、类型或长度不符', message_invalid: '组装后的回复不合规' } satisfies Record<IndependentProtocolDetail, string>;
+/** 请求失败原因（ISSUE-0054）：protocol 失败显示固定细分；旧记录没有细分时写明未记录，不推断 */
+export function requestFailureText(settlement: { failure: IndependentRequestFailure | null; protocolDetail?: IndependentProtocolDetail } | null | undefined): string | null {
+  if (!settlement?.failure) return null;
+  const base = requestFailureLabels[settlement.failure];
+  if (settlement.failure !== 'protocol') return base;
+  return settlement.protocolDetail ? `${base}：${protocolDetailLabels[settlement.protocolDetail]}` : `${base}（未记录细分）`;
 }

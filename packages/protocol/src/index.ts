@@ -946,11 +946,24 @@ export type IndependentRequestAttempt = z.infer<typeof IndependentRequestAttempt
 export const IndependentRequestFailure = z.enum(['request', 'network', 'cancelled', 'timed_out', 'limit', 'context',
   'protocol', 'authentication', 'quota', 'upstream', 'interrupted']);
 export type IndependentRequestFailure = z.infer<typeof IndependentRequestFailure>;
+/**
+ * protocol 失败的固定分类（2026-11-09，ISSUE-0054）：只说明哪一类严格校验没通过，不含上游正文、字段值或工具参数。
+ * shape：结构不是预期的对象 / 字符串 / 数组；error_payload：上游在成功响应或事件里带了 error；
+ * unknown_item：未知的输出项 / 内容块 / 事件类型；tool_arguments：工具参数不是合法 JSON 或不符合规范；
+ * reasoning_missing：带工具调用时 reasoning 缺少 encrypted_content 或 signature；status_mismatch：终态事件和状态不一致；
+ * event_order：流式事件顺序或索引不合法；duplicate_result：同一请求收到第二个结果；no_result：流结束仍没有终态；
+ * invalid_json：正文不是合法 JSON；transport：内容编码、类型或长度不符；message_invalid：组装后的助手消息不符合协议。
+ */
+export const IndependentProtocolDetail = z.enum(['shape', 'error_payload', 'unknown_item', 'tool_arguments', 'reasoning_missing',
+  'status_mismatch', 'event_order', 'duplicate_result', 'no_result', 'invalid_json', 'transport', 'message_invalid']);
+export type IndependentProtocolDetail = z.infer<typeof IndependentProtocolDetail>;
 export const IndependentRequestSettlement = z.object({
   outcome: z.enum(['succeeded', 'failed', 'interrupted']), failure: IndependentRequestFailure.nullable(),
   usage: IndependentUsage.nullable(), countedInputTokens: z.number().int().min(0).max(1_000_000_000_000).nullable(),
+  /** 只在 failure 为 protocol 时可选出现；旧记录没有 */
+  protocolDetail: IndependentProtocolDetail.optional(),
 }).strict().refine((v) => v.outcome === 'succeeded' ? v.failure === null : v.failure !== null && v.usage === null && v.countedInputTokens === null,
-  '失败或中断请求不能伪造用量');
+  '失败或中断请求不能伪造用量').refine((v) => v.protocolDetail === undefined || v.failure === 'protocol', '协议细分只对应 protocol 失败');
 export type IndependentRequestSettlement = z.infer<typeof IndependentRequestSettlement>;
 export const IndependentRequestRecord = z.object({
   id: Id, taskId: Id, ordinal: z.number().int().min(1).max(1000), binding: IndependentModelBinding,

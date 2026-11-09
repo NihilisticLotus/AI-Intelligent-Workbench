@@ -19,6 +19,12 @@ describe('独立请求预算追加协议', () => {
     expect(IndependentRequestSettlement.parse(failure)).toEqual(failure);
     expect(IndependentRequestSettlement.safeParse({ ...failure, countedInputTokens: 0 }).success).toBe(false);
     expect(IndependentRequestSettlement.safeParse({ ...failure, failure: null }).success).toBe(false);
+    // ISSUE-0054：protocol 细分只追加可选字段，只能配 protocol 失败，只能是固定枚举
+    const proto = { outcome: 'failed', failure: 'protocol', usage: null, countedInputTokens: null };
+    expect(IndependentRequestSettlement.parse({ ...proto, protocolDetail: 'reasoning_missing' }).protocolDetail).toBe('reasoning_missing');
+    expect(IndependentRequestSettlement.parse(proto)).toEqual(proto);
+    expect(IndependentRequestSettlement.safeParse({ ...proto, failure: 'network', protocolDetail: 'shape' }).success).toBe(false);
+    expect(IndependentRequestSettlement.safeParse({ ...proto, protocolDetail: 'fixture-private-body' }).success).toBe(false);
     expect(IndependentTurnStop.parse('request_budget')).toBe('request_budget');
   });
 });

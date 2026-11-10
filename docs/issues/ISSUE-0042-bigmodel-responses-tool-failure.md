@@ -2,12 +2,12 @@
 
 | 项 | 值 |
 |---|---|
-| 状态 | investigating |
+| 状态 | fixed |
 | 类型 | 验收未通过 |
 | 严重程度 | 中 |
 | 发现于 | [step-1.3](../acceptance/step-1.3.md) 独立 Agent 真实补验，基线 335a554 |
 | 开启 | 2026-11-08 |
-| 关闭 | |
+| 关闭 | 2026-11-10 |
 
 ## 现象
 
@@ -53,3 +53,5 @@
 - 2026-11-08 用户批准 a433720 的下一轮后，同一 separate_v2 任务新增 2 条消息 / 4 次生成均 succeeded：glm-5.3 low 流式 read_file → replace_text 私有详情审批 → 成功确认；切换 Flash / max 后真实合成图片识别及原文标记续接成功。证明新工具的流式链路可用，未复测旧 combined_v1 或重放原第三次失败，唯一根因仍未知；保持 investigating。累计真实 6 条消息 / 11 次生成、人工预留 4.4 元，实际账单未知，达到授权范围后停止；详见 step-1.3 新追加结果与截图。
 
 - 2026-11-08 继续离线对照公开创建 Response / 兼容指南：生成式样例的 message.content 对象与现解析器数组不同，但该模板还同时填 completed 与非空 error，无法直接作为真实终态；旧第三次失败没有完整响应，不能将该差异确定为根因。未放宽严格解析、重放旧任务或新增模型请求；当前 separate_v2 既有真实成功证据与旧失败分别保留，保持 investigating，见 step-1.3 剩余门槛节。
+
+- 2026-11-10 在新任务 t_fD3dB8hlcAJg 用 combined_v1 按原条件复现：glm-5.3 连续两次以空参数 {} 调用 write_file，被严格校验拒绝后到达工具上限停止；两次请求都 succeeded，没有 protocol。空参数的原因确认为 combined_v1 顶层 oneOf 的工具定义（换成 separate_v2 即正常，已多次真实通过）。旧任务第三次的 protocol 失败没有复现，最可能是已修复的 ISSUE-0054（智谱不给 encrypted_content），但旧记录无细分，不回填。新任务默认 separate_v2（9.28），旧版本只为历史续传保留，不再改动。关闭为 fixed（处理提交：separate_v2 引入 5e67edd、明文续传 9eb67b3）。

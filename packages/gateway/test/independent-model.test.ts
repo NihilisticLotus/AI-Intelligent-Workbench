@@ -327,3 +327,48 @@ describe('protocol 失败的固定细分', () => {
     expect(settled.at(-1)).toEqual({ outcome: 'failed', failure: 'upstream', usage: null, countedInputTokens: null });
   });
 });
+
+// ISSUE-0054：智谱 Responses 精确范围使用明文 reasoning_text 续传；其他服务仍要求 encrypted_content
+describe('明文思考续传（智谱 Responses）', async () => {
+  const { modelWire } = await import('../src/independent/model-wire');
+  const { plaintextReasoningService } = await import('../src/independent/official-metadata');
+  const zhipu = { id: 's', name: '智谱', revision: 1, configRevision: 1, protocol: 'responses', baseUrl: 'https://open.bigmodel.cn/api/v1', authentication: 'api_key', apiVersion: null, providerId: null, plan: null, enabled: true, hasSecret: true, secretHint: null, createdAt: 1, updatedAt: 1 } as any;
+  const other = { ...zhipu, baseUrl: 'https://api.example.com/v1' };
+  const model = { id: 'm', serviceId: 's', remoteModelId: 'glm-5.3-flash', name: 'f', enabled: true, revision: 1, capabilities: [], createdAt: 1, updatedAt: 1 } as any;
+  const binding = { serviceId: 's', modelId: 'm', taskId: 't', configRevision: 1, modelRevision: 1, createdAt: 1 };
+  const req = (messages: any[]) => ({ binding, systemPrompt: '规则', checkpoint: null, messages, maxOutputTokens: 1024, tools: [tool] }) as any;
+  const plainReason = { type: 'reasoning', id: 'rs', content: [{ type: 'reasoning_text', text: '先读文件' }] };
+  const call = { ...fn, arguments: '{"path":"a.txt"}' };
+  it('只匹配官方精确范围', () => {
+    expect(plaintextReasoningService(zhipu)).toBe(true); expect(plaintextReasoningService({ ...zhipu, baseUrl: 'https://open.bigmodel.cn/api/v1/' })).toBe(true);
+    for (const s of [other, { ...zhipu, protocol: 'chat_completions' }, { ...zhipu, plan: 'x' }, { ...zhipu, apiVersion: '1' }, { ...zhipu, providerId: 'other' }, { ...zhipu, baseUrl: 'https://open.bigmodel.cn/api/coding/paas/v4' }])
+      expect(plaintextReasoningService(s)).toBe(false);
+  });
+  it('智谱：不请求 encrypted_content；带工具的明文思考被接受，并按文档格式在下一轮原样回传', () => {
+    const w = modelWire(req([{ role: 'user', text: '读一下', attachments: [] }]), zhipu, model, new Map(), () => {});
+    expect(w.body.include).toBeUndefined(); expect(w.body.store).toBe(false);
+    w.json(responses([plainReason, call]));
+    const reply = w.result(); expect(reply.stopReason).toBe('tool_calls'); expect(reply.toolCalls).toHaveLength(1); expect(reply.continuation).toBeTruthy();
+    const next = modelWire(req([{ role: 'user', text: '读一下', attachments: [] }, reply, { role: 'tool', callId: 'call-one', name: 'read_file', text: '内容', outcome: 'ok' }]), zhipu, model, new Map(), () => {});
+    const sent = next.body.input as any[];
+    expect(sent).toContainEqual({ type: 'reasoning', content: { type: 'reasoning_text', text: '先读文件' } });
+    expect(sent.some((i) => i.type === 'function_call' && i.call_id === 'call-one')).toBe(true);
+    expect(sent.some((i) => i.type === 'function_call_output' && i.call_id === 'call-one')).toBe(true);
+    expect(JSON.stringify(sent)).not.toContain('"id":"rs"'); // 只回传文档定义的字段
+  });
+  it('智谱：思考内容为空或格式不明仍拒绝；其他服务的明文思考仍拒绝', () => {
+    for (const bad of [{ type: 'reasoning', id: 'rs' }, { type: 'reasoning', content: [{ type: 'reasoning_text', text: '' }] }, { type: 'reasoning', content: [{ type: 'summary_text', text: 'x' }] }]) {
+      const w = modelWire(req([{ role: 'user', text: 'x', attachments: [] }]), zhipu, model, new Map(), () => {});
+      expect(() => w.json(responses([bad, call]))).toThrowError(expect.objectContaining({ reason: 'protocol', detail: 'reasoning_missing' }));
+    }
+    const o = modelWire(req([{ role: 'user', text: 'x', attachments: [] }]), other, model, new Map(), () => {});
+    expect(o.body.include).toEqual(['reasoning.encrypted_content']);
+    expect(() => o.json(responses([plainReason, call]))).toThrowError(expect.objectContaining({ detail: 'reasoning_missing' }));
+  });
+  it('智谱流式：reasoning_text.delta 作为思考显示', () => {
+    const deltas: any[] = []; const w = modelWire(req([{ role: 'user', text: 'x', attachments: [] }]), zhipu, model, new Map(), (d) => deltas.push(d));
+    w.event(JSON.stringify({ type: 'response.reasoning_text.delta', delta: '想一想' }), 'response.reasoning_text.delta');
+    w.event(JSON.stringify({ type: 'response.completed', response: responses([plainReason, call]) }), 'response.completed');
+    expect(deltas).toContainEqual({ type: 'thinking_delta', text: '想一想' }); expect(w.result().toolCalls).toHaveLength(1);
+  });
+});

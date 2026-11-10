@@ -66,4 +66,5 @@
 | [ISSUE-0051](ISSUE-0051-model-pagination-null-cursor.md) | Messages 模型分页的空游标被当作列表结束 | fixed | bug | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0052](ISSUE-0052-child-pipe-epipe-crash.md) | 子进程被外部结束时，写管道的 EPIPE 会让整个 Gateway 退出 | fixed | bug | 2026-11-09 | 2026-11-09 |
 | [ISSUE-0053](ISSUE-0053-fake-ip-proxy-blocks-metadata.md) | 本机代理把供应商域名解析到 198.18.x，元数据读取被网络规则拒绝 | fixed | 外部依赖 | 2026-11-09 | 2026-11-09 |
-| [ISSUE-0054](ISSUE-0054-coding-plan-tool-request-protocol.md) | Coding Plan 服务上带工具定义的独立 Agent 请求失败（protocol / reasoning_missing） | investigating | 验收未通过 | 2026-11-09 | |
+| [ISSUE-0054](ISSUE-0054-coding-plan-tool-request-protocol.md) | Coding Plan 服务上带工具定义的独立 Agent 请求失败（protocol / reasoning_missing） | fixed | 验收未通过 | 2026-11-09 | 2026-11-10 |
+| [ISSUE-0055](ISSUE-0055-approval-wait-counts-toward-turn-limit.md) | 独立 Agent 等待用户审批的时间被算进回合时限 | open | bug | 2026-11-10 | |

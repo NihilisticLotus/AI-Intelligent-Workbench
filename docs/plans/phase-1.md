@@ -1255,3 +1255,8 @@ ISSUE-0044 的离线反例确认：仅保存任务预算也会重写绑定创建
 - Gateway 的每处严格校验失败都带分类，driver 结算时写入请求账本；不保存上游正文、字段值或工具参数，不放宽任何校验。
 - 网页独立任务“请求记录”显示失败原因与细分；旧记录写“未记录细分”。
 - 首次真实使用即定位 ISSUE-0054：智谱 Responses 带工具调用时 reasoning 缺少 encrypted_content。续传方式的调整待用户决定，不在本节范围。
+
+### 9.35 智谱明文思考续传与审批不计时（2026-11-09 / 11-10，ISSUE-0054、0055）
+
+- 续传方式按服务区分：只对官方资料的精确范围（Responses、https://open.bigmodel.cn/api/v1、未设 API 版本 / 套餐、providerId 未设或 zhipuai）接受明文 `reasoning_text`，不请求 `reasoning.encrypted_content`，下一轮按官方思维链输入格式 `{ type: 'reasoning', content: { type: 'reasoning_text', text } }` 回传，只回传文档定义的字段；空或格式不明仍 reasoning_missing。其他服务的严格规则不变。流式 `response.reasoning_text.delta` 显示为思考。
+- 独立回合的时限不计等待用户审批的时间：请求审批时暂停计时，审批结束后恢复并重排剩余时间；审批自身 30 分钟超时、停止与取消不变。

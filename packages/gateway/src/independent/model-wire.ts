@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { IndependentAssistantMessage, IndependentToolArguments, type IndependentModelRequest, type IndependentModelAttachment,
   type IndependentService, type IndependentModel, type IndependentModelDelta, type IndependentUsage, type IndependentProtocolDetail } from '@aic/protocol';
 import { ModelTransportError, modelJson } from './model-http';
+import { plaintextReasoningService } from './official-metadata';
 
 // 每处严格校验失败都带固定分类（ISSUE-0054），只说明哪一类不符合，不含上游内容
 const bad = (detail: IndependentProtocolDetail = 'shape'): never => { throw new ModelTransportError('protocol', null, detail); };
@@ -23,6 +24,18 @@ const args = (value: unknown) => { try { return IndependentToolArguments.parse(t
 export function modelWire(request: IndependentModelRequest, service: IndependentService, model: IndependentModel,
   attachments: Map<string, IndependentModelAttachment>, emit: (delta: IndependentModelDelta) => void) {
   const protocol = service.protocol, tools = request.tools ?? [], generation = request.generation ?? {};
+  // 续传思考（ISSUE-0054）：默认要求 encrypted_content；确认使用明文 reasoning_text 的服务（智谱 Responses 精确范围）也接受明文，
+  // 并按其文档的思维链输入格式 { type: 'reasoning', content: { type: 'reasoning_text', text } } 回传。
+  const plain = protocol === 'responses' && plaintextReasoningService(service);
+  const encrypted = (i: any) => i?.type === 'reasoning' && typeof i.encrypted_content === 'string' && !!i.encrypted_content;
+  const plainReasoning = (i: any): string | null => {
+    if (!plain || i?.type !== 'reasoning') return null;
+    const parts = Array.isArray(i.content) ? i.content : i.content != null ? [i.content] : [];
+    if (!parts.length) return null; let text = '';
+    for (const p of parts) { if (!p || typeof p !== 'object' || p.type !== 'reasoning_text' || typeof p.text !== 'string') return null; text += p.text; }
+    return text.length ? text : null;
+  };
+  const continuable = (i: any) => encrypted(i) || plainReasoning(i) !== null;
   const scope = hash({ binding: request.binding, protocol, baseUrl: service.baseUrl, remoteModelId: model.remoteModelId });
   const prefix = (through: number) => hash({ system: request.systemPrompt, checkpoint: request.checkpoint,
     tools, messages: request.messages.slice(0, through) });
@@ -102,7 +115,7 @@ export function modelWire(request: IndependentModelRequest, service: Independent
     if (generation.effort) body.reasoning_effort = generation.effort;
     if (generation.thinking) throw new ModelTransportError('request');
   } else if (protocol === 'responses') {
-    body.input = messages; body.instructions = system; body.max_output_tokens = maxOutput; body.store = false; body.include = ['reasoning.encrypted_content'];
+    body.input = messages; body.instructions = system; body.max_output_tokens = maxOutput; body.store = false; if (!plain) body.include = ['reasoning.encrypted_content'];
     if (tools.length) body.tools = tools.map((t) => ({ type: 'function', ...t, strict: false }));
     if (generation.effort) body.reasoning = { effort: generation.effort };
     if (generation.thinking) throw new ModelTransportError('request');
@@ -151,10 +164,11 @@ export function modelWire(request: IndependentModelRequest, service: Independent
     const v = obj(value), output = list(v.output), status = str(v.status); const parts = responseParts(output, status);
     if (status === 'completed' && v.error != null) bad('error_payload');
     const stop = status === 'completed' ? (parts.toolCalls.length ? 'tool_calls' : 'complete') : status === 'incomplete' && v.incomplete_details?.reason === 'max_output_tokens' ? 'length' : 'error';
-    if (parts.toolCalls.length && output.some((i) => i.type === 'reasoning' && (typeof i.encrypted_content !== 'string' || !i.encrypted_content))) bad('reasoning_missing');
+    if (parts.toolCalls.length && output.some((i) => i.type === 'reasoning' && !continuable(i))) bad('reasoning_missing');
+    const kept = output.filter((i) => i.type !== 'reasoning' || continuable(i))
+      .map((i) => i.type !== 'reasoning' || encrypted(i) ? i : { type: 'reasoning', content: { type: 'reasoning_text', text: plainReasoning(i) } });
     result = seal({ role: 'assistant', ...parts, toolCalls: stop === 'tool_calls' ? parts.toolCalls : [], stopReason: stop, usage: usage(v.usage, 'responses') },
-      output.some((i) => i.type === 'function_call' || i.type === 'reasoning' && typeof i.encrypted_content === 'string')
-        ? output.filter((i) => i.type !== 'reasoning' || typeof i.encrypted_content === 'string') : null);
+      output.some((i) => i.type === 'function_call' || i.type === 'reasoning' && continuable(i)) ? kept : null);
   };
   const finishMessage = (value: unknown) => {
     const v = obj(value), content = list(v.content), reason = str(v.stop_reason), parts = messageParts(content, reason);
@@ -192,7 +206,7 @@ export function modelWire(request: IndependentModelRequest, service: Independent
     if (typeof e.type !== 'string') bad(); if (e.type === 'error') bad('error_payload'); if (name && name !== e.type) bad('event_order');
     if (protocol === 'responses') {
       if (e.type === 'response.output_text.delta') emit({ type: 'text_delta', text: str(e.delta) });
-      if (e.type === 'response.reasoning_summary_text.delta') emit({ type: 'thinking_delta', text: str(e.delta) });
+      if (e.type === 'response.reasoning_summary_text.delta' || plain && e.type === 'response.reasoning_text.delta') emit({ type: 'thinking_delta', text: str(e.delta) });
       if (['response.completed', 'response.incomplete', 'response.failed'].includes(e.type)) {
         if (obj(e.response).status !== e.type.slice('response.'.length)) bad('status_mismatch');
         finishResponse(e.response); return true;

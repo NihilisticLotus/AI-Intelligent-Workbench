@@ -2,7 +2,7 @@
 import {
   IndependentTaskOptions, IndependentTaskState, IndependentApprovalDetail, IndependentHistoryPage,
   IndependentCommandSpec,
-  type AgentInfo, type IndependentTaskReference, type PermissionLevel,
+  type AgentInfo, type IndependentTaskReference, type PermissionLevel, type IndependentToolCall,
 } from '@aic/protocol';
 import { redact } from '@aic/adapters';
 import type { Db } from '../db';
@@ -24,7 +24,7 @@ import { IndependentFileTool } from './file-tool';
 import { IndependentFileDriver } from './file-driver';
 import { IndependentAttachments } from './attachments';
 import { IndependentApiDriver } from './model-driver';
-import { IndependentTurnEngine } from './turn-engine';
+import { IndependentTurnEngine, type IndependentApprovalClock } from './turn-engine';
 import { independentModelTools } from './tool-definitions';
 const STOP_TEXT = {
   completed: '本回合已完成，等待你验收。', cancelled: '本回合已停止，实际工具与连接已收尾。',
@@ -193,16 +193,18 @@ export class IndependentTaskRuntime {
     const files = new IndependentFiles(new IndependentFileHost(workspace, this.dataDir, executor));
     const fileTool = new IndependentFileTool(files, this.journal, new IndependentFileReceipts(this.db));
     const basis = JSON.stringify({ taskId, sessionId, revision: state.revision, workspace });
+    let clock: IndependentApprovalClock | undefined;
     const approve = async (id: string, title: string, detail: IndependentApprovalDetail, signal: AbortSignal) => {
       if (permission !== 'ask' || signal.aborted) return { approved: false, reason: signal.aborted ? '操作已停止' : '只读权限不允许修改或命令' };
       this.details.set(id, detail);
+      clock?.pause();
       try {
         const result = await host.requestPermission({ toolId: id, title, reason: '独立 Agent 请求本次操作，请展开详情核对后决定。',
           detail: '原始内容仅通过任务的独立审批详情接口读取，不写入事件。', cwd: null,
           options: [{ id: 'allow', label: '允许一次', kind: 'allow_once' }, { id: 'reject', label: '拒绝', kind: 'reject_once' }] }, signal);
         return { approved: permission === 'ask' && !signal.aborted && result.outcome === 'selected' && result.optionId === 'allow',
           reason: result.outcome === 'selected' ? redact(result.note || '用户未批准本次操作', secrets) : '审批已取消或超时' };
-      } finally { this.details.delete(id); }
+      } finally { clock?.resume(); this.details.delete(id); }
     };
     const fileDriver = new IndependentFileDriver(files, fileTool, this.journal, basis,
       (proposal, signal) => approve(proposal.record.id, proposal.kind === 'create' ? '创建项目文件' : '替换项目文本',
@@ -223,7 +225,8 @@ export class IndependentTaskRuntime {
       checkBinding: (binding) => driver.checkBinding(binding), waitForIdle: (binding) => driver.waitForIdle(binding),
       complete: (input, signal) => { messageId = newId('m'); streamedText = false; return driver.complete(input, signal); },
     }, {
-      execute: async (call, identity, signal) => {
+      execute: async (call: IndependentToolCall, identity: { taskId: string; sessionId: string; turnId: string }, signal: AbortSignal, turnClock?: IndependentApprovalClock) => {
+        clock = turnClock;
         const toolId = newId('tool'); host.update({ kind: 'tool_start', toolId, toolKind: call.name === 'command' ? 'execute' : ['write_file', 'create_file', 'replace_text'].includes(call.name) ? 'edit' : 'read', title: call.name, target: null });
         let ok = false;
         try {

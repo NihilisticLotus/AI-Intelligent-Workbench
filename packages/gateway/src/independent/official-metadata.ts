@@ -12,6 +12,15 @@ const MODELS = {
 } as const;
 
 /** 只追加可追溯证据，调用方仍须预览 / 勾选导入；旧人工值不在此处操作。 */
+/**
+ * 续传方式（2026-11-09，ISSUE-0054）：智谱 Responses 的思维链输出 / 输入都是明文 reasoning_text，不提供 encrypted_content
+ * （官方“创建 Response”文档）。只对与官方资料相同的精确范围启用明文续传；其他服务仍要求 encrypted_content。
+ */
+export function plaintextReasoningService(service: IndependentService) {
+  return service.protocol === 'responses' && service.baseUrl.replace(/\/$/, '') === 'https://open.bigmodel.cn/api/v1'
+    && service.apiVersion === null && service.plan === null && (service.providerId === null || service.providerId === 'zhipuai');
+}
+
 export function supplementOfficial(service: IndependentService, items: IndependentDiscoveredModel[]) {
   if (service.protocol !== 'responses' || service.baseUrl.replace(/\/$/, '') !== 'https://open.bigmodel.cn/api/v1'
     || service.apiVersion !== null || service.plan !== null || service.providerId !== null && service.providerId !== 'zhipuai') return [];

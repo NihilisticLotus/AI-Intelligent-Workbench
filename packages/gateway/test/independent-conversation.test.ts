@@ -366,3 +366,31 @@ describe('循环整合真实 Windows 命令与审批', () => {
     expect(context.store.pending(turn.id)).toEqual([]); expect(context.model.complete).toHaveBeenCalledTimes(1);
   });
 });
+
+// 2026-11-10：等待用户审批的时间不计入回合时限（真实补验中一次未处理的审批让回合超时失败）
+describe('审批等待不计入回合时限', () => {
+  it('工具在审批中暂停计时：等待超过时限后批准，回合照常完成', async () => {
+    const { engine, create } = setup([toolReply, finalReply], async (input, _identity, _signal, ...rest: unknown[]) => {
+      const clock = rest[0] as { pause(): void; resume(): void } | undefined;
+      clock?.pause(); await new Promise((r) => setTimeout(r, 120)); clock?.resume();
+      return { role: 'tool', callId: input.id, name: input.name, text: '已批准并执行', outcome: 'ok' };
+    });
+    expect(await engine.run(create({ timeoutMs: 60 }).id)).toMatchObject({ stop: 'completed', toolCalls: 1 });
+  });
+  it('对照：工具不暂停计时时，同样的等待会让回合超时', async () => {
+    const { engine, create } = setup([toolReply, finalReply], async (input) => {
+      await new Promise((r) => setTimeout(r, 120));
+      return { role: 'tool', callId: input.id, name: input.name, text: '已执行', outcome: 'ok' };
+    });
+    expect(await engine.run(create({ timeoutMs: 60 }).id)).toMatchObject({ stop: 'timed_out' });
+  });
+  it('审批结束后恢复计时，后续耗时仍受时限约束', async () => {
+    const { engine, model, create } = setup([toolReply], async (input, _identity, _signal, ...rest: unknown[]) => {
+      const clock = rest[0] as { pause(): void; resume(): void } | undefined;
+      clock?.pause(); await new Promise((r) => setTimeout(r, 120)); clock?.resume();
+      return { role: 'tool', callId: input.id, name: input.name, text: 'ok', outcome: 'ok' };
+    });
+    model.complete.mockImplementationOnce(async () => toolReply).mockImplementationOnce(async () => new Promise(() => {}));
+    expect(await engine.run(create({ timeoutMs: 80 }).id)).toMatchObject({ stop: 'timed_out', toolCalls: 1 });
+  });
+});

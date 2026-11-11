@@ -1,3 +1,4 @@
   没有找到 Node.js 24 或更高版本，AI Console 需要它才能运行。
   点“确定”后会打开下载页面：https://nodejs.org/zh-cn/download
-  请下载并安装 LTS 版本，装好后重新双击“启动 AI Console”。
+  页面上方的命令行步骤不用管，往下找“Windows 安装程序(.msi)”按钮，
+  下载后双击安装（一路点“下一步”即可），装好后重新双击“启动 AI Console”。

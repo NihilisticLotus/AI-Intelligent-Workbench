@@ -12,7 +12,7 @@
 | 1.1 骨架 | 已完成 | 工程结构、共享协议包、Gateway（HTTP + WebSocket、令牌鉴权、事件库）、假 Agent、网页外壳（侧栏、对话、右侧面板）、双击启动脚本 | 2、3、10、13、14、15、16.4 | 双击启动后浏览器自动打开；和假 Agent 完成一次带工具调用和审批的对话；刷新页面、断网重连后对话完整恢复 |
 | 1.2 接入真实 Agent | 已通过，遗留项并入 1.3 | ACP 客户端；Claude Code、Codex、CodeBuddy 适配器；能力探测；Agent 管理页；账号配置；会话内换模型和思考强度；启用开关；草稿与注释；回复按轮显示 | 6、7.4（H0/H1） | 三个 Agent 都能在网页里登录、选模型、完成对话、换模型不丢上下文（验收见 `docs/acceptance/step-1.2.md`，未验证项见第 7.2 节） |
 | 1.3 稳定、补验与输入框 | 已通过（2026-11-12），ISSUE-0015 根因转为观察项 | 稳定性、统一选择器、附件、第三方配置边界、独立多服务模型与任务闭环；三家真实识图与换模型、独立 Agent 真实对话与工具审批、沙盒首次启动均已真实验证，见 9.38 与 step-1.3 结论 | design 6.4、15.2、17；ui 5.5、6.1、6.5、6.16 | 见 8.1、9.15～9.30 及 step-1.3 最新记录 |
-| 1.4 界面改版与用量 | 未开始 | 轻量化样式；新建任务起始页；右侧“详细”（环境、计划、上下文、会话 token 用量、连接、输出）；上下文圆环；每轮用量；对话导航条；账号额度和上下文明细的调研 | design 15.1、15.5；ui 6.11～6.15 | 见 8.2 |
+| 1.4 界面改版与用量 | 规格已写（第 10 节），未开工 | 轻量化样式；新建任务起始页；右侧“详细”（环境、计划、上下文、会话 token 用量、连接、输出）；上下文圆环；每轮用量；对话导航条；账号额度和上下文明细的调研 | design 15.1、15.5；ui 6.11～6.15 | 见 8.2 |
 | 1.5 任务与工作区 | 未开始（原 1.3） | git worktree；非 git 项目的影子快照；改动（diff）面板；合并 / 丢弃 / 回滚；权限规则和“总是允许”；开放“工作区内自动 / 全自动”；看板；“详细 → 输出”改为工作副本的改动 | 8、9、13 | 在 git 项目和非 git 项目各完成一个改代码的任务，并分别合并和回滚 |
 | 1.6 上下文与交接 | 未开始（原 1.4） | 任务账本、`.aic/TASK.md`、自动交接 H2–H4、覆盖校验、`aic_history` 工具、交接分隔条；换 Agent 发送消息时才交接；换账号的交接 | 7；ui 6.5、6.8 | 同一任务从 Claude Code 交接到 Codex，全程不弹窗，交接后继续完成且不重复已做的改动；选了别的 Agent 但没发消息时不交接、可以撤销 |
 | 1.7 局域网浏览器 | 未开始（原 1.5） | 局域网开关、防火墙规则、配对码、设备管理 | 16 | 在手机浏览器上配对后完成一次审批 |
@@ -624,6 +624,8 @@ ErrorCode 增加：`agent.auth_required`、`agent.quota_exceeded`、`agent.crash
 - 自动测试、类型检查、构建全部通过；第 9.12 节列出的新测试都在。
 
 ### 8.2 第 1.4 步：界面改版与用量
+
+> 详细实现规格见第 10 节（2026-11-12）。下面是范围摘要。
 
 做什么：
 
@@ -1302,3 +1304,148 @@ ISSUE-0044 的离线反例确认：仅保存任务预算也会重写绑定创建
 - 1.4：ISSUE-0060（重复开销）、0061（无回应看门狗与长时间无输出的工具）、0062（按回复开头文字判定失败）。
 - 1.6：ISSUE-0001（模型能否调用注入的 MCP 工具，随 `aic_history`）。
 - 不在本阶段：ISSUE-0003（node:sqlite 实验特性）、0009（全局 codex CLI）、0016（WorkBuddy 精简引擎）、0020（ZCode 桥接）、0030（Pi 候选，正式实现已改为自有循环）。
+
+## 10. 1.4 实现规格（2026-11-12）
+
+> 范围摘要见 8.2。界面以 ui-design 6.11～6.15 和原型 `docs/prototype/workbench.html`（`lite.css`、`nav-rail.js`、`interact.js` 里的“详细”与起始页）为准；数据规则见 design 15.5。
+
+### 10.1 总体与约束
+
+- 第 2 节接口规则照旧：只走 `/api/v1`，类型只在 protocol 里加，只增不改。
+- 用量只显示 Agent 或上游真实报告的数，不估算、不用 0 冒充；没有窗口大小就不显示百分比。
+- 1.4 不做工作副本（1.5）和交接（1.6）。起始页的“基于分支”、详细面板的“输出”在本步只做到现有数据能支撑的程度，界面写清楚，不预告未实现的行为。
+- 默认测试离线、不花钱。真实补验单列消息条数和费用，用户同意后执行；“智谱真实补验”服务按长期授权可直接用。
+
+### 10.2 现状（2026-11-12 只读调研）
+
+| 方面 | 现在有的 | 缺的 |
+|---|---|---|
+| 上下文 | 适配器把 ACP `usage_update` 记成 `session.usage {used,size,cost?}`；右侧面板一行“上下文 已用 x%” | 圆环、明细、分类 |
+| 每轮用量 | 独立 Agent：每次请求的 usage 进请求账本，回合累计输出 token | ACP Agent 没读 `PromptResponse.usage`（只在 ACP 草案 schema 里，SDK 2.4.0 unstable）；没有 `TurnUsage`、没有 `/tasks/:id/usage` |
+| 右侧面板 | `SidePanel` 两个标签“计划”“改动”（改动是占位），可拖宽，Ctrl+J 开关 | 六节“详细”、折叠与摘要 |
+| 新建任务 | `NewTaskDialog` 对话框，8 处入口（Alt+N、侧栏、项目 / 分组菜单、分区 +、搜索面板、选择器换 Agent） | 起始页 |
+| 对话流 | `Stream → groupTurns → Item`，已经按“一问一答”分组 | DOM 锚点、导航条 |
+| 环境 | `Project {path,isGit}`；tasks 表有未用的 branch 列 | 分支读取、常用组合 |
+| MCP | Gateway 不注入（mcpServers 为空），Agent 只报告 `caps.mcp {http,sse}` | Agent 没有可读的 MCP 服务列表 |
+| 改动文件 | `tool.start/update` 带 kind（edit / create / delete）和 target；ACP diff 只转成一行文字；独立 Agent 有 `independent_file_receipts` | 结构化的“本会话改了哪些文件” |
+| 样式 | tokens / app / shell / components / interact 五个 CSS，深色默认，`data-theme="light"` | lite 样式 |
+
+### 10.3 工作分解
+
+| 编号 | 内容 | 主要位置 |
+|---|---|---|
+| A | 用量数据：协议、适配器、Gateway 存储与接口 | protocol、adapters/acp/session.ts、gateway |
+| B | 轻量化样式（ui 6.11） | apps/web/src/styles |
+| C | 右侧“详细”六节（ui 6.13） | SidePanel 拆分 |
+| D | 输入框上下文圆环、每轮用量小字（ui 6.12） | Composer、Chat |
+| E | 对话导航条（ui 6.14） | Chat 旁新组件 |
+| F | 新建任务起始页（ui 6.15） | 新页面，替换 NewTaskDialog 的入口 |
+| G | 调研：订阅额度、上下文分类明细 | docs/research/usage-quota.md |
+| H | 1.3 代码审查留下的 ISSUE-0060、0061、0062 | gateway、adapters、web |
+| I | 真实补验（需要用户同意） | step-1.4 验收记录 |
+
+### 10.4 A：用量数据
+
+协议（只增）：
+
+- `TurnUsage`：`inputTokens`、`outputTokens`、`thoughtTokens`、`cacheReadTokens`、`cacheWriteTokens`、`totalTokens`，每项 `number | null`；`source: 'agent' | 'independent'`。
+- 事件 `turn.usage`：`{ messageId, usage: TurnUsage }`，回合结束时发一次；Agent 没报告时也发，各项为 null，界面据此写“未报告”。
+- `TaskUsage`（`GET /tasks/:id/usage` 的返回）：按会话段列出 `{ sessionId, agent, model, startedAt, turns, reportedTurns, totals: TurnUsage }`，加任务合计；合计只加报告了的轮次，并给出未报告的轮数。
+- `session.usage` 不改；`Hello.features` 加 `taskUsage`。
+
+适配器：
+
+- `AcpSession.prompt` 读取 `PromptResponse.usage`（字段名按 SDK 2.4.0 unstable：totalTokens / inputTokens / outputTokens / thoughtTokens / cachedReadTokens / cachedWriteTokens），返回 `{ stopReason, usage? }`。只接受非负安全整数，其他值记 null，不猜。
+- 三家是否真的报告要实测（10.13），结论写进 `docs/research/usage-quota.md`。
+
+Gateway：
+
+- 迁移新增 `turn_usage` 表（task_id、session_id、message_id、at、usage_json），回合结束时写一行并发 `turn.usage`。
+- 独立 Agent 把一个回合内各次生成请求的 usage 逐项相加；任一请求该项为 null 时这一项记 null（不能半加）。计数请求（counter）不计入。
+- 旧任务没有 `turn_usage` 行：接口返回 0 轮、不补算。
+
+测试：PromptResponse 有 / 无 / 坏 usage；独立回合多请求相加与 null 传播；接口按会话段汇总；鉴权。
+
+### 10.5 B：轻量化样式
+
+- 以 `lite.css` 为准逐项搬到正式样式：对话区去外框、用户消息右对齐浅灰胶囊、Agent 徽标 20px、工具组无外框、侧栏 [新建任务] 描边、输入框圆角 16px。
+- 顶栏只留标题、状态、视图切换和面板按钮。
+- 大块彩色只用于“需要你处理”（琥珀）和出错（红）。
+- 深浅两套主题都要在浏览器里看过；颜色变量继续放在 tokens.css。
+
+### 10.6 C：右侧“详细”
+
+- “计划”标签改名“详细”，一列分节；“改动”标签保留（1.5 才有内容）。
+- 每节可折叠，默认展开计划和上下文，状态存在 prefs（按设备）；收起时标题行右侧显示摘要。
+- 六节的数据来源：
+  1. **环境**：运行位置（本机）、项目名与路径、当前分支。分支由 Gateway 读项目的 `.git/HEAD`（不启动 git 进程），`Project` 加可选 `branch: string | null`；非 git 项目不显示分支。[存为常用] 保存“项目 · 分支”组合（新表或 meta，接口 `GET / POST / DELETE /environments`），起始页可选用。本步分支只作记录，不切换。
+  2. **计划**：沿用现有 PlanList，标题右侧“已完成 / 总数”。
+  3. **上下文**：“已用 N%”和“used / size”，标题右侧 Agent · 模型。分类明细 ACP 没有：调研（G）有结论前只显示总量横条（已用 + 剩余两段），图例写“分类明细 Agent 未报告”。独立 Agent 用最近一次上下文预检的估算，明确标“估算”。
+  4. **会话 token 用量**：来自 `GET /tasks/:id/usage`，大字合计、“N 轮 · N 段 · 从几点开始”、输入（缓存读写）、输出（思考）；未报告的轮次单独说明。费用：`session.usage.cost` 有就显示，否则订阅写“不单独计费”，独立 Agent 显示请求账本里的人工预留（标明“预留，不是实际账单”）。额度：G 有结论前写“额度未知”。
+  5. **连接**：工作台注入的 MCP（当前为空）和 Agent 报告的 MCP 能力。Agent 没有可读的服务列表时写“Agent 未报告 MCP 服务列表”，不放 [重新连接]。
+  6. **输出**：本会话新建或修改的文件。ACP Agent 来自 tool 事件里 kind 为 edit / create / delete 的 target，加上 diff 行数（适配器把现有“修改 path（+a −b）”改为在 `tool.update` 里追加可选结构化字段 `files: [{ path, added, removed, created }]`，协议只增）；独立 Agent 来自 `independent_file_receipts`。注明“来自 Agent 的工具记录，1.5 后改为工作副本的实际改动”。点文件暂不跳转（改动面板在 1.5）。
+
+### 10.7 D：圆环与每轮用量
+
+- 输入框工具条最右、发送按钮左边，18px 圆环，数据是最新的 `session.usage`。70% 以上琥珀、90% 以上红；没有 size 时显示空心灰环，提示“上下文窗口未报告”。
+- 悬停 / 聚焦一行“上下文 76.2k / 200k（38%）”，≥90% 补“Agent 会自动压缩较早的对话”；点击打开“详细”并展开、滚到“上下文”。
+- 每轮回复下一行小字“N token · 输入 · 输出”，悬停看全部字段；`turn.usage` 全 null 时写“用量：未报告”。
+
+### 10.8 E：对话导航条
+
+- 按原型 `nav-rail.js`：用户消息长刻度、Agent 每轮短刻度、待审批琥珀色；交接刻度留到 1.6。
+- 当前刻度高亮（可视区上方 1/3 处的消息）；悬停 / 聚焦浮出卡片（谁、时间、开头一句）；点击平滑滚动并闪一下底色，减少动态效果时不动画。
+- 键盘：Tab 进入，上下键移动，Home / End，Enter 跳转。少于 3 条不显示；流式输出、审批变化时更新。
+- 给每条消息加稳定的 `id` / `data-key` 锚点（用 groupTurns 现有的 key）。
+
+### 10.9 F：新建任务起始页
+
+- 新路由 `#/new`（可带 projectId / groupId / agent / model / prompt 预设，与 `openNewTask(preset)` 相同）；8 处入口全部改到这里，快捷键沿用 Alt+N（ui-design 快捷键表已注明 Ctrl+N 会被浏览器拦截）。
+- 占满主区，右侧面板隐藏；[返回] 和 Esc 回原页面，原页面状态（滚动、草稿）不丢。
+- 问候语按时间段；大输入框：项目 ▾、分支（只显示当前分支，标“工作副本在之后的版本提供”）、分组 ▾、常用环境 ▾；描述、附件（复用 1.3 的附件组件）、权限 ▾（只开放只读 / 需审批）、Agent · 模型 · 思考强度（复用选择器）、派发按钮、Ctrl+Enter。
+- Agent 推荐用简单规则：带图片时推荐能看图的已启用模型；其余推荐用户上次在该项目用的 Agent · 模型。给出理由一句，可 [采用推荐]。
+- 快捷入口：报错修复、周报总结、资产处理、PPT 制作，只填模板文字并把光标放到待补充处。“闲时任务”依赖调度，本步不放。
+- 不写“派发后会建立独立的工作副本”（1.5 才成立）。派发后回原页面，侧栏出现新任务。
+- 独立 Agent 的任务配置（6.5.1）在起始页里同样能填；原 NewTaskDialog 删除，测试改到起始页。
+
+### 10.10 G：调研
+
+`docs/research/usage-quota.md`：
+
+- 三家 Agent 是否报告 `PromptResponse.usage` 和 `usage_update`，各字段是否齐全（实测，见 10.13）。
+- Claude Code `/context` 的分类明细能否经 ACP 扩展或 `_meta` 取得；拿不到就写拿不到，界面保持“未报告”。
+- 订阅账号周期额度：Claude、Codex、CodeBuddy 有没有不读凭据文件就能取得的途径；zcode-acp 的智谱配额接口思路是否适用于独立 Agent 的智谱服务（只用工作台自己保存的 Key）。
+
+### 10.11 H：1.3 审查遗留
+
+- ISSUE-0061：工具处于执行中（已开始未结束）时不计入无回应时间；独立命令时限上限改为小于看门狗时限，或看门狗对执行中的独立命令改按命令自身时限。先确认三家 Agent 长命令期间是否发事件。
+- ISSUE-0060：流式片段的绑定核对改为按时间间隔（例如 250 毫秒）；网页按任务和附件 id 缓存图片 Blob；文件修改合并规则和原文读取为一次宿主请求。
+- ISSUE-0062：除 Codex 代理完整封套外，开头匹配收紧为完整句式；保证 11-10 的真实失败路径不退化。
+
+### 10.12 测试清单（默认 `npm test`）
+
+- protocol：TurnUsage / TaskUsage / Project.branch / tool.update.files / Environment 的解析与拒绝。
+- adapters：PromptResponse.usage 有 / 无 / 坏值；diff 结构化字段。
+- gateway：turn_usage 写入与汇总、独立回合相加与 null、`.git/HEAD` 读取（分支、分离头、非 git、超大或异常文件）、常用环境增删、看门狗对执行中工具的处理、鉴权。
+- web：圆环颜色阈值与无 size、每轮用量文案、详细面板折叠与摘要、导航条键盘、起始页预设与返回、推荐规则。
+
+### 10.13 真实补验（需要用户同意后执行）
+
+预计：Claude Code 3 条、Codex 2 条、CodeBuddy 2 条，都是“请只回复 OK”一类的短消息，在空的临时项目里；独立 Agent 用“智谱真实补验”服务 3 条（长期授权）。核对：
+- 三家是否报告每轮用量和上下文；会话 token 合计等于每轮之和；圆环数字与 `session.usage` 一致；
+- 没报告的显示“未报告”不显示 0；
+- 深浅主题下详细面板、圆环、导航条、起始页都过一遍。
+费用按 1.3 的口径每条短消息记 1 元人工预留，共 7 元；实际账单未知。
+
+### 10.14 完成标准
+
+即 8.2 的完成标准，加上：ISSUE-0060、0061、0062 关闭或有明确结论；`docs/research/usage-quota.md` 写完；起始页替换所有入口后 NewTaskDialog 不再被引用。
+
+### 10.15 开发顺序
+
+1. A 的协议与适配器（先能拿到数据），同时写 G 的离线部分。
+2. B 样式（后面的组件都基于新样式写）。
+3. C 详细面板 → D 圆环与每轮用量 → E 导航条。
+4. F 起始页（改入口最多，放在样式稳定之后）。
+5. H 三个遗留问题。
+6. 全量检查、浏览器深浅主题实操、写 step-1.4 验收；再请用户批准 10.13 的真实补验。

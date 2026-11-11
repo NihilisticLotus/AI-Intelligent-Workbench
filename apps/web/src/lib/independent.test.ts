@@ -23,6 +23,8 @@ describe('独立模型能力编辑', () => {
     expect(requestFailureText({ failure: 'upstream' })).toBe('服务暂时不可用');
     expect(requestFailureText({ failure: 'protocol' })).toBe('返回内容无法识别（未记录细分）');
     expect(requestFailureText({ failure: 'protocol', protocolDetail: 'reasoning_missing' })).toBe('返回内容无法识别：缺少可续传的思考内容');
+    expect(requestFailureText({ failure: 'network', networkDetail: 'fake_ip_proxy' })).toBe('连接失败：域名解析到本机代理的 fake-ip 网段（198.18.x），可在“设置 → 网络”里允许');
+    expect(requestFailureText({ failure: 'network' })).toBe('连接失败');
   });
   it('16 个协议字段均有中文名称，未知、false、零和空列表各自保留', () => {
     expect(Object.keys(capabilityLabels).sort()).toEqual([...IndependentCapabilityField.options].sort());

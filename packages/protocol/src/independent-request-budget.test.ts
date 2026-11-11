@@ -25,6 +25,10 @@ describe('独立请求预算追加协议', () => {
     expect(IndependentRequestSettlement.parse(proto)).toEqual(proto);
     expect(IndependentRequestSettlement.safeParse({ ...proto, failure: 'network', protocolDetail: 'shape' }).success).toBe(false);
     expect(IndependentRequestSettlement.safeParse({ ...proto, protocolDetail: 'fixture-private-body' }).success).toBe(false);
+    // 网络细分同样只增、只对应 network 失败（ISSUE-0058）
+    expect(IndependentRequestSettlement.parse({ ...proto, failure: 'network', networkDetail: 'fake_ip_proxy' }).networkDetail).toBe('fake_ip_proxy');
+    expect(IndependentRequestSettlement.safeParse({ ...proto, networkDetail: 'fake_ip_proxy' }).success).toBe(false);
+    expect(IndependentRequestSettlement.safeParse({ ...proto, failure: 'network', networkDetail: '198.18.0.9' }).success).toBe(false);
     expect(IndependentTurnStop.parse('request_budget')).toBe('request_budget');
   });
 });

@@ -68,3 +68,10 @@
 | [ISSUE-0053](ISSUE-0053-fake-ip-proxy-blocks-metadata.md) | 本机代理把供应商域名解析到 198.18.x，元数据读取被网络规则拒绝 | fixed | 外部依赖 | 2026-11-09 | 2026-11-09 |
 | [ISSUE-0054](ISSUE-0054-coding-plan-tool-request-protocol.md) | Coding Plan 服务上带工具定义的独立 Agent 请求失败（protocol / reasoning_missing） | fixed | 验收未通过 | 2026-11-09 | 2026-11-10 |
 | [ISSUE-0055](ISSUE-0055-approval-wait-counts-toward-turn-limit.md) | 独立 Agent 等待用户审批的时间被算进回合时限 | fixed | bug | 2026-11-10 | 2026-11-10 |
+| [ISSUE-0056](ISSUE-0056-continuation-basis-drift.md) | 项目规则、人工总结或工具开关变化后，独立任务每条消息都失败 | fixed | bug | 2026-11-11 | 2026-11-11 |
+| [ISSUE-0057](ISSUE-0057-last-exit-false-alarm.md) | 旧格式日志下，启动时把本次的启动行当成上次运行，误报“上次没有正常退出” | fixed | bug | 2026-11-11 | 2026-11-11 |
+| [ISSUE-0058](ISSUE-0058-model-fake-ip-hint.md) | 独立 Agent 对话被 fake-ip 规则拦下时没有对应提示 | fixed | bug | 2026-11-11 | 2026-11-11 |
+| [ISSUE-0059](ISSUE-0059-official-evidence-expiry.md) | 内置智谱官方能力资料 2026-11-15 到期，到期后带工具的任务无法使用且无法刷新 | open | bug | 2026-11-11 | |
+| [ISSUE-0060](ISSUE-0060-independent-host-overhead.md) | 独立 Agent 的几处重复开销：每个流式片段查库、看图和改文件反复启动受控宿主 | open | 技术债 | 2026-11-11 | |
+| [ISSUE-0061](ISSUE-0061-watchdog-long-tool.md) | 无回应看门狗会停掉长时间没有输出的工具 | open | bug | 2026-11-11 | |
+| [ISSUE-0062](ISSUE-0062-text-error-heuristic.md) | 按回复开头文字判定模型失败，可能把正常的简短回答当成错误 | open | bug | 2026-11-11 | |

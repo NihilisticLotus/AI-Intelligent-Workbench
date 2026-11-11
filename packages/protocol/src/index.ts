@@ -957,13 +957,19 @@ export type IndependentRequestFailure = z.infer<typeof IndependentRequestFailure
 export const IndependentProtocolDetail = z.enum(['shape', 'error_payload', 'unknown_item', 'tool_arguments', 'reasoning_missing',
   'status_mismatch', 'event_order', 'duplicate_result', 'no_result', 'invalid_json', 'transport', 'message_invalid']);
 export type IndependentProtocolDetail = z.infer<typeof IndependentProtocolDetail>;
+/** network 失败的固定细分（ISSUE-0058），只说明本地地址规则的结论，不含解析结果或上游内容。fake_ip_proxy：域名解析到本机代理的 fake-ip 网段且开关未打开。 */
+export const IndependentNetworkDetail = z.enum(['fake_ip_proxy']);
+export type IndependentNetworkDetail = z.infer<typeof IndependentNetworkDetail>;
 export const IndependentRequestSettlement = z.object({
   outcome: z.enum(['succeeded', 'failed', 'interrupted']), failure: IndependentRequestFailure.nullable(),
   usage: IndependentUsage.nullable(), countedInputTokens: z.number().int().min(0).max(1_000_000_000_000).nullable(),
   /** 只在 failure 为 protocol 时可选出现；旧记录没有 */
   protocolDetail: IndependentProtocolDetail.optional(),
+  /** 只在 failure 为 network 时可选出现；旧记录没有 */
+  networkDetail: IndependentNetworkDetail.optional(),
 }).strict().refine((v) => v.outcome === 'succeeded' ? v.failure === null : v.failure !== null && v.usage === null && v.countedInputTokens === null,
-  '失败或中断请求不能伪造用量').refine((v) => v.protocolDetail === undefined || v.failure === 'protocol', '协议细分只对应 protocol 失败');
+  '失败或中断请求不能伪造用量').refine((v) => v.protocolDetail === undefined || v.failure === 'protocol', '协议细分只对应 protocol 失败')
+  .refine((v) => v.networkDetail === undefined || v.failure === 'network', '网络细分只对应 network 失败');
 export type IndependentRequestSettlement = z.infer<typeof IndependentRequestSettlement>;
 export const IndependentRequestRecord = z.object({
   id: Id, taskId: Id, ordinal: z.number().int().min(1).max(1000), binding: IndependentModelBinding,

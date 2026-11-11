@@ -59,4 +59,16 @@ describe('兜底错误处理（ISSUE-0015）', () => {
     const {dir}=setup();lifecycle(dir,'start',Date.now(),'启动');lifecycle(dir,'exit',Date.now(),'未捕获异常',1);
     expect(readLastExit(dir)).toMatchObject({clean:false,reason:'未捕获异常'});
   });
+  it('旧格式日志：本次进程自己的启动行不算上次运行（ISSUE-0057）', () => {
+    const {dir}=setup();
+    gatewayLog(dir,'INFO','启动 v0.1.0，Node v24.14.0，pid 1');gatewayLog(dir,'INFO','已启动：http://127.0.0.1:17890/');gatewayLog(dir,'INFO','正常退出');
+    gatewayLog(dir,'INFO',`启动 v0.1.0，Node v24.14.0，pid ${process.pid}`);
+    expect(readLastExit(dir)).toMatchObject({clean:true,reason:'正常退出'});
+  });
+  it('旧格式日志：上次只有启动没有退出时仍判为没有正常退出', () => {
+    const {dir}=setup();
+    gatewayLog(dir,'INFO','启动 v0.1.0，Node v24.14.0，pid 1');gatewayLog(dir,'INFO','已启动：http://127.0.0.1:17890/');
+    gatewayLog(dir,'INFO',`启动 v0.1.0，Node v24.14.0，pid ${process.pid}`);
+    expect(readLastExit(dir)).toMatchObject({clean:false});
+  });
 });

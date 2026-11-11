@@ -231,19 +231,21 @@ describe('独立模型三协议正式传输', () => {
     await expect(driver.complete({ ...f.request, messages: [{ role: 'tool', callId: 'missing', name: 'read_file', text: '伪造', outcome: 'ok' }] }, f.signal)).rejects.toBeInstanceOf(ModelTransportError);
     await f.catalog.patchService(f.service.id, { expectedRevision: f.service.revision, enabled: false }); await expect(driver.complete(f.request, f.signal)).rejects.toBeInstanceOf(ModelTransportError); expect(calls).toHaveLength(before);
   });
-  it('模型请求同样受 fake-ip 开关约束：默认拒绝，打开后越过地址校验（ISSUE-0053）', async () => {
+  it('模型请求同样受 fake-ip 开关约束：默认拒绝并给出固定细分，混合结果即使打开也拒绝（ISSUE-0053、ISSUE-0058）', async () => {
     const resolver = ((_host: unknown, _options: unknown, cb: Function) => cb(null, [{ address: '198.18.0.9', family: 4 }])) as typeof lookup;
     const base = { base: new URL('https://example.com/v1'), endpoint: 'responses' as const, headers: {}, body: '{}', onEvent: () => false, onJson: () => {}, lookup: resolver };
-    await expect(postModel({ ...base, signal: new AbortController().signal, timeoutMs: 500 })).rejects.toMatchObject({ reason: 'network' });
-    // 关闭时在地址校验处立即拒绝；打开后进入连接阶段，198.18.0.9 本机不可达，只能等到超时
-    const t0 = Date.now(); await postModel({ ...base, signal: new AbortController().signal, timeoutMs: 1500 }).catch(() => {}); const offMs = Date.now() - t0;
-    const t1 = Date.now(); const err = await postModel({ ...base, signal: new AbortController().signal, timeoutMs: 1500, addressPolicy: { allowFakeIpProxy: true } }).then(() => null, (e) => e as { reason?: string }); const onMs = Date.now() - t1;
-    expect(offMs).toBeLessThan(500); expect(err).not.toBeNull(); expect(['timed_out', 'network']).toContain(err!.reason); expect(onMs).toBeGreaterThan(offMs);
+    await expect(postModel({ ...base, signal: new AbortController().signal, timeoutMs: 500 })).rejects.toMatchObject({ reason: 'network', networkDetail: 'fake_ip_proxy' });
+    // 混合结果（fake-ip + 内网）即使打开开关也在地址校验处拒绝，且不给 fake-ip 提示
+    const mixed = ((_host: unknown, _options: unknown, cb: Function) => cb(null, [{ address: '198.18.0.9', family: 4 }, { address: '10.0.0.1', family: 4 }])) as typeof lookup;
+    await expect(postModel({ ...base, lookup: mixed, signal: new AbortController().signal, timeoutMs: 500, addressPolicy: { allowFakeIpProxy: true } }))
+      .rejects.toSatisfy((e: { reason?: string; networkDetail?: string }) => e.reason === 'network' && e.networkDetail === undefined);
+    // 打开后的放行由 metadataAddressAllowed 的纯函数用例核对；这里不实际连接 198.18.x，
+    // 本机开着 fake-ip 代理时该连接会被代理接走并真的访问外网（2026-11-11 复现），默认测试必须离线。
   }, 10_000);
   it('真正的连接 DNS 检查拒绝公网 / 私网混合，正文与原始 DNS 错误不外泄', async () => {
     const resolver = ((_host: unknown, _options: unknown, cb: Function) => cb(null, [{ address: '8.8.8.8', family: 4 }, { address: '127.0.0.1', family: 4 }])) as typeof lookup;
     await expect(postModel({ base: new URL('https://example.com/v1'), endpoint: 'responses', headers: {}, body: '{}', signal: new AbortController().signal, timeoutMs: 500,
-      onEvent: () => false, onJson: () => {}, lookup: resolver })).rejects.toMatchObject({ reason: 'network' });
+      onEvent: () => false, onJson: () => {}, lookup: resolver })).rejects.toSatisfy((e: { reason?: string; networkDetail?: string }) => e.reason === 'network' && e.networkDetail === undefined);
   });
   it.each(['mime','encoding','length','frame','dangerous','deep','invalid-utf8'])('实际 HTTP 拒绝不可信响应 %s', async (mode) => {
     const f = await fixture('chat_completions', (_req, res) => {

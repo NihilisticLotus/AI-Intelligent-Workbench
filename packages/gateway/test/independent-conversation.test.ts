@@ -61,6 +61,40 @@ describe('完整独立会话与循环', () => {
     expect(store.context(second.id).messages.find((m) => m.role === 'assistant')).not.toHaveProperty('continuation');
     expect(store.entries('session')[1]!.message).toHaveProperty('continuation', '旧模型专用续传资料');
   });
+  it('项目规则或工具开关变化后不再带上旧私有续传，相同时保留（ISSUE-0056）', () => {
+    const { store } = setup(); const first = store.create(binding, 'session', user, limits, '规则甲'), owner = store.acquire(first.id);
+    store.claimModel(first.id, owner); store.assistant(first.id, owner, { ...finalReply, continuation: '规则甲下的续传' }); store.finish(first.id, owner, 'completed');
+    const original = store.entries('session');
+    const assistantOf = (id: string) => store.context(id).messages.find((m) => m.role === 'assistant');
+    const finish = (id: string) => store.finish(id, store.acquire(id), 'cancelled');
+    const same = store.create(binding, 'session', user, limits, '规则甲');
+    expect(assistantOf(same.id)).toHaveProperty('continuation', '规则甲下的续传'); finish(same.id);
+    const changed = store.create(binding, 'session', user, limits, '规则乙');
+    expect(assistantOf(changed.id)).toMatchObject({ text: finalReply.text }); expect(assistantOf(changed.id)).not.toHaveProperty('continuation'); finish(changed.id);
+    const noTools = store.create(binding, 'session', user, { ...limits, maxToolCalls: 0 }, '规则甲');
+    expect(assistantOf(noTools.id)).not.toHaveProperty('continuation'); finish(noTools.id);
+    // 规则改回原样后，原续传重新适用；原始记录始终不改写
+    const back = store.create(binding, 'session', user, limits, '规则甲');
+    expect(assistantOf(back.id)).toHaveProperty('continuation', '规则甲下的续传');
+    expect(store.entries('session').slice(0, original.length)).toEqual(original);
+  });
+  it('人工总结保存在中间位置时，总结之前产生的后续消息不再带旧私有续传（ISSUE-0056）', () => {
+    let clock = 1_800_000_000_000; vi.spyOn(Date, 'now').mockImplementation(() => clock += 10);
+    const { store, create } = setup();
+    const run = (continuation: string) => { const turn = create(), owner = store.acquire(turn.id);
+      store.claimModel(turn.id, owner); store.assistant(turn.id, owner, { ...finalReply, continuation }); store.finish(turn.id, owner, 'completed'); };
+    run('第一回合续传'); run('第二回合续传');
+    store.checkpoint('session', 2, '第一回合的人工总结', store.entries('session').at(-1)!.hash);
+    const third = create(), owner = store.acquire(third.id); let context = store.context(third.id);
+    expect(context.checkpoint?.throughSeq).toBe(2);
+    expect(context.messages.filter((m) => m.role === 'assistant')).toHaveLength(1);
+    expect(context.messages.find((m) => m.role === 'assistant')).not.toHaveProperty('continuation');
+    // 总结之后产生的消息在同一总结下生成，续传保留
+    store.claimModel(third.id, owner); store.assistant(third.id, owner, { ...finalReply, continuation: '总结之后的续传' }); store.finish(third.id, owner, 'completed');
+    context = store.context(create().id);
+    expect(context.messages.filter((m) => m.role === 'assistant').map((m) => (m as { continuation?: string }).continuation)).toEqual([undefined, '总结之后的续传']);
+    expect(store.entries('session')[3]!.message).toHaveProperty('continuation', '第二回合续传');
+  });
   it('只有助手正文落盘成功后才通知宿主确认消息，持久化失败不发布成功', async () => {
     const { db, store, model, tools, create } = setup(); const observed = vi.fn(() => { expect(db.all('SELECT seq FROM independent_messages')).toHaveLength(2); });
     const engine = new IndependentTurnEngine(store, model, tools, { assistant: observed }); engines.push(engine);

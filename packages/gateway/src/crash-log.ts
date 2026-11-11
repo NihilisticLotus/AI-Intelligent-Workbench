@@ -65,7 +65,9 @@ export function readLastExit(dataDir: string): import('@aic/protocol').Hello['la
       const r = JSON.parse(last.slice(last.indexOf('生命周期 ') + 5)) as { phase: string; pid: number; at: number; reason: string | null; code?: number };
       return { clean: r.phase === 'exit' && (r.code ?? 0) === 0, at: r.at, reason: r.phase === 'exit' ? r.reason : '上次运行没有正常退出（pid ' + r.pid + '）' };
     }
-    const legacy = lines.findLast((l) => /启动|退出/.test(l));
+    // 旧格式日志没有生命周期记录。本次进程在调用前已写入自己的“启动 v…pid”一行，必须排除，否则每次都判成上次没有正常退出（ISSUE-0057）。
+    const own = `，pid ${process.pid}`;
+    const legacy = lines.findLast((l) => /启动|退出/.test(l) && !(l.includes(' 启动 v') && l.trimEnd().endsWith(own)));
     return legacy ? { clean: /正常退出/.test(legacy), at: Date.parse(legacy.slice(0, 24)) || Date.now(), reason: /正常退出/.test(legacy) ? '正常退出' : '上次运行没有正常退出' } : null;
   } catch { return null; }
 }

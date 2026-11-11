@@ -62,7 +62,7 @@ describe('受限模型元数据 HTTP', () => {
     expect(metadataAddressAllowed(new URL('https://198.18.0.5/v1'), '198.18.0.5', false, on)).toBe(false); // 直接填写 IP 不放行
     for (const ip of ['127.0.0.1','10.1.1.1','192.168.1.1','169.254.169.254','100.64.1.1','::1']) expect(metadataAddressAllowed(domain, ip, false, on)).toBe(false);
   });
-  it('fake-ip 解析经真实连接路径：关闭时提示可在设置里允许，打开后请求越过地址校验', async () => {
+  it('fake-ip 解析经真实连接路径：关闭时提示可在设置里允许，混合结果即使打开也拒绝', async () => {
     const base = new URL('https://proxy.example.com/api/v1'); const url = new URL(base.href + '/models');
     // lookup 返回 198.18.x，模拟代理 fake-ip；不需要真的连上，只看地址校验的结果
     const resolver = ((_h:unknown,_o:unknown,cb:Function) => cb(null,[{address:'198.18.0.9',family:4}])) as typeof lookup;
@@ -71,9 +71,8 @@ describe('受限模型元数据 HTTP', () => {
     // 混合结果（fake-ip + 内网）即使打开也拒绝
     const mixed = ((_h:unknown,_o:unknown,cb:Function) => cb(null,[{address:'198.18.0.9',family:4},{address:'10.0.0.1',family:4}])) as typeof lookup;
     await expect(readMetadataJson({base,url,publicCatalog:false,lookup:mixed,addressPolicy:{allowFakeIpProxy:true},timeoutMs:1500})).rejects.toThrow('元数据域名解析到受限地址');
-    // 打开后地址校验通过：198.18.0.9 在本机没有可用路由，失败只能发生在连接阶段，错误不再是地址被拒
-    const err = await readMetadataJson({base,url,publicCatalog:false,lookup:resolver,addressPolicy:{allowFakeIpProxy:true},timeoutMs:1500}).then(()=>null,(e)=>e as Error);
-    expect(err).not.toBeNull(); expect(err!.message).not.toMatch(/fake-ip|受限地址|网络规则/);
+    // 打开后的放行只在上面的纯函数用例里核对，这里不实际连接 198.18.x：
+    // 本机开着 fake-ip 代理时，这个连接会被代理接走并真的访问外网（2026-11-11 复现），默认测试必须离线。
   }, 10_000);
   it('localhost 通过被校验的 lookup 连接，不进行第二次解析', async () => {
     const target = await fixture((_req,res) => {res.writeHead(200,{'content-type':'application/json'});res.end('{}');});

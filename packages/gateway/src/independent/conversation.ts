@@ -101,13 +101,25 @@ export class IndependentConversationStore {
     const r = this.db.get('SELECT * FROM independent_checkpoints WHERE session_id=? ORDER BY through_seq DESC LIMIT 1', turn.sessionId);
     const checkpoint = r ? IndependentContextCheckpoint.parse({ id: r.id, sessionId: r.session_id, throughSeq: r.through_seq, sourceHash: r.source_hash, summary: r.summary, createdAt: r.created_at }) : null;
     if (checkpoint && entries[checkpoint.throughSeq - 1]?.hash !== checkpoint.sourceHash) throw Errors.invalidState('压缩来源摘要不一致');
-    return { systemPrompt: String(this.row(id).system_prompt), checkpoint,
+    const systemPrompt = String(this.row(id).system_prompt);
+    // 私有续传在生成时绑定了绑定、系统提示（含项目规则正文）、人工总结和工具声明（modelWire 的 scope / prefix）。
+    // 其中任何一项与当前回合不同，就只移除本次输入里的专用资料、保留可移植原文；原始记录不改写，也不放宽 modelWire 的校验（ISSUE-0056）。
+    const basis = new Map<string, { binding: IndependentModelBinding; systemPrompt: string; tools: boolean }>();
+    const basisOf = (turnId: string) => {
+      let value = basis.get(turnId);
+      if (!value) { const record = this.get(turnId); value = { binding: record.binding, systemPrompt: String(this.row(turnId).system_prompt), tools: record.limits.maxToolCalls > 0 }; basis.set(turnId, value); }
+      return value;
+    };
+    return { systemPrompt, checkpoint,
       messages: entries.filter((e) => e.seq > (checkpoint?.throughSeq ?? 0)).map((e) => {
         const message = e.message;
         if (message.role !== 'assistant' || !message.continuation) return message;
-        const old = this.get(e.turnId).binding;
-        if (old.serviceId === turn.binding.serviceId && old.modelId === turn.binding.modelId && old.configRevision === turn.binding.configRevision
-            && old.modelRevision === turn.binding.modelRevision && old.createdAt === turn.binding.createdAt) return message;
+        const old = basisOf(e.turnId);
+        if (old.binding.serviceId === turn.binding.serviceId && old.binding.modelId === turn.binding.modelId && old.binding.configRevision === turn.binding.configRevision
+            && old.binding.modelRevision === turn.binding.modelRevision && old.binding.createdAt === turn.binding.createdAt
+            && old.systemPrompt === systemPrompt && old.tools === turn.limits.maxToolCalls > 0
+            // 在当前总结保存之前产生的消息，生成时用的是更早的总结或没有总结
+            && !(checkpoint && e.createdAt <= checkpoint.createdAt)) return message;
         const { continuation: _private, ...portable } = message; return portable;
       }) };
   }

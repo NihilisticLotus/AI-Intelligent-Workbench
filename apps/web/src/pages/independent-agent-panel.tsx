@@ -7,7 +7,7 @@ import { api, useApp } from '../state/app';
 import { ApiRequestError } from '../api/http';
 import { Dialog, ErrorNotice, asApiError, confirmDialog, openDialog } from '../components/ui';
 import { toast } from '../state/ui';
-import { capabilityKinds, capabilityLabels, capabilityText, evidenceApplies, latestRequest, overridePatch, sourceLabels } from '../lib/independent';
+import { capabilityKinds, capabilityLabels, capabilityText, evidenceApplies, latestRequest, overridePatch, sourceLabels, staleText } from '../lib/independent';
 import { IndependentDiscoveryDialog } from './independent-discovery-dialog';
 
 const protocolLabels = { chat_completions: 'Chat Completions', responses: 'Responses', anthropic_messages: 'Anthropic Messages' };
@@ -72,7 +72,7 @@ export function IndependentAgentPanel() {
             <div className="independent-heading"><div><h3>{model.name}</h3><code>{model.remoteModelId}</code></div><span>{model.enabled ? '已启用' : '已停用'}{snapshot.selection?.modelId === model.id ? ' · 默认模型' : ''}</span></div>
             <dl className="independent-summary">{(['contextWindow', 'imageInput', 'tools', 'effortLevels'] as const).map((field) => {
               const cap = model.capabilities.find((c) => c.field === field);
-              return <div key={field}><dt>{capabilityLabels[field]}</dt><dd>{capabilityText(cap?.value ?? null)}{cap?.conflict ? ' · 来源冲突' : ''}{cap?.stale ? ' · 来源过期或配置变更' : ''}</dd></div>;
+              return <div key={field}><dt>{capabilityLabels[field]}</dt><dd>{capabilityText(cap?.value ?? null)}{cap?.conflict ? ' · 来源冲突' : ''}{staleText(cap)}</dd></div>;
             })}</dl>
             <div className="independent-actions"><button className="btn" onClick={() => openDialog((close) => <CapabilitiesDialog service={service} initial={model} close={close} saved={refresh} />)}>能力与来源</button>
               <button className="btn" onClick={() => modelDialog(service, model)}>编辑模型</button>
@@ -195,7 +195,7 @@ function CapabilitiesDialog({ service: initialService, initial, close, saved }: 
       const automatic = draft[field] === '' || (draft[field] === undefined && !manual);
       const input = draft[field] ?? (manual ? Array.isArray(manual.value) ? manual.value.length ? manual.value.join(', ') : '[]' : String(manual.value) : '');
       const kind = capabilityKinds[field]; const id = `ic-${field}`;
-      return <details key={field} className="independent-capability"><summary><strong>{capabilityLabels[field]}</strong><span>{capabilityText(cap?.value ?? null)} · {cap?.sourceKind ? sourceLabels[cap.sourceKind] : '无已知来源'}{cap?.conflict ? ' · 来源冲突' : ''}{cap?.stale ? ' · 已过期或配置已变更' : ''}{draft[field] !== undefined ? ' · 待保存' : ''}</span></summary>
+      return <details key={field} className="independent-capability"><summary><strong>{capabilityLabels[field]}</strong><span>{capabilityText(cap?.value ?? null)} · {cap?.sourceKind ? sourceLabels[cap.sourceKind] : '无已知来源'}{cap?.conflict ? ' · 来源冲突' : ''}{staleText(cap)}{draft[field] !== undefined ? ' · 待保存' : ''}</span></summary>
         <div className="independent-capability-body"><div className="form-row"><label htmlFor={id}>手动设置</label>
           {kind === 'flag' ? <select className="select" id={id} value={input} onChange={(e) => setDraft({ ...draft, [field]: e.target.value })}><option value="">自动（无来源时未知）</option><option value="true">支持</option><option value="false">不支持</option></select>
             : <input className="input" id={id} type="text" inputMode={kind === 'number' ? 'numeric' : 'text'} maxLength={kind === 'list' ? 3300 : 100} value={input} placeholder={automatic ? '自动（无来源时未知）' : ''} onChange={(e) => setDraft({ ...draft, [field]: e.target.value })} />}

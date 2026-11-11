@@ -9,6 +9,7 @@ import { sniffAttachment } from '../attachments';
 import { IndependentCatalog } from './catalog';
 import { ModelTransportError, modelBody, postModel } from './model-http';
 import { modelWire } from './model-wire';
+import { usableCapability } from './capabilities';
 import { contextCounter, contextCountReply, contextInput, contextReport } from './context';
 
 export class IndependentApiDriver implements IndependentModelDriver {
@@ -39,7 +40,7 @@ export class IndependentApiDriver implements IndependentModelDriver {
   private async run(request: IndependentModelRequest, signal: AbortSignal) {
     const check = () => { if (signal.aborted) throw new ModelTransportError('cancelled'); this.checkBinding(request.binding); };
     check(); const { service, model, key } = await this.catalog.credentials(request.binding.taskId); check();
-    const capability = (field: IndependentCapabilityField) => { const c = model.capabilities.find((v) => v.field === field); return c && !c.stale && !c.conflict ? c.value : null; };
+    const capability = (field: IndependentCapabilityField) => usableCapability(model, field);
     request = { ...request, tools: request.tools ?? this.config.tools ?? [], generation: { ...this.config.generation, ...request.generation } };
     if (new Set(request.tools!.map((t) => t.name)).size !== request.tools!.length) throw new ModelTransportError('request');
     if ((request.tools!.length || request.messages.some((m) => m.role === 'assistant' && m.toolCalls.length)) && capability('tools') !== true) throw new ModelTransportError('request');

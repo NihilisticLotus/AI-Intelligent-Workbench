@@ -15,6 +15,7 @@ import { IndependentConversationStore } from '../src/independent/conversation';
 import { IndependentTurnEngine } from '../src/independent/turn-engine';
 import { seed } from './fixtures/independent-journal';
 import { independentModelTools } from '../src/independent/tool-definitions';
+import { capabilityScope } from '../src/independent/capabilities';
 
 const servers: Server[] = [], databases: Db[] = [], dirs: string[] = [];
 const calls: { url: string; headers: Record<string, any>; body: any }[] = [];
@@ -49,6 +50,19 @@ async function fixture(protocol: IndependentApiProtocol = 'chat_completions', ha
 }
 
 describe('独立模型三协议正式传输', () => {
+  it('能力来源过期后仍按原值发送工具和输出上限，不当成未知拒绝（ISSUE-0059）', async () => {
+    const f = await fixture('chat_completions', undefined, { tools: null, streamUsage: null });
+    const scope = capabilityScope(f.catalog.getService(f.service.id), 'original/model-id');
+    const old = (field: 'tools' | 'outputLimit', value: unknown, i: number) => ({ id: 'old-' + i, field, value, kind: 'endpoint' as const, scope,
+      sourceUrl: 'https://example.com/v1/models', sourceVersion: 'fixture-v1', fieldPath: field, observedAt: 1, expiresAt: 2 });
+    let model = f.catalog.getModel(f.service.id, f.model.id);
+    model = f.catalog.recordEvidence(f.service.id, model.id, [old('tools', true, 0), old('outputLimit', 1000, 1)] as never);
+    expect(model.capabilities.find((c) => c.field === 'tools')).toMatchObject({ value: true, stale: true });
+    // 记录证据改变了模型修订，任务需重新绑定（与真实“重新获取后应用配置”一致）
+    const binding = f.catalog.rebind('task', { serviceId: f.service.id, modelId: model.id }, f.binding);
+    await f.driver({ tools: independentModelTools('separate_v2') }).complete({ ...f.request, binding }, f.signal);
+    expect(calls).toHaveLength(1); expect(calls[0]!.body.tools).toHaveLength(7); expect(calls[0]!.body.max_completion_tokens).toBe(1000);
+  });
   it.each(['chat_completions', 'responses', 'anthropic_messages'] as const)('%s 实际发送分开文件工具的根属性和完整必填，不使用顶层联合', async (protocol) => {
     const f = await fixture(protocol, (_req, res) => { res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(protocol === 'responses' ? responses([]) : protocol === 'anthropic_messages' ? messages([]) : chat())); });

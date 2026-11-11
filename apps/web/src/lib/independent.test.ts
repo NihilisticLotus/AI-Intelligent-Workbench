@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { IndependentCapabilityField, IndependentDiscoveryParseFailure, type IndependentModel, type IndependentService } from '@aic/protocol';
-import { capabilityLabels, capabilityText, discoveryParseFailureText, discoveryRootShapeText, evidenceApplies, requestFailureText, latestRequest, overridePatch } from './independent';
+import { capabilityLabels, capabilityText, discoveryParseFailureText, discoveryRootShapeText, evidenceApplies, requestFailureText, latestRequest, overridePatch, staleText } from './independent';
 
 describe('独立模型能力编辑', () => {
   it('固定解析分类有中文说明，旧诊断明确未记录，不推断上游结构', () => {
@@ -57,5 +57,14 @@ describe('独立模型能力编辑', () => {
     const old = requests.begin(); const pending = slow.then((v) => { if (requests.current(old)) show = v; });
     const newer = requests.begin(); if (requests.current(newer)) show = '新服务目录'; finish('旧服务目录'); await pending;
     expect(show).toBe('新服务目录'); requests.invalidate(); expect(requests.current(newer)).toBe(false);
+  });
+});
+
+describe('能力来源过期提示（ISSUE-0059）', () => {
+  it('过期但有值时说明仍在使用；无值时说明没有适用证据；未过期无提示', () => {
+    expect(staleText({ stale: true, value: true })).toBe(' · 来源已过期，仍在使用，建议重新获取复核');
+    expect(staleText({ stale: true, value: null })).toBe(' · 来源过期或配置已变更');
+    expect(staleText({ stale: false, value: true })).toBe('');
+    expect(staleText(undefined)).toBe('');
   });
 });

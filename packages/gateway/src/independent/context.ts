@@ -2,6 +2,7 @@
 import { createHash } from 'node:crypto';
 import { IndependentContextPolicy, IndependentContextReport, type IndependentApiProtocol, type IndependentModel } from '@aic/protocol';
 import { ModelTransportError, modelBody } from './model-http';
+import { usableCapability } from './capabilities';
 
 /** 仅接受已生成的协议对象，不从模型名猜计数接口或图片成本。 */
 export function contextInput(protocol: IndependentApiProtocol, body: Record<string, any>) {
@@ -35,8 +36,7 @@ export function contextReport(protocol: IndependentApiProtocol, body: Record<str
     else if (protocol === 'chat_completions' && block.type === 'image_url') { imageCount++; block.image_url.url = ''; }
     else if (protocol === 'anthropic_messages' && block.type === 'image') { imageCount++; block.source.data = ''; }
   }
-  const cap = (field: 'inputLimit' | 'contextWindow') => { const c = model.capabilities.find((item) => item.field === field && !item.stale && !item.conflict);
-    return typeof c?.value === 'number' ? c.value : null; };
+  const cap = (field: 'inputLimit' | 'contextWindow') => { const value = usableCapability(model, field); return typeof value === 'number' ? value : null; };
   const safetyTokens = policy.safetyTokens ?? 2048, modelInputLimit = cap('inputLimit'), contextWindow = cap('contextWindow');
   const localInputLimit = policy.localInputLimit ?? null, imageTokensPerImage = policy.mode === 'local' ? policy.imageTokensPerImage ?? null : null;
   // 一字节按一个 token 估算并包含完整 JSON 包装；这是保守启发式，不能承诺任意 tokenizer 的数学上界。

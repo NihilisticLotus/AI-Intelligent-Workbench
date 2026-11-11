@@ -1,5 +1,14 @@
 // 只解析已经校验的证据，不请求网络、不从模型名猜测能力。
-import { IndependentCapabilityField, type IndependentCapabilityEvidence, type IndependentCapabilityScope, type IndependentCapabilityResolution, type IndependentService } from '@aic/protocol';
+import { IndependentCapabilityField, type IndependentCapabilityEvidence, type IndependentCapabilityScope, type IndependentCapabilityResolution, type IndependentService, type IndependentModel } from '@aic/protocol';
+
+/**
+ * 运行时取能力值的唯一入口（ISSUE-0059）：来源过期（stale）的值继续使用，界面另行提示需复核；
+ * 只有来源冲突或没有适用于当前配置的证据（此时 value 本身为 null）才算未知。
+ */
+export function usableCapability(model: Pick<IndependentModel, 'capabilities'>, field: IndependentCapabilityField) {
+  const c = model.capabilities.find((item) => item.field === field);
+  return c && !c.conflict ? c.value : null;
+}
 
 export function capabilityScope(service: IndependentService, remoteModelId: string): IndependentCapabilityScope {
   return { serviceId: service.id, configRevision: service.configRevision, protocol: service.protocol,

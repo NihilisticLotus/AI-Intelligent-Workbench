@@ -2,7 +2,7 @@
 import {
   IndependentTaskOptions, IndependentTaskState, IndependentApprovalDetail, IndependentHistoryPage,
   IndependentCommandSpec,
-  type AgentInfo, type IndependentTaskReference, type PermissionLevel, type IndependentToolCall,
+  type AgentInfo, type IndependentTaskReference, type PermissionLevel, type IndependentToolCall, type IndependentCapabilityField,
 } from '@aic/protocol';
 import { redact } from '@aic/adapters';
 import type { Db } from '../db';
@@ -26,6 +26,7 @@ import { IndependentAttachments } from './attachments';
 import { IndependentApiDriver } from './model-driver';
 import { IndependentTurnEngine, type IndependentApprovalClock } from './turn-engine';
 import { independentModelTools } from './tool-definitions';
+import { usableCapability } from './capabilities';
 const STOP_TEXT = {
   completed: '本回合已完成，等待你验收。', cancelled: '本回合已停止，实际工具与连接已收尾。',
   interrupted: '本回合已中断，请核对记录后继续。', timed_out: '已达到回合时间上限。',
@@ -63,7 +64,7 @@ export class IndependentTaskRuntime {
   info(): AgentInfo {
     const models = this.catalog.listServices().filter((s) => s.enabled).flatMap((s) => this.catalog.listModels(s.id)
       .filter((m) => m.enabled).map((m) => {
-        const capability = (field: string) => m.capabilities.find((c) => c.field === field && !c.stale && !c.conflict)?.value;
+        const capability = (field: IndependentCapabilityField) => usableCapability(m, field);
         const context = capability('contextWindow'), vision = capability('imageInput');
         return { id: m.id, name: `${s.name} / ${m.name}`, contextWindow: typeof context === 'number' ? context : null,
           vision: typeof vision === 'boolean' ? vision : null };
@@ -89,7 +90,7 @@ export class IndependentTaskRuntime {
       }
       const model = this.catalog.getModel(options.selection.serviceId, options.selection.modelId);
       const service = this.catalog.getService(options.selection.serviceId);
-      const cap = (field: string) => model.capabilities.find((c) => c.field === field && !c.stale && !c.conflict)?.value;
+      const cap = (field: IndependentCapabilityField) => usableCapability(model, field);
       if (options.limits.maxToolCalls > 0 && cap('tools') !== true) throw Errors.badRequest('模型工具能力未知或不支持，请核对能力，或将工具次数设为 0');
       if (options.generation.effort && (cap('thinking') !== true || !Array.isArray(cap('effortLevels'))
         || !(cap('effortLevels') as string[]).includes(options.generation.effort))) throw Errors.badRequest('思考强度缺少适用能力证据');

@@ -84,3 +84,12 @@ export function requestFailureText(settlement: { failure: IndependentRequestFail
   if (settlement.failure !== 'protocol') return base;
   return settlement.protocolDetail ? `${base}：${protocolDetailLabels[settlement.protocolDetail]}` : `${base}（未记录细分）`;
 }
+
+/**
+ * 能力来源过期时的提示（ISSUE-0059）：过期的值仍被工作台使用，只提示需要复核；
+ * 没有值时说明来源过期或配置变更后没有适用证据。
+ */
+export function staleText(cap: { stale: boolean; value: unknown } | undefined): string {
+  if (!cap?.stale) return '';
+  return cap.value !== null ? ' · 来源已过期，仍在使用，建议重新获取复核' : ' · 来源过期或配置已变更';
+}

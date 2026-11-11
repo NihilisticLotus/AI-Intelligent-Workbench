@@ -65,10 +65,14 @@ describe('发送前的上下文检查', () => {
     await expect(f.driver({ context: { mode } }).complete(f.request, f.signal)).rejects.toMatchObject({ reason: 'context' });
     expect(seen).toHaveLength(0); expect(f.reports[0]).toMatchObject({ status: 'limits_unknown', modelInputLimit: null, contextWindow: null, counterRequests: 0 });
   });
-  it('过期 / 冲突能力不用作窗口，明确的本地上限不写回模型规格', async () => {
-    const f = await fixture('responses'), m = { ...f.model, capabilities: f.model.capabilities.map((c) => ({ ...c, stale: c.field === 'inputLimit', conflict: c.field === 'contextWindow' })) };
-    expect(contextReport('responses', body('responses'), m, { mode: 'local' }).status).toBe('limits_unknown');
-    expect(contextReport('responses', body('responses'), m, { mode: 'local', localInputLimit: 10_000 })).toMatchObject({ status: 'ready', modelInputLimit: null, contextWindow: null, localInputLimit: 10_000 });
+  it('冲突能力不用作窗口；过期能力按原值使用（ISSUE-0059）；明确的本地上限不写回模型规格', async () => {
+    const f = await fixture('responses');
+    const conflicted = { ...f.model, capabilities: f.model.capabilities.map((c) => ({ ...c, conflict: c.field === 'inputLimit' || c.field === 'contextWindow' })) };
+    expect(contextReport('responses', body('responses'), conflicted, { mode: 'local' }).status).toBe('limits_unknown');
+    expect(contextReport('responses', body('responses'), conflicted, { mode: 'local', localInputLimit: 10_000 })).toMatchObject({ status: 'ready', modelInputLimit: null, contextWindow: null, localInputLimit: 10_000 });
+    // 2026-11-11 前的规则是过期即不用；按用户决定改为继续使用并在界面提示复核
+    const stale = { ...f.model, capabilities: f.model.capabilities.map((c) => ({ ...c, stale: c.field === 'inputLimit', conflict: c.field === 'contextWindow' })) };
+    expect(contextReport('responses', body('responses'), stale, { mode: 'local' })).toMatchObject({ status: 'ready', modelInputLimit: 100_000, contextWindow: null });
   });
   it.each(protocols)('%s 图片按出现次数算，未知成本停止，编码长度不伪装为图像 token', async (protocol) => {
     const f = await fixture(protocol), b: any = body(protocol), content = b[protocol === 'responses' ? 'input' : 'messages'][0].content;

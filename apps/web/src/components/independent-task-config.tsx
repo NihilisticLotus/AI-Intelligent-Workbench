@@ -33,7 +33,7 @@ export function IndependentTaskConfig({ initialOptions, initialModelId, onChange
   }, [initialModelId, models, !!initialOptions]);
   const parsed = IndependentTaskOptions.safeParse(draft);
   const service = services.find((s) => s.id === draft.selection.serviceId), model = models.find((m) => m.id === draft.selection.modelId);
-  const capability = (field: string) => model?.capabilities.find((c) => c.field === field && !c.stale && !c.conflict)?.value;
+  const capability = (field: string) => model?.capabilities.find((c) => c.field === field && !c.conflict)?.value;
   const blockedTools = draft.limits.maxToolCalls > 0 && capability('tools') !== true;
   const usable = !!service?.enabled && !!model?.enabled && model.serviceId === service.id && !blockedTools;
   useEffect(() => { onChange(parsed.success && usable && !loading ? parsed.data : null); }, [draft, usable, loading]);

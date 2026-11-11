@@ -4,6 +4,7 @@ import { IndependentAssistantMessage, IndependentToolArguments, type Independent
   type IndependentService, type IndependentModel, type IndependentModelDelta, type IndependentUsage, type IndependentProtocolDetail } from '@aic/protocol';
 import { ModelTransportError, modelJson } from './model-http';
 import { plaintextReasoningService } from './official-metadata';
+import { usableCapability } from './capabilities';
 
 // 每处严格校验失败都带固定分类（ISSUE-0054），只说明哪一类不符合，不含上游内容
 const bad = (detail: IndependentProtocolDetail = 'shape'): never => { throw new ModelTransportError('protocol', null, detail); };
@@ -105,12 +106,12 @@ export function modelWire(request: IndependentModelRequest, service: Independent
       messages.push({ role: 'assistant', content });
     }
   }
-  const outputLimit = model.capabilities.find((c) => c.field === 'outputLimit' && !c.conflict && !c.stale)?.value;
+  const outputLimit = usableCapability(model, 'outputLimit');
   const maxOutput = Math.min(request.maxOutputTokens, typeof outputLimit === 'number' ? outputLimit : request.maxOutputTokens);
   const body: Record<string, any> = { model: model.remoteModelId, stream: generation.stream !== false };
   if (protocol === 'chat_completions') {
     body.messages = messages; body[generation.chatTokenLimitField ?? 'max_completion_tokens'] = maxOutput;
-    if (body.stream && model.capabilities.some((c) => c.field === 'streamUsage' && c.value === true && !c.stale && !c.conflict)) body.stream_options = { include_usage: true };
+    if (body.stream && usableCapability(model, 'streamUsage') === true) body.stream_options = { include_usage: true };
     if (tools.length) body.tools = tools.map((t) => ({ type: 'function', function: { ...t, strict: false } }));
     if (generation.effort) body.reasoning_effort = generation.effort;
     if (generation.thinking) throw new ModelTransportError('request');

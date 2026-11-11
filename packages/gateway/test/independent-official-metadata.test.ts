@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { IndependentDiscoveredModel, IndependentService } from '@aic/protocol';
 import { supplementOfficial } from '../src/independent/official-metadata';
-import { capabilityScope, resolveCapabilities } from '../src/independent/capabilities';
+import { capabilityScope, resolveCapabilities, usableCapability } from '../src/independent/capabilities';
 const service = (extra: Partial<IndependentService> = {}): IndependentService => ({id:'s',name:'服务',revision:1,configRevision:1,protocol:'responses',baseUrl:'https://open.bigmodel.cn/api/v1',authentication:'none',apiVersion:null,providerId:null,plan:null,enabled:true,hasSecret:false,secretHint:null,createdAt:1,updatedAt:1,...extra});
 const items = (): IndependentDiscoveredModel[] => ['glm-5.3','glm-5.3-flash','other-image-max'].map(id=>({remoteModelId:id,name:id,evidence:[]}));
 const reviewedAt=Date.UTC(2026,10,8,12,17);
@@ -31,5 +31,21 @@ describe('精确适用范围的官方资料快照',()=>{
     expect(resolveCapabilities([...evidence,endpoint],scope,reviewedAt).find(c=>c.field==='imageInput')?.value).toBe(false);
     const manual={...original,id:'manual',kind:'manual' as const,value:false};
     expect(resolveCapabilities([...evidence,manual],scope,reviewedAt).find(c=>c.field==='imageInput')).toMatchObject({value:false,sourceKind:'manual',conflict:true});
+  });
+  it('到期后能力仍可用、只标需复核；冲突或配置变更后的无值才算未知（ISSUE-0059）',()=>{
+    const s=service();const models=items();supplementOfficial(s,models);
+    const scope=capabilityScope(s,'glm-5.3-flash');const later=reviewedAt+30*86400000;
+    const caps=resolveCapabilities(models[1]!.evidence,scope,later);
+    expect(caps.find(c=>c.field==='tools')).toMatchObject({value:true,stale:true,conflict:false});
+    for(const field of ['tools','streaming','imageInput','thinking'] as const) expect(usableCapability({capabilities:caps},field)).toBe(true);
+    expect(usableCapability({capabilities:caps},'outputLimit')).toBe(131072);
+    expect(usableCapability({capabilities:caps},'effortLevels')).toEqual(['none','minimal','low','medium','high','xhigh','max']);
+    // 配置修订后旧证据不适用：值为 null，仍是未知
+    const revised=resolveCapabilities(models[1]!.evidence,capabilityScope({...s,configRevision:2},'glm-5.3-flash'),later);
+    expect(revised.find(c=>c.field==='tools')).toMatchObject({value:null,stale:true}); expect(usableCapability({capabilities:revised},'tools')).toBeNull();
+    // 冲突时即使有人工值也不用
+    const original=models[1]!.evidence.find(e=>e.field==='tools')!;
+    const conflicted=resolveCapabilities([...models[1]!.evidence,{...original,id:'other',sourceUrl:'https://docs.bigmodel.cn/other',value:false}],scope,later);
+    expect(usableCapability({capabilities:conflicted},'tools')).toBeNull();
   });
 });

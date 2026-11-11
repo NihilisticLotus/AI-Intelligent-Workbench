@@ -568,7 +568,7 @@ ErrorCode 增加：`agent.auth_required`、`agent.quota_exceeded`、`agent.crash
 |---|---|
 | 原生 Windows Chrome 最小化后实际等待 610014ms 发送，619199ms 真实 CodeBuddy 审批到达；用户确认通知、恢复无刷新卡片并拒绝，文件未创建；真实同场景通过，修复 726e7ef，详见 step-1.3 最新节 | ISSUE-0014（fixed） |
 | 异常日志、down 提示与恢复已验证；用户物理关闭记录正常 SIGHUP，另一次受控退出的内嵌页提示计时 1618ms 通过；原始意外退出根因未查明 | ISSUE-0015 |
-| 用户已取消 Claude 登录；代登录与第三方 API 替换按新边界停止。独立真实文本、创建审批、流式替换、Flash 图片 / 换模型续接及 HTTP 取消 / 重启恢复通过，旧工具失败原因仍调查；两份旧工作台密钥已清理，目录和历史按授权保留 | ISSUE-0007、0013、0026（wontfix：旧认证路线取消）；ISSUE-0028（fixed）；ISSUE-0029、0042 |
+| 用户已取消 Claude 登录；代登录与第三方 API 替换按新边界停止。独立真实文本、创建审批、流式替换、Flash 图片 / 换模型续接及 HTTP 取消 / 重启恢复、Coding Plan 带工具调用与标准 Key 模型列表通过；旧工具失败原因已复现确认；两份旧工作台密钥已清理，目录和历史按授权保留 | ISSUE-0007、0013、0026（wontfix：旧认证路线取消）；ISSUE-0028、0029、0042（fixed / 关闭），见 9.36 |
 | 原生 Claude 新合成任务的拒绝写入、sonnet / low 切换及 Gateway 重启后同一会话 / 配置 / 暗号恢复通过，结合既有 Codex / CodeBuddy 证据关闭；原实现 d57e73b，详见 step-1.3 最新节 | ISSUE-0012（fixed） |
 | 额度提示与无回应停止已修复；假 ACP 实际时钟 60668ms 提醒、600517ms 自动停止已补验，默认回归通过；真实 Claude 额度请求未重发验证 | ISSUE-0021、ISSUE-0022（fixed） |
 | Claude 工具行标题更新已修复；假 ACP 与本轮原生真实 Write 的 tool.update / 合成路径标题均通过 | ISSUE-0011（fixed） |
@@ -1260,3 +1260,11 @@ ISSUE-0044 的离线反例确认：仅保存任务预算也会重写绑定创建
 
 - 续传方式按服务区分：只对官方资料的精确范围（Responses、https://open.bigmodel.cn/api/v1、未设 API 版本 / 套餐、providerId 未设或 zhipuai）接受明文 `reasoning_text`，不请求 `reasoning.encrypted_content`，下一轮按官方思维链输入格式 `{ type: 'reasoning', content: { type: 'reasoning_text', text } }` 回传，只回传文档定义的字段；空或格式不明仍 reasoning_missing。其他服务的严格规则不变。流式 `response.reasoning_text.delta` 显示为思考。
 - 独立回合的时限不计等待用户审批的时间：请求审批时暂停计时，审批结束后恢复并重排剩余时间；审批自身 30 分钟超时、停止与取消不变。
+
+### 9.36 第 1.3 步收尾盘点（2026-11-11）
+
+- 9.15 的新验收边界已逐条有证据，ISSUE-0029 关闭（对照见该单时间线）；ISSUE-0023 列出的真实输入项全部有证据，最后的失败模型标记 11-10 真实通过，关闭。
+- 1.3 剩下两项不能靠写代码完成：
+  1. ISSUE-0004：干净环境首次启动。Windows 沙盒功能已开启但需重启电脑才生效，重启后在沙盒里实测。
+  2. ISSUE-0015：原始意外退出的根因。崩溃日志（11-07 起）和 stdio 错误监听（ISSUE-0052）已就位；11-11 核对开发与正式数据目录的 gateway.log，没有任何未捕获异常记录，只有被外部结束（预览工具停止、重启电脑）留下的“上次没有正常退出”。继续观察，再次发生时按日志补根因。
+- 这两项完成或按观察结论处理前，1.3 整体仍为部分通过。

@@ -6,14 +6,15 @@
 
 | 文档 | 说明 |
 |---|---|
-| [design/design.md](design/design.md) | 架构设计 v0.4.23：第三方设置归属、独立任务、自有循环、三协议、预算与恢复；DeepSeek Harness 参考、文件工具版本、旧密钥清理、有限诊断及已有模型官方能力预览 |
-| [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.12：统一选择器、附件、独立服务与模型、能力来源、任务策略 / 预算、私有审批、恢复、目录诊断、服务停止提示及已有模型能力预览 |
+| [design/design.md](design/design.md) | 架构设计 v0.4.30：详细面板、真实用量与工具输出；第三方设置归属、独立任务、自有循环、三协议、预算与恢复；DeepSeek Harness 参考、文件工具版本、旧密钥清理、有限诊断及已有模型官方能力预览 |
+| [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.16：详细六节、常用环境与未知状态；统一选择器、附件、独立服务与模型、能力来源、任务策略 / 预算、私有审批、恢复、目录诊断、服务停止提示及已有模型能力预览 |
 | [prototype/index.html](prototype/index.html) | 可点击原型（双击打开）：工作台、看板、Agent、资产、生成、自动化、监控、能力 |
 
 ## 调研
 
 | 文档 | 日期 | 说明 |
 |---|---|---|
+| [research/usage-quota.md](research/usage-quota.md) | 2026-11-12 | 1.4 用量与额度离线初稿：固定适配器字段、统计范围与待验证项；真实结果待补 |
 | [research/context.md](research/context.md) | 2026-11-05 | 切换模型不丢上下文：记忆方案、同类产品、ACP 能力 |
 | [research/handoff.md](research/handoff.md) | 2026-11-06 | 各家工作台的会话交接做法，自动交接方案 |
 | [research/media-gen.md](research/media-gen.md) | 2026-11-06 | 图片 / 视频 / 音频生成选型，28 条关键断言已独立核查 |

@@ -72,11 +72,13 @@ export class IndependentFiles {
     return IndependentFileSearchResult.parse({ matches: result.Matches.map((m) => ({ path: m.Path, line: m.Line, text: decode(Buffer.from(m.TextBase64, 'base64')), textTruncated: m.TextTruncated })),
       scannedFiles: result.ScannedFiles, scannedBytes: result.ScannedBytes, skipped: listed.skipped + result.Skipped, truncated: listed.truncated || result.Truncated });
   }
-  async rules(target: string | null = null, signal?: AbortSignal): Promise<IndependentProjectRules> {
+  private rulePaths(target: string | null) {
     const parts = target === null ? [] : workspaceRelative(target).split('/').slice(0, -1);
     if (parts.length > 32) throw Errors.tooLarge('目标目录过深，无法完整核对项目规则');
-    const paths = ['AGENTS.md', ...parts.map((_, index) => parts.slice(0, index + 1).join('/') + '/AGENTS.md')];
-    const result = await this.host.rules(paths, signal); check(signal);
+    return ['AGENTS.md', ...parts.map((_, index) => parts.slice(0, index + 1).join('/') + '/AGENTS.md')];
+  }
+  private ruleResult(result: Awaited<ReturnType<IndependentFileHost['rules']>>, signal?: AbortSignal): IndependentProjectRules {
+    check(signal);
     const files: IndependentProjectRules['files'] = []; const notices: string[] = [];
     for (const item of result) {
       if (!item.ok) { if (item.reason !== 'not_found') notices.push(`${item.path} 的规则无法完整读取，修改前需要核对`); continue; }
@@ -85,5 +87,12 @@ export class IndependentFiles {
       files.push({ path: item.path, sha256: item.hash, text: decode(bytes) });
     }
     return IndependentProjectRules.parse({ files, fingerprint: createHash('sha256').update(JSON.stringify(files.map((f) => [f.path, f.sha256]))).digest('hex'), complete: notices.length === 0, notices });
+  }
+  async rules(target: string | null = null, signal?: AbortSignal): Promise<IndependentProjectRules> {
+    return this.ruleResult(await this.host.rules(this.rulePaths(target), signal), signal);
+  }
+  async writeSnapshot(target: string, signal?: AbortSignal) {
+    const snapshot = await this.host.snapshot(target, this.rulePaths(target), signal);
+    return { rules: this.ruleResult(snapshot.items, signal), original: snapshot.original };
   }
 }

@@ -6,6 +6,7 @@ import { toast } from '../state/ui';
 import { attachmentLimit, clipboardFiles, screenshotName, visionWarning } from '../lib/attachments';
 import { Dialog, openDialog } from './ui';
 import { Icon } from './Icon';
+import { imageCache } from '../lib/image-cache';
 type Item = { key: string; file?: File; info?: AttachmentInfo; progress: number; error?: string };
 export function useAttachments(taskId: string | null) {
   const [items,setItems]=useState<Item[]>([]);const current=useRef(items);current.current=items;
@@ -52,7 +53,7 @@ export function useAttachmentInput(add:(files:File[])=>void) {
 }
 function AttachmentImage({taskId,info,file,onClick}:{taskId:string|null;info?:AttachmentInfo;file?:File;onClick:(url:string)=>void}) {
   const [url,setUrl]=useState(''),[error,setError]=useState(false);
-  useEffect(()=>{let active=true,local='';setError(false);const load=async()=>{try{const blob=file??await api.attachmentBlob(taskId!,info!.id);local=URL.createObjectURL(blob);if(active)setUrl(local);else URL.revokeObjectURL(local);}catch{if(active)setError(true);}};void load();return()=>{active=false;if(local)URL.revokeObjectURL(local);};},[file,info?.id,taskId]);
+  useEffect(()=>{let active=true,local='';setError(false);const load=async()=>{try{const blob=file??await imageCache.get(taskId!,info!.id,()=>api.attachmentBlob(taskId!,info!.id));local=URL.createObjectURL(blob);if(active)setUrl(local);else URL.revokeObjectURL(local);}catch{if(active)setError(true);}};void load();return()=>{active=false;if(local)URL.revokeObjectURL(local);};},[file,info?.id,taskId]);
   return error?<span role="status">预览失败</span>:<button type="button" className="attachment-image" disabled={!url} onClick={()=>onClick(url)} aria-label={`查看大图 ${info?.name??file?.name}`}><img src={url||undefined} alt={info?.name??file?.name??'图片'} width={120} height={90}/></button>;
 }
 function showImage(url:string,name:string){openDialog((close)=><Dialog title={name} onClose={close}><img className="attachment-large" src={url} alt={name}/></Dialog>);}

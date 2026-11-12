@@ -38,7 +38,13 @@ export class IndependentApiDriver implements IndependentModelDriver {
   }
   async waitForIdle(binding: IndependentModelBinding) { await this.active.get(binding.taskId)?.catch(() => {}); }
   private async run(request: IndependentModelRequest, signal: AbortSignal) {
-    const check = () => { if (signal.aborted) throw new ModelTransportError('cancelled'); this.checkBinding(request.binding); };
+    let lastBindingCheck = -Infinity;
+    const check = (force = true) => {
+      // 取消每个片段都检查；绑定在流中最多每 250ms 查一次，发送前和结算前仍强制核对。
+      if (signal.aborted) throw new ModelTransportError('cancelled');
+      const at = performance.now();
+      if (force || at - lastBindingCheck >= 250) { this.checkBinding(request.binding); lastBindingCheck = at; }
+    };
     check(); const { service, model, key } = await this.catalog.credentials(request.binding.taskId); check();
     const capability = (field: IndependentCapabilityField) => usableCapability(model, field);
     request = { ...request, tools: request.tools ?? this.config.tools ?? [], generation: { ...this.config.generation, ...request.generation } };
@@ -76,7 +82,7 @@ export class IndependentApiDriver implements IndependentModelDriver {
     }
     const redactor = new StreamRedactor(key ? [key] : []);
     const emit = (delta: Parameters<NonNullable<IndependentModelDriverConfig['onDelta']>>[1]) => {
-      check(); const text = redactor.push(delta.type, delta.text); if (text) this.config.onDelta?.(request.binding, { type: delta.type, text });
+      check(false); const text = redactor.push(delta.type, delta.text); if (text) this.config.onDelta?.(request.binding, { type: delta.type, text });
     };
     const wire = modelWire(request, service, model, attachments, emit), body = modelBody(wire.body); check();
     const headers: Record<string, string> = {};

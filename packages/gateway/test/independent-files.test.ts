@@ -44,6 +44,37 @@ afterEach(async () => {
 });
 
 describe('独立项目文本工具', () => {
+  it('修改计划一次宿主读取规则和原文，审批后重新读取再写入，总共三次启动', async () => {
+    const f = setup(); f.put('AGENTS.md', '先审批再写入'); f.put('file.txt', '原文');
+    const run = vi.spyOn(f.executor, 'run'), spec = replace('原文');
+    const proposal = await f.writes.prepare(identity, spec, 'ask');
+    expect(run).toHaveBeenCalledTimes(1); expect(proposal.beforeText).toBe('原文');
+    f.journal.approve(proposal.record.id);
+    expect((await f.writes.execute(proposal.record.id, spec, 'ask')).status).toBe('written');
+    expect(run).toHaveBeenCalledTimes(3); expect(readFileSync(path.join(f.root, 'file.txt'), 'utf8')).toBe('改文');
+  }, 30_000);
+  it('合并快照容纳规则和原文的原有上限，仍拒绝超限规则及原文', async () => {
+    const f = setup(); f.put('AGENTS.md', 'r'.repeat(256 * 1024)); f.put('file.txt', 'a'.repeat(512 * 1024));
+    const snapshot = await f.files.writeSnapshot('file.txt');
+    expect(snapshot.rules.complete).toBe(true); expect(snapshot.rules.files[0]!.text.length).toBe(256 * 1024); expect(snapshot.original?.bytes.length).toBe(512 * 1024);
+    f.put('AGENTS.md', 'r'.repeat(256 * 1024 + 1));
+    expect((await f.files.writeSnapshot('file.txt')).rules.complete).toBe(false);
+    f.put('file.txt', 'a'.repeat(512 * 1024 + 1)); await expect(f.files.writeSnapshot('file.txt')).rejects.toMatchObject({ reason: 'too_large' });
+  }, 30_000);
+  it('合并快照仍拒绝联接、硬链接、私有路径和取消，不让规则身份或原文摘要被替换', async () => {
+    const f = setup(), outside = path.join(f.directory, 'outside'); mkdirSync(outside); writeFileSync(path.join(outside, 'marker'), '外部夹具');
+    symlinkSync(outside, path.join(f.root, 'junction'), 'junction'); linkSync(path.join(outside, 'marker'), path.join(f.root, 'hard'));
+    for (const relative of ['junction/marker', 'hard', 'private-state/marker']) await expect(f.host.snapshot(relative, ['AGENTS.md'])).rejects.toMatchObject({ reason: 'forbidden' });
+    const run = vi.spyOn(f.executor, 'run');
+    await expect(f.host.snapshot('file.txt', ['AGENTS.md'], AbortSignal.abort())).rejects.toMatchObject({ reason: 'cancelled' }); expect(run).not.toHaveBeenCalled();
+    const original = { ok: true, data: Buffer.from('原文').toString('base64'), hash: hash('原文'), fileId: '12345678-1234567812345678' };
+    const result = (rules: unknown, patch = {}) => ({ reason: 'completed' as const, exitCode: 0, stdout: JSON.stringify({ ok: true, rules, original: { ...original, ...patch } }), stderr: '', outputBytes: 1, truncated: false, durationMs: 1 });
+    run.mockResolvedValueOnce(result({ ok: true, items: [{ path: 'other.md', ok: false, reason: 'not_found' }] }));
+    await expect(f.host.snapshot('file.txt', ['AGENTS.md'])).rejects.toMatchObject({ reason: 'io_error' });
+    run.mockResolvedValueOnce(result({ ok: true, items: [] }, { hash: hash('替换') }));
+    await expect(f.host.snapshot('file.txt', [])).rejects.toMatchObject({ reason: 'io_error' });
+    expect(readFileSync(path.join(outside, 'marker'), 'utf8')).toBe('外部夹具');
+  }, 30_000);
   it('读取保留原字节摘要、BOM 和换行，分段与大行输出有界', async () => {
     const f = setup(); const bytes = Buffer.concat([Buffer.from([239,187,191]), Buffer.from('第一行\r\n第二行\r\n')]); f.put('file.txt', bytes);
     expect(await f.files.read({ path: 'file.txt', startLine: 2, maxLines: 1 })).toMatchObject({ sha256: hash(bytes), size: bytes.length, text: '第二行\r\n', startLine: 2, endLine: 2, totalLines: 2, bom: true, lineEnding: 'crlf', truncated: false });

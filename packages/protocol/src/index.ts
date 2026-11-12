@@ -1223,3 +1223,7 @@ export const IndependentFileHostRulesReply = z.union([FileHostFailure, z.object(
   z.object({ path: IndependentRelativePath, ok: z.literal(true), data: z.string().max(512 * 1024).regex(/^[A-Za-z0-9+/]*={0,2}$/),
     hash: z.string().regex(/^[a-f0-9]{64}$/), fileId: z.string().regex(/^[a-f0-9]{8}-[a-f0-9]{16}$/) }).strict(),
 ])).max(33) }).strict()]);
+/** 修改前的规则与原文共用一次受控宿主；两部分仍分别按原合同校验。 */
+export const IndependentFileHostSnapshotReply = z.union([FileHostFailure, z.object({ ok: z.literal(true),
+  rules: IndependentFileHostRulesReply, original: IndependentFileHostReadReply,
+}).strict()]);

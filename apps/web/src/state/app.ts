@@ -9,6 +9,7 @@ import { ApiRequestError, HttpClient, toApiError } from '../api/http';
 import { Credentials } from '../api/credentials';
 import { WsClient, type ConnState } from '../api/ws';
 import { guessDeviceName } from '../lib/format';
+import { imageCache } from '../lib/image-cache';
 import { platform } from '../platform';
 import {
   applyAgentSnapshot, applyApprovalSnapshot, applyEvents, applyTaskSnapshot, emptyCore, mergeRestTask, type CoreState,
@@ -112,6 +113,7 @@ export function boot(): Promise<void> {
   return booting;
 }
 async function doBoot() {
+  imageCache.clear();
   set((s) => ({ ...s, boot: 'loading', bootError: null }));
   if (!creds.isLoaded) await creds.load();
   // 1) 地址栏带 #pair=<配对码>：先清掉地址栏里的配对码；已有有效凭据就直接进入，不重复配对
@@ -207,6 +209,7 @@ async function resyncAfterReconnect() {
 }
 
 async function resetAndRestart() {
+  imageCache.clear();
   ws?.stop();
   ws = null;
   queue = [];
@@ -216,6 +219,7 @@ async function resetAndRestart() {
 }
 
 function toUnpaired() {
+  imageCache.clear();
   ws?.stop();
   ws = null;
   // 凭据已失效（或设备被吊销）：清掉本地保存的密钥 / 令牌

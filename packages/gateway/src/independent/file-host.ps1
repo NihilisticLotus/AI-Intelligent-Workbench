@@ -20,7 +20,7 @@ try {
             $found = $guard.Search([string[]]$request.paths, [string]$request.query, [bool]$request.caseSensitive, [int]$request.maxMatches)
             $result = @{ ok = $true; found = $found }
         }
-        'rules' {
+        { $_ -eq 'rules' -or $_ -eq 'snapshot' } {
             $items = New-Object System.Collections.Generic.List[object]
             $used = 0
             foreach ($relative in $request.paths) {
@@ -36,6 +36,19 @@ try {
                 }
             }
             $result = @{ ok = $true; items = @($items.ToArray()) }
+            if ($request.operation -eq 'snapshot') {
+                $rules = $result
+                try {
+                    $blob = $guard.ReadFile([string]$request.path)
+                    $original = @{ ok = $true; data = [Convert]::ToBase64String($blob.Bytes); hash = $blob.Hash; fileId = $blob.FileId }
+                } catch {
+                    $reason = 'io_error'
+                    $message = $_.Exception.GetBaseException().Message
+                    if ($message -match '^aic_(forbidden|not_found|busy|conflict|too_large|binary|io_error)$') { $reason = $Matches[1] }
+                    $original = @{ ok = $false; reason = $reason }
+                }
+                $result = @{ ok = $true; rules = $rules; original = $original }
+            }
         }
         default { throw 'aic_forbidden' }
     }

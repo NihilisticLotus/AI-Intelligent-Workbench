@@ -14,19 +14,19 @@ export class IndependentFileTool {
     const spec = IndependentFileWriteSpec.parse(input); workspaceRelative(spec.path);
     const workspace = independentWorkspace(this.files.host.workspace.root);
     if (workspace.fingerprint !== this.files.host.workspace.fingerprint) throw Errors.conflict('工作区身份已变化，请重新核对');
-    const rules = await this.files.rules(spec.path, signal);
+    const { rules, original: snapshot } = await this.files.writeSnapshot(spec.path, signal);
     if (!rules.complete) throw Errors.invalidState('项目规则未完整读取，暂不能修改文件');
     let original: Buffer | null = null; let beforeHash: string | null = null; let beforeText: string | null = null; let afterText: string;
     if (spec.kind === 'replace') {
-      const snapshot = await this.files.host.read(spec.path, signal); original = snapshot.bytes; beforeHash = snapshot.hash;
+      if (!snapshot) throw new IndependentFileError('not_found');
+      original = snapshot.bytes; beforeHash = snapshot.hash;
       if (snapshot.hash !== spec.expectedHash) throw Errors.conflict('文件已变化，未覆盖，请重新读取并审批');
       beforeText = new TextDecoder('utf-8', { fatal: true }).decode(original);
       const position = beforeText.indexOf(spec.oldText);
       if (position < 0 || beforeText.indexOf(spec.oldText, position + 1) >= 0) throw Errors.conflict('替换原文必须且只能匹配一处，请重新读取');
       afterText = beforeText.slice(0, position) + spec.newText + beforeText.slice(position + spec.oldText.length);
     } else {
-      try { await this.files.host.read(spec.path, signal); throw Errors.conflict('创建目标已经存在，未覆盖，请重新核对'); }
-      catch (error) { if (!(error instanceof IndependentFileError) || error.reason !== 'not_found') throw error; }
+      if (snapshot) throw Errors.conflict('创建目标已经存在，未覆盖，请重新核对');
       afterText = spec.content;
     }
     const bom = original?.subarray(0, 3).equals(Buffer.from([239, 187, 191]));

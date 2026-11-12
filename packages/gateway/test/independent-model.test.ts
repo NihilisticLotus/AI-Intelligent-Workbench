@@ -50,6 +50,40 @@ async function fixture(protocol: IndependentApiProtocol = 'chat_completions', ha
 }
 
 describe('独立模型三协议正式传输', () => {
+  it('密集流式片段不逐次查绑定，结算前仍强制核对', async () => {
+    vi.spyOn(performance, 'now').mockReturnValue(1000);
+    const stream = Array.from({ length: 400 }, (_, i) => sse({ choices: [{ index: 0, delta: { content: `离线片段${i}。` }, finish_reason: null }] })).join('')
+      + sse({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 9, completion_tokens: 2 } }) + sse('[DONE]');
+    const f = await fixture('chat_completions', (_req, res) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end(stream); });
+    const bound = vi.spyOn(f.catalog, 'bound'); let first = 0, deltas = 0;
+    const reply = await f.driver({ onDelta: () => { if (!deltas++) first = bound.mock.calls.length; else expect(bound.mock.calls.length).toBe(first); } }).complete(f.request, f.signal);
+    expect(deltas).toBeGreaterThan(300); expect(reply.text).toContain('离线片段399');
+    expect(bound.mock.calls.length).toBeGreaterThan(first); expect(bound.mock.calls.length).toBeLessThan(20);
+  });
+  it('流中配置修订到 250ms 边界即被发现，未到边界的短流也在结算前拒绝', async () => {
+    for (const boundary of [true, false]) {
+      let time = 1000, seen = 0; vi.spyOn(performance, 'now').mockImplementation(() => time);
+      const stream = Array.from({ length: 8 }, () => sse({ choices: [{ index: 0, delta: { content: '足够长的离线内容片段。' }, finish_reason: null }] })).join('')
+        + sse({ choices: [{ index: 0, delta: {}, finish_reason: 'stop' }], usage: { prompt_tokens: 9, completion_tokens: 2 } }) + sse('[DONE]');
+      const f = await fixture('chat_completions', (_req, res) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end(stream); });
+      await expect(f.driver({ onDelta: () => {
+        seen++;
+        if (seen === 1) f.catalog.overrides(f.service.id, f.model.id, { expectedRevision: f.model.revision, values: { tools: false } });
+        if (boundary && seen === 2) time = 1249;
+        if (boundary && seen === 3) time = 1250;
+      } }).complete(f.request, f.signal)).rejects.toMatchObject({ reason: 'request' });
+      expect(seen).toBe(boundary ? 3 : 8);
+      vi.restoreAllMocks();
+    }
+  });
+  it('绑定检查间隔内取消仍立即停止后续片段', async () => {
+    vi.spyOn(performance, 'now').mockReturnValue(1000);
+    const stream = Array.from({ length: 4 }, () => sse({ choices: [{ index: 0, delta: { content: '取消测试的离线内容片段。' }, finish_reason: null }] })).join('') + sse('[DONE]');
+    const f = await fixture('chat_completions', (_req, res) => { res.writeHead(200, { 'Content-Type': 'text/event-stream' }); res.end(stream); });
+    const abort = new AbortController(); let seen = 0;
+    await expect(f.driver({ onDelta: () => { seen++; abort.abort(); } }).complete(f.request, abort.signal)).rejects.toMatchObject({ reason: 'cancelled' });
+    expect(seen).toBe(1);
+  });
   it('能力来源过期后仍按原值发送工具和输出上限，不当成未知拒绝（ISSUE-0059）', async () => {
     const f = await fixture('chat_completions', undefined, { tools: null, streamUsage: null });
     const scope = capabilityScope(f.catalog.getService(f.service.id), 'original/model-id');

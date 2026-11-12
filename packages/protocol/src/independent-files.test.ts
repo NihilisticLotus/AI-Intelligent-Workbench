@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { IndependentRelativePath, IndependentFileWriteSpec, IndependentFileReadSpec, IndependentFileSearchSpec,
-  IndependentFileApprovalDecision, IndependentFileReceipt, IndependentFileWriteOutcome } from './index';
+  IndependentFileApprovalDecision, IndependentFileReceipt, IndependentFileWriteOutcome, IndependentFileHostSnapshotReply } from './index';
 
 describe('独立文件协议', () => {
+  it('合并宿主快照严格校验两部分，未知原文不被包装成成功', () => {
+    const snapshot = { ok: true, rules: { ok: true, items: [] }, original: { ok: false, reason: 'not_found' } };
+    expect(IndependentFileHostSnapshotReply.parse(snapshot)).toEqual(snapshot);
+    for (const patch of [{ original: { ok: true } }, { rules: { ok: true, items: [{ path: '../a', ok: false, reason: 'not_found' }] } }, { original: { ok: false, reason: 'unknown' } }, { secret: '额外字段' }]) expect(IndependentFileHostSnapshotReply.safeParse({ ...snapshot, ...patch }).success).toBe(false);
+  });
   it('只接纳规范相对路径，拒绝遍历、设备别名、流与 Windows 歧义', () => {
     for (const value of ['src/世界.ts', 'assets/a-b_1.txt', 'CONSOLE.md']) expect(IndependentRelativePath.safeParse(value).success).toBe(true);
     for (const value of ['', '../a', 'a/../b', './a', '/a', 'C:/a', '//server/a', 'a\\b', 'a//b', 'a:stream', 'a.','a ',

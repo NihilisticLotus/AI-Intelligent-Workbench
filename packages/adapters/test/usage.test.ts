@@ -1,6 +1,38 @@
 import { describe, expect, it } from 'vitest';
 import { fakeAdapter, RecordingHost, scenario } from './helpers';
 import { promptUsage } from '../src/acp/usage';
+import { UpdateMapper } from '../src/acp/updates';
+import type { AgentUpdate } from '../src/types';
+
+function contextUsage(update: Record<string, unknown>) {
+  const events: AgentUpdate[] = [];
+  const noop = () => {};
+  const mapper = new UpdateMapper('usage', (event) => events.push(event), {
+    unknown: noop, thought: noop, commands: noop, mode: noop, configOptions: noop, sessionInfo: noop,
+  });
+  mapper.handle({ sessionUpdate: 'usage_update', ...update });
+  return events.filter((event) => event.kind === 'usage');
+}
+
+describe('ACP 上下文报告边界', () => {
+  it('未知和非法上下文不冒充零，明确报告的零保留', () => {
+    for (const invalid of [null, undefined, '', '5', -1, NaN, Infinity]) {
+      expect(contextUsage({ used: invalid, size: 100 })).toEqual([]);
+      expect(contextUsage({ used: 5, size: invalid })).toEqual([]);
+    }
+    expect(contextUsage({ used: 0, size: 0 })).toEqual([{ kind: 'usage', used: 0, size: 0 }]);
+  });
+  it('缺失币种不猜美元，缺失金额不冒充免费', () => {
+    expect(contextUsage({ used: 5, size: 100, cost: { amount: 2.15 } }))
+      .toEqual([{ kind: 'usage', used: 5, size: 100, cost: { amount: 2.15, currency: '' } }]);
+    for (const invalid of [null, undefined, '', '5', -1, NaN, Infinity]) {
+      expect(contextUsage({ used: 5, size: 100, cost: { amount: invalid, currency: 'USD' } }))
+        .toEqual([{ kind: 'usage', used: 5, size: 100 }]);
+    }
+    expect(contextUsage({ used: 5, size: 100, cost: { amount: 0, currency: 'USD' } }))
+      .toEqual([{ kind: 'usage', used: 5, size: 100, cost: { amount: 0, currency: 'USD' } }]);
+  });
+});
 
 describe('ACP 每轮用量', () => {
   it('坏字段保持未知，不强制转换或推算总量', () => {

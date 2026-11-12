@@ -80,3 +80,6 @@
 | [ISSUE-0065](ISSUE-0065-independent-badge-light-contrast.md) | 浅色主题独立 Agent 徽标文字对比度不足 | fixed | bug | 2026-11-12 | 2026-11-12 |
 | [ISSUE-0066](ISSUE-0066-plan-hidden-text-overflow.md) | 计划辅助文字溢出导致定位时整页滚动 | fixed | bug | 2026-11-13 | 2026-11-13 |
 | [ISSUE-0067](ISSUE-0067-home-existing-tasks-message.md) | 从起始页返回首页后，有任务仍显示空列表文案 | fixed | bug | 2026-11-13 | 2026-11-13 |
+| [ISSUE-0068](ISSUE-0068-reported-cost-without-unit.md) | 上游费用缺少单位时，面板仍展示无单位数字 | fixed | bug / 外部依赖 | 2026-11-13 | 2026-11-13 |
+| [ISSUE-0069](ISSUE-0069-invalid-context-usage-coercion.md) | 空上下文用量被强制转换成零 | fixed | bug | 2026-11-13 | 2026-11-13 |
+| [ISSUE-0070](ISSUE-0070-native-attachment-drag-verification.md) | 起始页原生文件拖入路径尚未补验 | open | 验收未通过（未验证） / 外部依赖 | 2026-11-13 | — |

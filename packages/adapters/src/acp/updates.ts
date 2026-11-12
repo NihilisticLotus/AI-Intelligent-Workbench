@@ -192,12 +192,15 @@ export class UpdateMapper {
         return;
       }
       case 'usage_update': {
-        const used = Number(update.used);
-        const size = Number(update.size);
-        if (!Number.isFinite(used) || !Number.isFinite(size)) return;
-        const cost = isRecord(update.cost) && Number.isFinite(Number(update.cost.amount))
-          ? { amount: Number(update.cost.amount), currency: str(update.cost.currency) ?? 'USD' } : undefined;
-        this.emit({ kind: 'usage', used: Math.max(0, used), size: Math.max(0, size), ...(cost ? { cost } : {}) });
+        const used = update.used;
+        const size = update.size;
+        // 未报告或非法数值不能强制转换为真实的零；空单位也不能猜成美元。
+        if (typeof used !== 'number' || !Number.isFinite(used) || used < 0
+          || typeof size !== 'number' || !Number.isFinite(size) || size < 0) return;
+        const cost = isRecord(update.cost) && typeof update.cost.amount === 'number'
+          && Number.isFinite(update.cost.amount) && update.cost.amount >= 0
+          ? { amount: update.cost.amount, currency: str(update.cost.currency) ?? '' } : undefined;
+        this.emit({ kind: 'usage', used, size, ...(cost ? { cost } : {}) });
         return;
       }
       case 'current_mode_update': {

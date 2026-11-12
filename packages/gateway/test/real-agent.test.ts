@@ -159,6 +159,51 @@ describe('真实形态的 Agent（假 ACP 进程）', () => {
     expect(events.some((e)=>e.type==='error'&&e.data.error.code==='agent.no_response')).toBe(true);
     await vi.waitFor(()=>expect(sc.log().some((r)=>r.method==='session/cancel')).toBe(true));
   });
+  it('长时间无输出的并行工具不被无回应看门狗误停，结束后恢复计时', async () => {
+    const sc = scenario({ config: CONFIG, turns: [{ steps: [
+      { update: { sessionUpdate: 'tool_call', toolCallId: 'long-a', title: '静默构建 A', kind: 'execute', status: 'in_progress' } },
+      { update: { sessionUpdate: 'tool_call', toolCallId: 'long-b', title: '静默构建 B', kind: 'execute', status: 'in_progress' } },
+      { sleep: 500 },
+      { update: { sessionUpdate: 'tool_call_update', toolCallId: 'long-a', status: 'completed' } },
+      { sleep: 500 },
+      { update: { sessionUpdate: 'tool_call_update', toolCallId: 'long-b', status: 'completed' } },
+      { waitCancel: true },
+    ] }] });
+    const { projectId, gw, ws } = await setup(sc, { noResponseNoticeMs: 100, noResponseCancelMs: 300 });
+    const task = await gw.gw.services.tasks.create({ projectId, agent: 'claude', prompt: '离线长工具回归', permission: 'ask' });
+    const second = await ws.waitEvent((e) => e.taskId === task.id && e.type === 'tool.start' && e.data.title === '静默构建 B', 5000);
+    const first = ws.events().find((e) => e.taskId === task.id && e.type === 'tool.start' && e.data.title === '静默构建 A');
+    if (first?.type !== 'tool.start' || second.type !== 'tool.start') throw new Error('缺少长工具启动事件');
+    await new Promise((resolve) => setTimeout(resolve, 750));
+    expect(gw.gw.services.tasks.get(task.id).status).toBe('running');
+    const during = ws.events().filter((e) => e.taskId === task.id);
+    expect(during.some((e) => e.type === 'tool.end' && e.data.toolId === first.data.toolId)).toBe(true);
+    expect(during.some((e) => e.type === 'error' || e.type === 'session.notice' && !!e.data.id)).toBe(false);
+    expect(sc.log().some((entry) => entry.method === 'session/cancel')).toBe(false);
+    await ws.waitEvent((e) => e.taskId === task.id && e.type === 'tool.end' && e.data.toolId === second.data.toolId, 5000);
+    await ws.waitEvent(statusIs(task.id, 'paused'), 5000);
+    expect(ws.events().some((e) => e.taskId === task.id && e.type === 'error' && e.data.error.code === ErrorCode.AgentNoResponse)).toBe(true);
+    await vi.waitFor(() => expect(sc.log().some((entry) => entry.method === 'session/cancel')).toBe(true));
+  });
+  it('静默工具仍可手动停止，下一回合不会继承工具的计时豁免', async () => {
+    const sc = scenario({ config: CONFIG, turns: [
+      { steps: [{ update: { sessionUpdate: 'tool_call', toolCallId: 'stop-me', title: '等待停止的工具', kind: 'execute', status: 'in_progress' } }, { waitCancel: true }] },
+      { steps: [{ waitCancel: true }] },
+    ] });
+    const { projectId, gw, ws } = await setup(sc, { noResponseNoticeMs: 100, noResponseCancelMs: 300 });
+    const task = await gw.gw.services.tasks.create({ projectId, agent: 'claude', prompt: '取消长工具', permission: 'ask' });
+    await ws.waitEvent((e) => e.taskId === task.id && e.type === 'tool.start', 5000);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(gw.gw.services.tasks.get(task.id).status).toBe('running');
+    await gw.gw.services.tasks.cancel(task.id); await gw.gw.services.tasks.idle();
+    expect(gw.gw.services.tasks.get(task.id).status).toBe('paused');
+    expect(ws.events().some((e) => e.taskId === task.id && e.type === 'error')).toBe(false);
+    await gw.gw.services.tasks.prompt(task.id, '下一回合静默');
+    await vi.waitFor(() => expect(gw.gw.services.tasks.get(task.id).status).toBe('paused'), { timeout: 5000 });
+    const errors = gw.gw.services.events.read({ after: 0, taskId: task.id, limit: 1000 }).filter((e) => e.type === 'error');
+    expect(errors).toHaveLength(1); expect(errors[0]!.data.error.code).toBe(ErrorCode.AgentNoResponse);
+    await vi.waitFor(() => expect(sc.log().filter((entry) => entry.method === 'session/cancel')).toHaveLength(2));
+  });
   it('建任务 → 对话 → 审批 → 换模型 → 崩溃 → 恢复', async () => {
     const sc = scenario({ config: CONFIG, persistTurns: true, turns: [PERM('c1'), { steps: [{ sleep: 100 }, { crash: 1 }] }, { steps: [{ update: { sessionUpdate: 'agent_message_chunk', content: text('我回来了') } }] }] });
     const { token, projectId, ws } = await setup(sc);

@@ -95,6 +95,8 @@ export class TaskService {
   private secretsOf = new Map<string, string[]>();
   private lastActivity = 0;
   private activity = new Map<string, number>();
+  /** 仅记录当前回合、当前会话已开始未结束的工具；回放和旧会话事件不延长等待。 */
+  private activeTools = new Map<string, { sessionId: string; ids: Set<string> }>();
   private noResponseNoticeMs: number;
   private noResponseCancelMs: number;
   attachments: import('./attachments').AttachmentService | null = null;
@@ -385,6 +387,11 @@ export class TaskService {
 
   private onUpdate(taskId: string, sessionId: string, u: AgentUpdate, secrets: string[] = [], red?: StreamRedactor) {
     this.activity.set(taskId, now());
+    const tools = this.activeTools.get(taskId);
+    if (tools?.sessionId === sessionId) {
+      if (u.kind === 'tool_start') tools.ids.add(u.toolId);
+      else if (u.kind === 'tool_end') tools.ids.delete(u.toolId);
+    }
     if (u.kind === 'activity') return;
     const base = { taskId, sessionId } as const;
     // 写进事件库前按密钥原文脱敏（工具输出里可能有 env / printenv 打出来的 API Key）；流式分片扣留可能是密钥开头的尾巴
@@ -648,10 +655,12 @@ export class TaskService {
       rt.lastActive = now();
       this.activity.set(taskId, now());
       let lastNotice = -Infinity;
+      this.activeTools.set(taskId, { sessionId: rt.sessionId, ids: new Set() });
       const noticeId = newId('idle');
       const timeout = new Promise<never>((_, reject) => {
         watchdog = setInterval(() => {
-          if ([...this.pending.values()].some((p) => p.approval.taskId === taskId)) { this.activity.set(taskId, now()); return; }
+          // 工具本身的时限和用户取消仍生效；不能把静默构建当成模型断联。
+          if (this.activeTools.get(taskId)?.ids.size || [...this.pending.values()].some((p) => p.approval.taskId === taskId)) { this.activity.set(taskId, now()); return; }
           const idle = now() - (this.activity.get(taskId) ?? now());
           if (idle >= this.noResponseCancelMs) {
             noResponse = true;
@@ -707,6 +716,7 @@ export class TaskService {
       if (watchdog) clearInterval(watchdog);
       recordTurnUsage(this.db, this.events, taskId, rt?.sessionId ?? null, messageId, usage);
       this.activity.delete(taskId);
+      this.activeTools.delete(taskId);
       if (this.turnAborts.get(taskId) === abort) this.turnAborts.delete(taskId);
       this.approvalTimedOut.delete(taskId);
       if (rt) rt.lastActive = now();

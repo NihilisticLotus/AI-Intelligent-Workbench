@@ -60,6 +60,24 @@ describe('1.3 适配器', () => {
     expect(quotaHint('API Error: Request rejected (429) · upstream account quota usage limit has been reached; wait for quota to reset or use an account with available quota')).toBe('额度或调用频率达到上限，可以稍后再试，或换个模型 / 账号');
     for (const t of ['resets at 2026-11-09T12:00:00Z', 'retry in 3 minutes', 'try again at 14:30 UTC', 'retry 2 h', 'reset after Monday']) expect(quotaHint(t)).toContain(t.replace(/^(?:resets?|retry|try again)\s+(?:at\s+)?/, ''));
   });
+  it('错误开头后追加解释、示例或引用时仍是正常回答', () => {
+    for (const reply of [
+      "The 'alpha' model is not supported 表示当前账号没有这个模型的访问权限。",
+      "The 'alpha' model is not supported when using Codex with a ChatGPT account. 这句话是报错示例。",
+      'model is not supported means the selected model cannot be used.',
+      'model is not supported\n请核对模型 ID。',
+      'upstream_status: HTTP 400 bad request 表示请求格式有问题。',
+      'upstream_status: HTTP 400: 这是你贴出的日志，不是本轮调用失败。',
+      'API Error: Request rejected (429) quota 说明额度不足，可以等待恢复。',
+      'API Error: Request rejected (429) · upstream account quota usage limit has been reached; 这是说明文字。',
+      'API Error: Request rejected\n例如请求参数不正确时会这样显示。',
+    ]) expect(textResponseError(reply, 'codex', 'Codex'), reply).toBeNull();
+  });
+  it('完整模型拒绝与真实额度句式保留，固定 Codex 代理封套规则不变', () => {
+    for (const reply of ["The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account", "The 'x' model is not supported.", 'model is not supported', 'upstream_status: HTTP 400 bad request']) expect(textResponseError(reply, 'codex', 'Codex')).toMatchObject({ reason: 'invalid_value' });
+    for (const reply of ['API Error: Request rejected (429) · upstream account quota usage limit has been reached', 'API Error: Request rejected (429) · upstream account quota usage limit has been reached; wait for quota to reset or use an account with available quota']) expect(textResponseError(reply, 'claude', 'Claude Code')).toMatchObject({ reason: 'quota' });
+    expect(textResponseError(proxyError.replaceAll('alpha', 'gpt-5.5'), 'codex', 'Codex')).toMatchObject({ reason: 'invalid_value' });
+  });
   it.each(["The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account", 'upstream_status: HTTP 400 bad request', 'API Error: Request rejected (429) quota'])('短错误正文被识别 %s', (s) => {
     expect(TEXT_ERROR_PATTERNS.some((p) => p.test(s))).toBe(true);
     expect(textResponseError(s, 'codex', 'Codex')).not.toBe(null);

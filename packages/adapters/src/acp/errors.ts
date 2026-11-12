@@ -116,11 +116,11 @@ export function isCodexProxyModelError(text: string, model: string | null): bool
   return !!match && model !== null && match[1] === model;
 }
 
-/** 只接受整段以已知错误开头的短回复，避免把讨论错误的正常正文误判。 */
+/** 只接受完整的已知错误句式；追加解释或引用正文时不能据此标记模型失败。 */
 export const TEXT_ERROR_PATTERNS = [
-  /^(?:The ['"][^'"\n]+['"] model is not supported|model is not supported)\b/i,
-  /^upstream_status:\s*HTTP 4\d\d\b/i,
-  /^API Error: Request rejected\b/i,
+  /^(?:The ['"][^'"\r\n]+['"] model is not supported(?: when using Codex with a ChatGPT account)?|model is not supported)[.!]?$/i,
+  /^upstream_status:[ \t]*HTTP 4\d\d(?:[ \t]+(?:bad request|unauthorized|forbidden|not found|too many requests))?[.!]?$/i,
+  /^API Error: Request rejected(?:[ \t]+\([45]\d\d\))?(?:[ \t]+quota|[ \t]*·[ \t]*upstream account quota usage limit (?:has been reached|reached)(?:;[ \t]*wait for quota to reset or use an account with available quota)?)?[.!]?$/i,
   CODEX_PROXY_MODEL_ERROR,
 ] as const;
 export function textResponseError(text: string, kind: AgentKind, name: string, secrets: readonly string[] = []): AgentError | null {

@@ -112,6 +112,21 @@ describe('真实形态的 Agent（假 ACP 进程）', () => {
     expect(sc.log().filter((l) => l.method === 'session/prompt')).toHaveLength(1);
   });
 
+  it('解释报错的完整回复正常结束，不暂停任务或登记模型失败', async () => {
+    const replies = ["The 'alpha' model is not supported 表示你选的模型不可用，请核对账号支持范围。", 'upstream_status: HTTP 400 bad request 是请求格式错误的意思。', 'API Error: Request rejected (429) quota 说明额度已用完，这里只是解释你提供的报错。'];
+    const sc = scenario({ config: CONFIG, turns: replies.map((reply) => ({ steps: [{ update: { sessionUpdate: 'agent_message_chunk', content: text(reply) } }] })) });
+    const { projectId, gw } = await setup(sc);
+    const task = await gw.gw.services.tasks.create({ projectId, agent: 'claude', prompt: '解释报错', permission: 'readonly', deferPrompt: true });
+    for (const reply of replies) {
+      await gw.gw.services.tasks.prompt(task.id, '解释下面的错误'); await gw.gw.services.tasks.idle();
+      expect(gw.gw.services.tasks.get(task.id).status).toBe('review');
+      expect(gw.gw.services.db.all('SELECT * FROM model_failures')).toEqual([]);
+      const events = gw.gw.services.events.read({ after: 0, taskId: task.id, limit: 1000 });
+      expect(events.some((e) => e.type === 'error')).toBe(false);
+      expect(events.filter((e) => e.type === 'message.delta').map((e) => e.data.text).join('')).toContain(reply);
+    }
+    expect(sc.log().filter((entry) => entry.method === 'session/prompt')).toHaveLength(3);
+  });
   it('会话内切换被上游拒绝：保留原模型，并将失败标记归到实际账号', async () => {
     const sc = scenario({ config: CONFIG, setErrors: { 'model:beta': { code: -32602, message: 'Invalid model: beta' } } });
     const { token, projectId, ws } = await setup(sc);

@@ -1,5 +1,5 @@
 // 界面层的小状态：路由（地址栏 hash）、提示条、读屏播报。
-import type { ApiError } from '@aic/protocol';
+import { AgentKind, type ApiError } from '@aic/protocol';
 import { createStore } from './store';
 
 // ---------- 路由 ----------
@@ -9,8 +9,10 @@ import { createStore } from './store';
 // #/agents/<kind>[/<账号id>]  Agent 页并选中某个 Agent（错误按钮“去登录”等用）
 // #/settings    设置
 // #/p/<页面>    以后按功能开关出现的页面
+export interface NewTaskPreset { projectId?: string; groupId?: string | null; agent?: AgentKind; model?: string; prompt?: string }
 export type Route =
   | { page: 'home' }
+  | { page: 'new'; preset?: NewTaskPreset }
   | { page: 'task'; taskId: string }
   | { page: 'agents'; agent?: string; profileId?: string }
   | { page: 'settings' }
@@ -18,6 +20,14 @@ export type Route =
 
 export function parseHash(hash: string): Route {
   const h = hash.replace(/^#/, '');
+  if (h === '/new' || h.startsWith('/new?')) {
+    const params = new URLSearchParams(h.split('?').slice(1).join('?')), preset: NewTaskPreset = {};
+    for (const key of ['projectId', 'model', 'prompt'] as const) if (params.has(key)) preset[key] = params.get(key)!;
+    if (params.has('groupId')) preset.groupId = params.get('groupId') || null;
+    const agent = AgentKind.safeParse(params.get('agent'));
+    if (agent.success) preset.agent = agent.data;
+    return Object.keys(preset).length ? { page: 'new', preset } : { page: 'new' };
+  }
   if (h.startsWith('/t/')) return { page: 'task', taskId: decodeURIComponent(h.slice(3)) };
   if (h === '/agents') return { page: 'agents' };
   if (h.startsWith('/agents/')) {
@@ -31,6 +41,14 @@ export function parseHash(hash: string): Route {
 
 export function routeHash(r: Route): string {
   switch (r.page) {
+    case 'new': {
+      const params = new URLSearchParams();
+      for (const key of ['projectId', 'groupId', 'agent', 'model', 'prompt'] as const) {
+        const value = r.preset?.[key];
+        if (value !== undefined) params.set(key, value ?? '');
+      }
+      return '#/new' + (params.size ? '?' + params.toString() : '');
+    }
     case 'task': return '#/t/' + encodeURIComponent(r.taskId);
     case 'agents': return '#/agents' + (r.agent ? '/' + encodeURIComponent(r.agent) + (r.profileId ? '/' + encodeURIComponent(r.profileId) : '') : '');
     case 'settings': return '#/settings';
@@ -40,14 +58,21 @@ export function routeHash(r: Route): string {
 }
 
 export const routeStore = createStore<Route>(typeof location === 'undefined' ? { page: 'home' } : parseHash(location.hash));
+export const newTaskReturnStore = createStore<Exclude<Route, { page: 'new' }>>({ page: 'home' });
+function applyRoute(route: Route) {
+  const previous = routeStore.get();
+  if (route.page === 'new' && previous.page !== 'new') newTaskReturnStore.set(() => previous);
+  routeStore.set(() => route);
+}
 if (typeof window !== 'undefined') {
-  window.addEventListener('hashchange', () => routeStore.set(() => parseHash(location.hash)));
+  window.addEventListener('hashchange', () => applyRoute(parseHash(location.hash)));
 }
 export function navigate(r: Route) {
   const h = routeHash(r);
   if (location.hash !== h) location.hash = h;
-  else routeStore.set(() => r);
+  else applyRoute(r);
 }
+export function returnFromNewTask() { navigate(newTaskReturnStore.get()); }
 
 // ---------- 提示条 ----------
 export interface Toast { id: number; text: string; kind: 'ok' | 'attn' | 'err' }

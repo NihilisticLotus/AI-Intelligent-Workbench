@@ -16,7 +16,7 @@ import { openDetail } from '../state/details';
 
 const EMPTY: EventEnvelope[] = [];
 
-export function TaskView({ taskId }: { taskId: string }) {
+export function TaskView({ taskId, active = true }: { taskId: string; active?: boolean }) {
   const task = useApp((s) => s.tasks[taskId]);
   const log = useApp((s) => s.logs[taskId] ?? EMPTY);
   const history = useApp((s) => s.history[taskId]);
@@ -60,7 +60,7 @@ export function TaskView({ taskId }: { taskId: string }) {
         <div className="main-body">
           <section className="content" aria-label="对话">
             {history === 'error' ? <div style={{ padding: '0 var(--sp-5)' }}><ErrorNotice error={{ code: 'client.history', message: '对话记录没有载入完整', hint: '刷新页面再试一次。', actions: [{ label: '刷新页面', action: 'reload' }] }} /></div> : null}
-            <Stream task={task} items={items} loading={history !== 'done'} onOpenPlan={() => openDetail('plan')} />
+            <Stream task={task} items={items} loading={history !== 'done'} active={active} onOpenPlan={() => openDetail('plan')} />
             {task.agent === 'independent' ? <IndependentTaskPanel task={task} /> : null}
             <Composer key={task.id} task={task} pending={pending} config={config} blocking={blocking} />
           </section>

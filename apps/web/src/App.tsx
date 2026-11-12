@@ -1,9 +1,9 @@
 // 应用外壳：启动状态（载入 / 配对 / 就绪）、侧栏 + 主区 + 右侧面板、全局快捷键。
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { FeatureKey } from '@aic/protocol';
 import { boot, useApp } from './state/app';
 import { prefsStore, setPref, usePref } from './state/prefs';
-import { navigate, routeStore } from './state/ui';
+import { navigate, newTaskReturnStore, routeHash, routeStore } from './state/ui';
 import { useStore } from './state/store';
 import { Sidebar } from './components/Sidebar';
 import { TaskView } from './components/TaskView';
@@ -14,6 +14,7 @@ import { requestFocusApproval } from './components/focus';
 import { AgentsPage } from './pages/AgentsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { PairingPage } from './pages/PairingPage';
+import { NewTaskPage } from './pages/new-task-page';
 import { Icon } from './components/Icon';
 
 export function App() {
@@ -44,6 +45,9 @@ export function App() {
 
 function Shell() {
   const route = useStore(routeStore, (r) => r);
+  const returnRoute = useStore(newTaskReturnStore, (r) => r);
+  const pageRoute = route.page === 'new' ? returnRoute : route;
+  const previousPage = useRef(route.page);
   const sbCollapsed = usePref('sidebarCollapsed');
   const sideOpen = usePref('sideOpen');
   const sideWidth = usePref('sideWidth');
@@ -65,7 +69,10 @@ function Shell() {
 
   // 首页：有任务时打开最近活动的那个
   useEffect(() => {
+    const from = previousPage.current; previousPage.current = route.page;
     if (route.page !== 'home') return;
+    // 派发返回空首页时不自动跳进刚创建的任务。
+    if (from === 'new') return;
     const recent = Object.values(tasks).sort((a, b) => b.lastActivityAt - a.lastActivityAt)[0];
     if (recent) navigate({ page: 'task', taskId: recent.id });
   }, [route.page]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -86,7 +93,7 @@ function Shell() {
         const i = pending.findIndex((a) => a.id === curId);
         const next = pending[(i + 1) % Math.max(1, pending.length)];
         if (next) { navigate({ page: 'task', taskId: next.taskId }); requestFocusApproval(next.id); }
-      } else if (e.key === 'Escape' && matchMedia('(max-width: 1279px)').matches && prefsStore.get().sideOpen && !document.querySelector('.popover, .menu')) {
+      } else if (e.key === 'Escape' && routeStore.get().page !== 'new' && matchMedia('(max-width: 1279px)').matches && prefsStore.get().sideOpen && !document.querySelector('.popover, .menu')) {
         setPref('sideOpen', false);
       }
     };
@@ -100,15 +107,18 @@ function Shell() {
       style={{ ['--side-w' as string]: sideWidth + 'px' }}>
       <Sidebar onSearch={openPalette} />
       <button type="button" className="sb-scrim" aria-label="关闭任务列表" tabIndex={-1} onClick={() => setDrawer(false)} />
-      {route.page === 'task' ? <TaskView key={route.taskId} taskId={route.taskId} /> : null}
-      {route.page === 'agents' ? <AgentsPage /> : null}
-      {route.page === 'settings' ? <SettingsPage /> : null}
-      {route.page === 'home' ? <Home /> : null}
-      {route.page === 'feature' ? (
+      <div className="route-surface" hidden={route.page === 'new'}>
+      {pageRoute.page === 'task' ? <TaskView key={pageRoute.taskId} taskId={pageRoute.taskId} active={route.page !== 'new'} /> : null}
+      {pageRoute.page === 'agents' ? <AgentsPage /> : null}
+      {pageRoute.page === 'settings' ? <SettingsPage /> : null}
+      {pageRoute.page === 'home' ? <Home /> : null}
+      {pageRoute.page === 'feature' ? (
         <main className="main"><div className="content-scroll"><div className="page">
           <div className="empty"><h3>这个页面还没有开放</h3><p>它会在后续阶段提供。</p></div>
         </div></div></main>
       ) : null}
+      </div>
+      {route.page === 'new' ? <NewTaskPage key={routeHash(route)} preset={route.preset} /> : null}
       <BottomNav pendingCount={pending.length} drawerOpen={drawer} onToggleDrawer={() => setDrawer((v) => !v)} />
     </div>
   );
@@ -127,7 +137,7 @@ const featureNav: Array<[key: string, label: string, icon: string]> = [
 function BottomNav({ pendingCount, drawerOpen, onToggleDrawer }: { pendingCount: number; drawerOpen: boolean; onToggleDrawer: () => void }) {
   const route = useStore(routeStore, (r) => r);
   const hello = useApp((s) => s.hello);
-  const onTasks = route.page === 'home' || route.page === 'task';
+  const onTasks = route.page === 'home' || route.page === 'task' || route.page === 'new';
   return (
     <nav className="bottomnav" aria-label="主导航">
       <a href="#/" aria-current={onTasks && !drawerOpen ? 'page' : undefined}

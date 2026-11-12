@@ -33,9 +33,10 @@ export function TaskError({ error, task, compact, stale }: { error: ApiError; ta
   return <ErrorNotice error={e} compact={compact} ctx={{ taskId: task.id, kind: task.agent, busy: busyStatuses.has(task.status) }} />;
 }
 
-export function Stream({ task, items, loading, onOpenPlan }: { task: Task; items: TimelineItem[]; loading: boolean; onOpenPlan: () => void }) {
+export function Stream({ task, items, loading, onOpenPlan, active = true }: { task: Task; items: TimelineItem[]; loading: boolean; onOpenPlan: () => void; active?: boolean }) {
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
+  const savedScroll = useRef(0);
   // 一轮回复的过程收进“用时 N 秒”，最终回答单独显示（和 Codex 等常见 Agent 软件一致）
   const events = useApp((s) => s.logs[task.id]);
   const view = useMemo(() => groupTurns(items, turnUsages(events ?? [])), [items, events]);
@@ -44,22 +45,24 @@ export function Stream({ task, items, loading, onOpenPlan }: { task: Task; items
   // 用户在底部附近时，新内容到来自动滚到底；往上翻看时不打扰
   useLayoutEffect(() => {
     const el = ref.current;
-    if (el && stick.current) el.scrollTop = el.scrollHeight;
+    if (active && el && stick.current) { el.scrollTop = el.scrollHeight; savedScroll.current = el.scrollTop; }
   }, [items]);
+  // 起始页临时隐藏原对话，返回时先恢复原位置；隐藏期间的流式更新不改变位置。
+  useLayoutEffect(() => { if (active && ref.current) ref.current.scrollTop = savedScroll.current; }, [active]);
   useEffect(() => { stick.current = true; }, [task.id]);
 
   // 用户主动跳转到某个审批时聚焦它（新审批到来不抢焦点）
   const focusReq = useStore(focusApprovalStore, (s) => s);
   useEffect(() => {
-    if (!focusReq) return;
+    if (!active || !focusReq) return;
     const el = document.getElementById('ap-' + focusReq.id);
     if (el) { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.focus({ preventScroll: true }); focusApprovalStore.set(() => null); }
-  }, [focusReq, items]);
+  }, [focusReq, items, active]);
 
   return (
     <div className="stream-shell">
     <div className="stream" ref={ref} tabIndex={0} aria-label="对话记录"
-      onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
+      onScroll={(e) => { if (!active) return; const el = e.currentTarget; savedScroll.current = el.scrollTop; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
       <div className="stream-inner">
         {!items.length ? (
           <div className="empty stream-empty">{loading ? <p>正在载入对话…</p> : <><h3>还没有消息</h3><p>在下面的输入框里告诉 Agent 要做什么。</p></>}</div>

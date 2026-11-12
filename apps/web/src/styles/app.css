@@ -1,5 +1,46 @@
 /* 正式工程新增的样式：原型里没有、但 1.1 需要的部分（演示 Agent、提示条、文件夹浏览、配对页、设置页等） */
 
+/* 起始页沿用原型的留白与胶囊；隐藏原页面但不卸载草稿和滚动状态。 */
+.route-surface { display: contents; }
+.route-surface[hidden] { display: none; }
+.nt-page { overflow: auto; background: var(--bg-1); }
+.nt-top { display: flex; align-items: center; gap: 8px; padding: 8px var(--sp-4); flex: none; }
+.nt-center { width: min(720px, calc(100% - 32px)); margin: auto; padding: 32px 0 8vh; }
+.nt-hello { margin: 0 0 24px; text-align: center; font-size: 26px; font-weight: 500; }
+.nt-hello > span { display: block; margin-top: 8px; font-size: 20px; }
+.nt-box { position: relative; min-width: 0; margin: 0; border: 1px solid var(--line); border-radius: 18px; background: var(--bg-1); box-shadow: 0 1px 0 var(--line), 0 8px 28px rgb(0 0 0 / 12%); padding: 10px 12px; }
+.nt-box:focus-within { border-color: var(--line-strong); }
+.nt-box.dragging { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-weak); }
+.nt-chips, .nt-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.nt-bar .grow { flex: 1; }
+.nt-menu { min-width: 0; }
+.nt-chip { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; max-width: 260px; padding: 4px 10px; border: 0; border-radius: var(--r-pill); background: var(--bg-2); color: var(--fg-1); font: inherit; font-size: var(--fs-12); }
+button.nt-chip { cursor: pointer; }
+button.nt-chip:hover { background: var(--bg-3); }
+.nt-chip > span { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.nt-chip svg.i { width: 13px; height: 13px; flex: none; color: var(--fg-3); }
+.nt-chip.quiet { background: transparent; color: var(--fg-2); }
+.nt-chip:disabled { opacity: .5; cursor: default; }
+.nt-worktree { margin: 6px 4px; font-size: var(--fs-12); color: var(--fg-3); }
+.nt-box textarea { display: block; width: 100%; min-height: 110px; max-height: 40vh; resize: vertical; border: 0; background: transparent; color: var(--fg-1); font: inherit; line-height: 1.6; padding: 8px 4px; }
+.nt-box textarea::placeholder { color: var(--fg-3); }
+.nt-box textarea:focus-visible { outline: 1px solid var(--line-strong); outline-offset: 0; border-radius: var(--r-ctl); }
+.nt-bar .agent-picker { min-width: 0; max-width: 100%; }
+.nt-bar .picker-trigger { flex-wrap: wrap; max-width: 100%; text-align: left; }
+.nt-bar .picker-trigger .muted { overflow-wrap: anywhere; }
+.nt-send { width: 34px; height: 34px; min-height: 34px; padding: 0; flex: none; border-radius: 50%; }
+.nt-menu-options { max-width: min(340px, calc(100vw - 16px)); max-height: min(360px, calc(100vh - 16px)); overflow: auto; }
+.nt-menu-options button > span { flex: 1; overflow-wrap: anywhere; white-space: normal; }
+.nt-rec { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 12px; padding: 10px 12px; border-radius: var(--r-card); background: var(--bg-2); font-size: var(--fs-13); }
+.nt-rec > div { flex: 1; min-width: 150px; overflow-wrap: anywhere; }
+.nt-rec strong { font-weight: 500; }
+.nt-rec p { margin: 4px 0 0; color: var(--fg-2); }
+.nt-quick { display: flex; flex-wrap: wrap; justify-content: center; gap: 8px; margin-top: 18px; }
+.nt-q { min-height: 34px; padding: 4px 14px; border: 1px solid var(--line); border-radius: var(--r-pill); background: transparent; color: var(--fg-2); font: inherit; font-size: var(--fs-13); cursor: pointer; }
+.nt-q:hover { background: var(--bg-2); color: var(--fg-1); }
+.nt-foot { margin: 16px 0 0; text-align: center; color: var(--fg-3); font-size: var(--fs-12); }
+@media (max-width: 767px) { .nt-center { padding-bottom: 32px; } .nt-bar .agent-picker { flex-basis: calc(100% - 44px); } .nt-chip, .nt-q, .nt-send { min-height: 44px; } .nt-send { width: 44px; } }
+
 /* 独立服务与模型：沿用原型令牌，窄屏按钮换行、长 ID 不撑开页面。 */
 .independent-panel { margin: 20px 0 28px; padding: 20px; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--bg-2); }
 .independent-panel h2, .independent-panel h3 { margin: 0 0 8px; }

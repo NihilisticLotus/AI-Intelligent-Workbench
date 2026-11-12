@@ -1,10 +1,9 @@
-// 添加项目、新建任务两个对话框。
+// 添加项目对话框与新建任务入口。
 import { useState } from 'react';
 import type { ApiError } from '@aic/protocol';
 import { platform, type PickedFolder } from '../platform';
 import { createProject } from '../state/app';
-import { toast } from '../state/ui';
-import { NewTaskDialog } from './NewTaskDialog';
+import { navigate, toast, type NewTaskPreset } from '../state/ui';
 import { Dialog, ErrorNotice, asApiError, openDialog } from './ui';
 import { Icon } from './Icon';
 
@@ -65,14 +64,9 @@ function AddProject({ close, then }: { close: () => void; then?: (id: string) =>
 }
 
 // ---------------------------------------------------------------------
-// 新建任务：见 NewTaskDialog.tsx
+// 所有入口统一进入起始页，预设保存在 hash 查询参数中。
 // ---------------------------------------------------------------------
-export function openNewTask(preset: { projectId?: string; groupId?: string | null; agent?: import('@aic/protocol').AgentKind; model?: string; prompt?: string } = {}) {
-  openDialog((close) => (
-    <NewTaskDialog close={close} preset={preset}
-      onAddProject={() => { close(); openAddProject((id) => openNewTask({ projectId: id })); }} />
-  ));
-}
+export function openNewTask(preset: NewTaskPreset = {}) { navigate({ page: 'new', preset }); }
 
 /** 兼容旧引用：状态文案集中在 lib/agents.ts */
 export { agentStatusText } from '../lib/agents';

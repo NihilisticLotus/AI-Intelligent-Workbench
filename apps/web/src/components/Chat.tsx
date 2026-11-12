@@ -19,6 +19,7 @@ import { MessageAttachments } from './Attachments';
 import { AnnotationLayer } from './Annotations';
 import { IndependentApproval } from './independent-task-panel';
 import { turnUsages, turnUsageText } from '../lib/usage';
+import { NavRail } from './NavRail';
 
 const busyStatuses = new Set<Task['status']>(['running', 'waiting', 'queued']);
 
@@ -56,6 +57,7 @@ export function Stream({ task, items, loading, onOpenPlan }: { task: Task; items
   }, [focusReq, items]);
 
   return (
+    <div className="stream-shell">
     <div className="stream" ref={ref} tabIndex={0} aria-label="对话记录"
       onScroll={(e) => { const el = e.currentTarget; stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80; }}>
       <div className="stream-inner">
@@ -65,12 +67,14 @@ export function Stream({ task, items, loading, onOpenPlan }: { task: Task; items
       </div>
       <AnnotationLayer container={ref} taskId={task.id} />
     </div>
+    <NavRail key={task.id} view={view} stream={ref} agent={task.agent} onJump={() => { stick.current = false; }} />
+    </div>
   );
 }
 
 function Item({ it, task, onOpenPlan, live }: { it: ViewItem; task: Task; onOpenPlan: () => void; live: boolean }) {
   switch (it.kind) {
-    case 'user': return <UserMsg text={it.text} ts={it.ts} taskId={task.id} attachments={it.attachments} />;
+    case 'user': return <UserMsg anchor={it.key} text={it.text} ts={it.ts} taskId={task.id} attachments={it.attachments} />;
     case 'turn': return <Turn it={it} task={task} />;
     case 'plan': return <PlanInline items={it.items} onOpen={onOpenPlan} />;
     case 'approval': return <ApprovalCard approval={it.approval} resolvedInLog={it.resolved} task={task} />;
@@ -90,9 +94,9 @@ function ConfigNote({ it, fallbackAgent }: { it: Extract<TimelineItem, { kind: '
   return <div className="sysnote" role="note"><span>已切换为{parts.join('，')}（{how.replace('（', '，').replace('）', '')}），从下一条消息生效</span></div>;
 }
 
-function UserMsg({ text, ts, taskId, attachments }: { text: string; ts: number; taskId: string; attachments?: AttachmentInfo[] }) {
+function UserMsg({ anchor, text, ts, taskId, attachments }: { anchor: string; text: string; ts: number; taskId: string; attachments?: AttachmentInfo[] }) {
   return (
-    <article className="msg user" aria-label="你的消息">
+    <article className="msg user" data-key={anchor} aria-label="你的消息">
       <div className="who"><span className="me" aria-hidden="true">你</span></div>
       <div>
         <div className="head"><b>你</b><span>{clock(ts)}</span></div>
@@ -121,7 +125,7 @@ function Turn({ it, task }: { it: TurnItem; task: Task }) {
   const secs = durationText(Math.max(1000, (working ? now : it.endTs) - it.ts));
   const usage = it.usage ? turnUsageText(it.usage) : null;
   return (
-    <article className="msg turn" aria-label={`${name} 的回复`}>
+    <article className="msg turn" data-key={it.key} aria-label={`${name} 的回复`}>
       <div className="who"><AgentBadge kind={kind} /></div>
       <div>
         <div className="head"><b>{name}</b>{modelName ? <span>{modelName}</span> : null}<span>{clock(it.ts)}</span></div>

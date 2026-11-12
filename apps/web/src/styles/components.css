@@ -248,3 +248,21 @@
 .context-ring-wrap:hover .usage-tip, .context-ring-wrap:focus-within .usage-tip { display: block; }
 .turn-usage { color: var(--fg-3); font-size: var(--fs-12); margin: 10px 0 0; width: fit-content; border-radius: var(--r-ctl); }
 .plan { position: relative; }
+
+/* 导航独立于消息滚动，刻度对应稳定的消息 key。 */
+.stream-shell { position: relative; display: flex; flex: 1; min-height: 0; min-width: 0; }
+.stream-shell .stream { padding-left: 36px; }
+.nav-rail { position: absolute; z-index: 5; left: 5px; top: 50%; transform: translateY(-50%); display: flex; flex-direction: column; gap: 2px; max-height: 60%; overflow: hidden auto; scrollbar-width: none; padding: 4px 2px; }
+.nav-tick { display: flex; align-items: center; width: 24px; height: 12px; padding: 0; border: 0; background: transparent; cursor: pointer; flex: none; }
+.nav-tick > span { display: block; height: 2px; width: 8px; border-radius: 1px; background: var(--line-strong); transition: width var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease); }
+.nav-tick.user > span { width: 14px; }
+.nav-tick:hover > span, .nav-tick:focus-visible > span { width: 20px; background: var(--fg-2); }
+.nav-tick.current > span { background: var(--fg-1); }
+.nav-tick.attn > span { background: var(--attn); }
+.nav-peek { position: absolute; z-index: 25; left: 38px; width: min(260px, calc(100% - 48px)); padding: 8px 12px; border-radius: var(--r-card); background: var(--bg-3); box-shadow: var(--shadow-pop); font-size: var(--fs-12); color: var(--fg-2); pointer-events: none; overflow-wrap: anywhere; }
+.nav-peek b { color: var(--fg-1); }
+.nav-peek > span { margin-left: 8px; color: var(--fg-3); }
+.nav-peek p { margin: 4px 0 0; color: var(--fg-1); line-height: 1.5; }
+.msg.nav-flash { animation: nav-flash .9s var(--ease); border-radius: var(--r-card); }
+@keyframes nav-flash { 0% { box-shadow: 0 0 0 6px var(--bg-2); background: var(--bg-2); } 100% { box-shadow: 0 0 0 6px transparent; background: transparent; } }
+@media (prefers-reduced-motion: reduce) { .msg.nav-flash { animation: none; } }

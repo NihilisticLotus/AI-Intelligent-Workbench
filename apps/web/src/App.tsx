@@ -157,15 +157,16 @@ function BottomNav({ pendingCount, drawerOpen, onToggleDrawer }: { pendingCount:
   );
 }
 
-function Home() {
+export function Home() {
   const projects = useApp((s) => s.projects);
+  const hasTasks = useApp((s) => Object.keys(s.tasks).length > 0);
   return (
     <main className="main">
       <header className="main-head"><h1>任务</h1></header>
       <div className="content-scroll">
         <div className="empty" style={{ paddingTop: '18vh' }}>
-          <h3>还没有任务</h3>
-          <p>{projects.length ? '描述你想完成的事，选一个 Agent 派发出去。' : '先添加一个项目文件夹，再描述你想完成的事，选一个 Agent 派发出去。'}</p>
+          <h3>{hasTasks ? '选择一个任务，或新建任务' : '还没有任务'}</h3>
+          <p>{hasTasks ? '从任务列表继续已有对话，也可以派发新的任务。' : projects.length ? '描述你想完成的事，选一个 Agent 派发出去。' : '先添加一个项目文件夹，再描述你想完成的事，选一个 Agent 派发出去。'}</p>
           <button type="button" className="btn primary" onClick={() => openNewTask()}><Icon name="plus" />新建任务</button>
         </div>
       </div>

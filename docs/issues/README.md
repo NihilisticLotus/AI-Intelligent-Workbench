@@ -79,3 +79,4 @@
 | [ISSUE-0064](ISSUE-0064-sidebar-new-button-shrink.md) | 项目较多时侧栏新建任务按钮被挤扁 | fixed | bug | 2026-11-12 | 2026-11-12 |
 | [ISSUE-0065](ISSUE-0065-independent-badge-light-contrast.md) | 浅色主题独立 Agent 徽标文字对比度不足 | fixed | bug | 2026-11-12 | 2026-11-12 |
 | [ISSUE-0066](ISSUE-0066-plan-hidden-text-overflow.md) | 计划辅助文字溢出导致定位时整页滚动 | fixed | bug | 2026-11-13 | 2026-11-13 |
+| [ISSUE-0067](ISSUE-0067-home-existing-tasks-message.md) | 从起始页返回首页后，有任务仍显示空列表文案 | fixed | bug | 2026-11-13 | 2026-11-13 |

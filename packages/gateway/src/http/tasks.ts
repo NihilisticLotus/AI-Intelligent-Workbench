@@ -6,6 +6,7 @@ import type { Services } from '../services';
 import { Errors } from '../util';
 import { parseQuery, readBody, type Env } from './app';
 import { taskUsage } from '../usage';
+import { taskFiles } from '../task-files';
 
 export function taskRoutes(s: Services) {
   const r = new Hono<Env>();
@@ -14,6 +15,7 @@ export function taskRoutes(s: Services) {
   r.post('/tasks', async (c) => c.json(await s.tasks.create(await readBody(c, CreateTaskBody)), 201));
   r.get('/tasks/:id', (c) => c.json(s.tasks.get(c.req.param('id'))));
   r.get('/tasks/:id/usage', (c) => c.json(taskUsage(s.db, c.req.param('id'))));
+  r.get('/tasks/:id/files', (c) => c.json({ items: taskFiles(s.db, c.req.param('id')), nextCursor: null }));
   r.patch('/tasks/:id', async (c) => c.json(await s.tasks.patch(c.req.param('id'), await readBody(c, PatchTaskBody))));
   r.get('/tasks/:id/independent', (c) => c.json(s.independentRuntime.state(c.req.param('id'))));
   r.put('/tasks/:id/independent', async (c) => {

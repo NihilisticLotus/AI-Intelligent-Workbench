@@ -411,6 +411,7 @@ export class TaskService {
         toolId: u.toolId, ...(u.title !== undefined ? { title: clean(u.title) } : {}),
         ...(u.target !== undefined ? { target: u.target === null ? null : clean(u.target) } : {}),
         ...(u.toolKind !== undefined ? { kind: u.toolKind } : {}),
+        ...(u.files ? { files: u.files.map((f) => ({ ...f, path: clean(f.path) })) } : {}),
       } }); break;
       case 'tool_output': {
         const text = piece(`o:${u.toolId}`, u.text);

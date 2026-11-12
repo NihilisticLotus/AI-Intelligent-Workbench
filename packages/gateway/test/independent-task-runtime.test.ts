@@ -98,6 +98,8 @@ describe('正式独立任务的离线接口与闭环', () => {
       await f.s.tasks.approve(approval.id, 'allow', undefined, device.id);
     }
     await f.wait(); expect(f.count()).toBe(4); expect(readFileSync(path.join(f.workspace, 'separate.txt'), 'utf8')).toBe(replacement);
+    const files = (await gateway!.api('GET', `/tasks/${f.task.id}/files`, { token: f.token })).json.items;
+    expect(files).toHaveLength(1); expect(files[0]).toMatchObject({ name: 'separate.txt', created: true, added: null, removed: null, source: 'independent' });
     expect(f.state().budget.attemptedRequests).toBe(4);
     const raw = f.s.independentRuntime.history(f.task.id, 0, 100).items;
     expect(raw.map((e) => e.message).filter((message) => message.role === 'tool').map((message) => message.name)).toEqual(['create_file', 'read_file', 'replace_text']);
@@ -277,9 +279,9 @@ describe('正式独立任务的离线接口与闭环', () => {
     const f = await setup(); f.s.independentRuntime.ledger.reserve(f.state().binding, { kind: 'model', requestHash: 'c'.repeat(64) });
     // 用 SQLite 的备份语句生成独立副本，避免读取实际用户数据。
     const file = path.join(temporary(), 'old.sqlite'); f.s.db.run('VACUUM INTO ?', file);
-    const old = new DatabaseSync(file); old.exec('DROP TABLE turn_usage; DROP TABLE independent_task_settings; ALTER TABLE independent_request_attempts DROP COLUMN binding_json; ALTER TABLE independent_request_attempts DROP COLUMN currency; ALTER TABLE independent_request_budgets DROP COLUMN revision; PRAGMA user_version=11;'); old.close();
+    const old = new DatabaseSync(file); old.exec('DROP TABLE saved_environments; DROP TABLE turn_usage; DROP TABLE independent_task_settings; ALTER TABLE independent_request_attempts DROP COLUMN binding_json; ALTER TABLE independent_request_attempts DROP COLUMN currency; ALTER TABLE independent_request_budgets DROP COLUMN revision; PRAGMA user_version=11;'); old.close();
     for (let i = 0; i < 2; i++) { const migrated = openDb(file); try {
-      expect(migrated.get('PRAGMA user_version')).toEqual({ user_version: 13 });
+      expect(migrated.get('PRAGMA user_version')).toEqual({ user_version: 14 });
       const row = migrated.get('SELECT binding_json,currency FROM independent_request_attempts')!;
       expect(JSON.parse(String(row.binding_json))).toEqual(f.state().binding); expect(row.currency).toBe(null);
     } finally { migrated.close(); } }

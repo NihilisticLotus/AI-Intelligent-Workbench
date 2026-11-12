@@ -1,6 +1,7 @@
 # AI Console 设计文档
 
-> 版本 0.4.29 · 2026-11-12 · 状态：设计中
+> 版本 0.4.30 · 2026-11-12 · 状态：设计中
+> v0.4.30 1.4 用量按用户消息持久化，任务按会话汇总；详细面板使用只读分支与常用环境，输出暂取成功工具和已写入回执，不读取文件正文。MCP 传输能力与服务列表分开表示，见 15.5、phase-1 第 10 节。
 > v0.4.29 能力来源过期不再等同未知：运行时统一按“非冲突即可用”取值，过期值照用并在界面提示复核；冲突或配置修订后无适用证据仍为未知。能力解析、优先级和证据过期时间不变（ISSUE-0059，phase-1 9.37）。
 > v0.4.28 独立会话的私有续传适用性扩展：除绑定外，系统提示（含项目规则正文）或工具开关不同、或消息产生于当前人工总结之前时，只移除本次输入的专用资料并保留可移植原文，原始记录与 modelWire 校验不变（ISSUE-0056）。请求结算记录只增可选 networkDetail（fake_ip_proxy），只对应 network 失败，不记录解析地址（ISSUE-0058）。见 phase-1 9.36。
 > v0.4.27 独立 Agent 的元数据读取和模型请求增加显式网络设置 allowFakeIpProxy（默认关闭，存在 meta 表，经 GET / PUT /independent/network 读写并记目录变化事件与审计）：打开后只放行“由域名解析得到的” 198.18.0.0/15，直接填写的 IP、其他私网、回环、公共目录仍拒绝；被该网段拦下时错误文字提示可在设置里允许。第三方 Agent 不受影响（ISSUE-0053）。
@@ -1269,16 +1270,19 @@ audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, action TEXT, de
 
 | 数据 | 来源 | 现状 |
 |---|---|---|
-| 当前上下文 token、窗口大小、累计费用 | ACP `usage_update`（稳定版：used、size、cost） | Gateway 已记成 `session.usage` 事件，网页还没显示 |
-| 每轮输入、输出、思考、缓存读写 | ACP `PromptResponse.usage`（草案：inputTokens、outputTokens、thoughtTokens、cachedReadTokens、cachedWriteTokens） | 适配器还没接，要实测哪家报告 |
+| 当前上下文 token、窗口大小、累计费用 | ACP `usage_update`（稳定版：used、size、cost） | Gateway 已记成 `session.usage` 事件，详细面板显示上下文与费用；输入框圆环待阶段 4 |
+| 每轮输入、输出、思考、缓存读写 | ACP `PromptResponse.usage`（草案：inputTokens、outputTokens、thoughtTokens、cachedReadTokens、cachedWriteTokens） | 已规范化、落盘并在详细面板汇总；各家真实报告范围待阶段 9 补验 |
 | 上下文分类明细（系统提示、工具、MCP、记忆、对话） | ACP 没有。Claude Code 的 `/context` 能给出，需研究能否通过扩展拿到 | 待研究；拿不到时只显示总量 |
 | 订阅账号的周期额度 | ACP 没有，各家单独研究（zcode-acp 有智谱的配额接口可参考） | 待研究；拿不到时写“额度未知” |
 
 规则：
+- 1.4 实施口径：TurnUsage / TaskUsage / turn.usage 已接入；未知为 null，取消与失败轮也记未知。独立一轮只累加生成请求，任一请求缺项则该项未知，真实报告范围见 usage-quota 调研与阶段 9 补验。
+- 1.4 输出来自已成功工具及 written 文件回执，按会话与路径合并，行数未报告不补零；实际工作副本改动留待之后版本。连接区分“未注入”“未报告服务列表”和 HTTP / SSE 传输能力。
+- 常用环境仅保存项目与分支，不切换分支；最多 50 个，项目删除时级联移除。项目分支来自限长只读 HEAD，异常时不显示。
 - 只显示 Agent 报告的数，不自己估算；没报告的写“未报告”，没有窗口大小就不显示百分比。
 - 协议新增（只增不改）：`SessionUsage`（会话当前上下文、窗口、累计 token、费用、分类明细可选）和每轮的 `TurnUsage`；`GET /tasks/:id/usage` 返回各会话段的汇总。
 - 每轮用量按会话段累计（交接前后分开），任务汇总是各段之和；监控页的调用统计（23.4）用同一份数据。
-- 右侧“详细”的“会话 token 用量”是整个会话从开始到现在的累计，不是某一轮；“连接”来自本任务可用的 MCP 列表和它们的连接状态；“输出”来自本任务工作副本的改动文件列表（和“改动”标签同一份数据），加上 `.aic/` 下的任务账本和交接内容。
+- 右侧“详细”的“会话 token 用量”按任务内会话段累计并列出段数；“连接”暂未注入 MCP，不把 Agent 传输能力当作服务列表；1.4 的“输出”仅为成功工具记录。工作副本改动、任务交接内容由之后版本接入。
 
 ### 15.3 响应式
 

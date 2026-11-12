@@ -8,6 +8,7 @@ import {
   type AgentKind, type AgentLoginBody, type CreateProfileBody, type DeviceKind, type PatchAgentBody, type PatchProfileBody, type PutTaskDraftBody,
 } from '@aic/protocol';
 import { z } from 'zod';
+import { TaskUsage, TaskFile, SavedEnvironment, type CreateEnvironmentBody } from '@aic/protocol';
 import {
   IndependentService, IndependentModel, IndependentDefault, IndependentNetworkSettings, IndependentDiscoveryState, ImportIndependentModelsResult,
   IndependentTaskState, IndependentHistoryPage, IndependentApprovalDetail, type IndependentTaskOptions, type IndependentCheckpointBody,
@@ -199,6 +200,11 @@ export class HttpClient {
   revokeDevice(id: string) { return this.request('DELETE', `/devices/${encodeURIComponent(id)}`); }
 
   projects() { return this.request('GET', '/projects', { parse: listOf(Project) }).then((r) => r.items); }
+  environments() { return this.request('GET', '/environments', { parse: listOf(SavedEnvironment) }).then((r) => r.items); }
+  saveEnvironment(body: CreateEnvironmentBody) { return this.request('POST', '/environments', { body, parse: oneOf(SavedEnvironment) }); }
+  deleteEnvironment(id: string) { return this.request('DELETE', `/environments/${encodeURIComponent(id)}`, { parse: oneOf(OkResult) }); }
+  taskUsage(id: string) { return this.request('GET', `/tasks/${encodeURIComponent(id)}/usage`, { parse: oneOf(TaskUsage) }); }
+  taskFiles(id: string) { return this.request('GET', `/tasks/${encodeURIComponent(id)}/files`, { parse: listOf(TaskFile) }).then((r) => r.items); }
   createProject(name: string, path: string) { return this.request('POST', '/projects', { body: { name, path }, parse: oneOf(Project) }); }
   patchProject(id: string, body: { name?: string }) { return this.request('PATCH', `/projects/${encodeURIComponent(id)}`, { body, parse: oneOf(Project) }); }
   deleteProject(id: string) { return this.request('DELETE', `/projects/${encodeURIComponent(id)}`); }

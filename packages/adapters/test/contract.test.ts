@@ -52,7 +52,7 @@ describe('basic：session/update 映射', () => {
     expect(k).toEqual([
       'thought', 'message', 'message', 'message_done',
       'tool_start', 'tool_output', 'tool_end',
-      'tool_start', 'tool_output', 'tool_update', 'tool_end',
+      'tool_start', 'tool_output', 'tool_update', 'tool_update', 'tool_end',
       'tool_start', 'tool_end',
       'tool_start', 'tool_end',
       'plan', 'usage', 'message', 'message_done',
@@ -69,6 +69,7 @@ describe('basic：session/update 映射', () => {
     expect(new Set(starts.map((s) => s.toolId)).size).toBe(4);
     expect(starts[0]!.toolId).toContain('stest');
     expect(host.of('tool_output')[1]!.text).toBe('修改 D:/p/Player.cs（+2 −0）');
+    expect(host.of('tool_update')[0]!.files).toEqual([{ path: 'D:/p/Player.cs', added: 2, removed: 0, created: false }]);
     const ends = host.of('tool_end');
     expect(ends.map((e) => e.ok)).toEqual([true, true, false, true]);
     expect(host.of('plan')[0]!.items).toEqual([{ text: '读代码', status: 'completed' }, { text: '改参数', status: 'in_progress' }]);

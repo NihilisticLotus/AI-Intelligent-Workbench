@@ -40,6 +40,7 @@
 .independent-history pre, .independent-approval-detail pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 35vh; overflow: auto; padding: 12px; background: var(--bg-1); }
 @media (max-width: 600px) { .independent-task-panel { margin-inline: 12px; padding-inline: 12px; } .independent-config { padding: 12px; } }
 .ag.independent { background: var(--bg-3); color: var(--fg-1); }
+:root[data-theme="light"] .ag.independent { color: var(--fg-1); }
 .compose-bar:has(.independent-runtime-trigger) { flex-wrap: wrap; }
 .picker-trigger.independent-runtime-trigger { flex: 0 0 auto; flex-wrap: nowrap; white-space: nowrap; min-height: 44px; }
 .independent-capability { border-bottom: 1px solid var(--line); }

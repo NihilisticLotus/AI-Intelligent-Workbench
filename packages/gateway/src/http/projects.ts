@@ -1,12 +1,16 @@
 // 项目、文件夹浏览、分组
 import { Hono } from 'hono';
-import { CreateGroupBody, CreateProjectBody, FsBrowseQuery, PatchGroupBody, PatchProjectBody } from '@aic/protocol';
+import { CreateEnvironmentBody, CreateGroupBody, CreateProjectBody, FsBrowseQuery, PatchGroupBody, PatchProjectBody } from '@aic/protocol';
+import { environments, saveEnvironment, deleteEnvironment } from '../environments';
 import { browse } from '../fsbrowse';
 import type { Services } from '../services';
 import { parseQuery, readBody, type Env } from './app';
 
 export function projectRoutes(s: Services) {
   const r = new Hono<Env>();
+  r.get('/environments', (c) => c.json({ items: environments(s.db), nextCursor: null }));
+  r.post('/environments', async (c) => c.json(saveEnvironment(s.db, await readBody(c, CreateEnvironmentBody)), 201));
+  r.delete('/environments/:id', (c) => { deleteEnvironment(s.db, c.req.param('id')); return c.json({ ok: true }); });
 
   r.get('/projects', (c) => c.json({ items: s.projects.list(), nextCursor: null }));
   r.post('/projects', async (c) => c.json(s.projects.create(await readBody(c, CreateProjectBody)), 201));

@@ -121,8 +121,14 @@ export type Hello = z.infer<typeof Hello>;
 export const Project = z.object({
   id: Id, name: z.string(), path: z.string(), isGit: z.boolean(),
   defaultAgent: AgentKind.nullable(), createdAt: Ts,
+  branch: z.string().nullable().optional(),
 });
 export type Project = z.infer<typeof Project>;
+
+export const SavedEnvironment = z.object({ id: Id, name: z.string().trim().min(1).max(200), projectId: Id, branch: z.string().max(200).nullable() }).strict();
+export type SavedEnvironment = z.infer<typeof SavedEnvironment>;
+export const CreateEnvironmentBody = SavedEnvironment.omit({ id: true });
+export type CreateEnvironmentBody = z.infer<typeof CreateEnvironmentBody>;
 
 export const Group = z.object({ id: Id, name: z.string(), ord: z.number().int(), createdAt: Ts });
 export type Group = z.infer<typeof Group>;
@@ -157,6 +163,7 @@ export const AgentCaps = z.object({
   modelSwitch: ModelSwitch, thoughts: z.boolean(),
   modes: z.array(z.object({ id: z.string(), name: z.string() })),
   prompt: z.object({ image: z.boolean(), audio: z.boolean(), embeddedContext: z.boolean() }),
+  mcp: z.object({ http: z.boolean(), sse: z.boolean() }).optional(),
 });
 export type AgentCaps = z.infer<typeof AgentCaps>;
 export const ProfileKind = z.enum(['subscription', 'apiKey', 'customEndpoint']);
@@ -273,6 +280,10 @@ export const TaskUsage = z.object({
 export type TaskUsage = z.infer<typeof TaskUsage>;
 
 export const ToolKind = z.enum(['read', 'search', 'edit', 'create', 'delete', 'execute', 'fetch', 'think', 'other']);
+export const ToolFile = z.object({ path: z.string().min(1), added: TokenCount, removed: TokenCount, created: z.boolean() }).strict();
+export type ToolFile = z.infer<typeof ToolFile>;
+export const TaskFile = ToolFile.extend({ sessionId: Id.nullable(), name: z.string(), directory: z.string(), updatedAt: Ts, source: z.enum(['agent', 'independent']) }).strict();
+export type TaskFile = z.infer<typeof TaskFile>;
 export const EventEnvelope = z.discriminatedUnion('type', [
   ev('task.created', z.object({ task: Task })),
   ev('task.updated', z.object({ task: Task })),
@@ -288,7 +299,7 @@ export const EventEnvelope = z.discriminatedUnion('type', [
   ev('message.done', z.object({ messageId: Id, text: z.string().optional() })),
   ev('thought.delta', z.object({ messageId: Id, text: z.string() })),
   ev('tool.start', z.object({ toolId: Id, kind: ToolKind, title: z.string(), target: z.string().nullable() })),
-  ev('tool.update', z.object({ toolId: Id, title: z.string().optional(), target: z.string().nullable().optional(), kind: ToolKind.optional() })),
+  ev('tool.update', z.object({ toolId: Id, title: z.string().optional(), target: z.string().nullable().optional(), kind: ToolKind.optional(), files: z.array(ToolFile).optional() })),
   ev('tool.output', z.object({ toolId: Id, text: z.string() })),
   /** rejected（1.1 新增）：用户在审批里拒绝，工具没有执行；界面按“未执行”显示，不当成故障 */
   ev('tool.end', z.object({ toolId: Id, ok: z.boolean(), summary: z.string().nullable(), rejected: z.boolean().optional() })),

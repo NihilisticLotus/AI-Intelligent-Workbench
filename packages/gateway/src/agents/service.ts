@@ -321,7 +321,7 @@ export class AgentService {
     if (!row?.caps_json) return null;
     try {
       const c = JSON.parse(row.caps_json) as AdapterCaps;
-      return { loadSession: c.loadSession, resume: c.resume, close: c.close, modelSwitch: c.modelSwitch, thoughts: c.thoughts, modes: c.modes, prompt: c.prompt };
+      return { loadSession: c.loadSession, resume: c.resume, close: c.close, modelSwitch: c.modelSwitch, thoughts: c.thoughts, modes: c.modes, prompt: c.prompt, ...(c.mcp ? { mcp: c.mcp } : {}) };
     } catch { return null; }
   }
 

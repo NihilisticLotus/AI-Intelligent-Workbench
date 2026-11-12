@@ -238,6 +238,14 @@ const MIGRATIONS: string[] = [
   );
   CREATE INDEX idx_turn_usage_session ON turn_usage(task_id,session_id,at);
   `,
+  // v14：设备间共享的常用项目与分支记录，不切换磁盘分支。
+  `
+  CREATE TABLE saved_environments (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL,
+    project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    branch TEXT, created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

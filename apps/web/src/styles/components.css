@@ -199,3 +199,39 @@
 .off-row .sub { color: var(--fg-3); font-size: var(--fs-12); flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .off-row .lbl { color: var(--fg-3); font-size: var(--fs-12); }
 .cards-empty { padding: var(--sp-4); border-radius: var(--r-card); border: 1px dashed var(--line-strong); color: var(--fg-3); font-size: var(--fs-13); }
+
+/* 详细面板：细分隔线、可折叠标题与真实数据摘要。 */
+.d-section { padding: var(--sp-1) 0; border-bottom: 1px solid var(--line); font-size: var(--fs-13); scroll-margin-top: var(--sp-2); }
+.d-section:last-child { border-bottom: 0; }
+.d-section.open { padding-bottom: var(--sp-3); }
+.d-section h3 { margin: 0; font-size: var(--fs-13); }
+.d-toggle { display: flex; align-items: center; gap: 6px; width: 100%; min-height: 36px; padding: 0 4px; border: 0; border-radius: var(--r-ctl); background: none; text-align: left; cursor: pointer; font-weight: 600; }
+.d-toggle:hover { background: var(--bg-2); }
+.d-toggle > .i { width: 12px; height: 12px; color: var(--fg-3); flex: none; }
+.d-toggle[aria-expanded=true] > .i { transform: rotate(90deg); }
+.d-toggle .sub { margin-left: auto; min-width: 0; max-width: 60%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--fg-3); font-size: var(--fs-12); font-weight: 400; }
+.d-body { padding-top: 6px; }
+.d-dl { display: grid; grid-template-columns: minmax(60px,auto) minmax(0,1fr); gap: 4px 12px; margin: 0; font-variant-numeric: tabular-nums; }
+.d-dl dt { color: var(--fg-2); }
+.d-dl dt.ind { padding-left: 12px; color: var(--fg-3); }
+.d-dl dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+.environment-list dd { text-align: left; }
+.d-total { display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin: 12px 0 8px; font-variant-numeric: tabular-nums; }
+.context-bar { height: 8px; background: var(--bg-3); border-radius: 4px; overflow: hidden; }
+.context-bar > span { display: block; height: 100%; background: var(--fg-2); }
+.d-legend { display: flex; justify-content: space-between; gap: 8px; margin-top: 8px; color: var(--fg-2); font-size: var(--fs-12); }
+.token-total { display: flex; align-items: baseline; flex-wrap: wrap; gap: 10px; margin-bottom: 8px; }
+.token-total b { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.token-total > span, .d-note { color: var(--fg-3); font-size: var(--fs-12); }
+.d-note { margin: 10px 0 0; line-height: 1.55; }
+.d-list, .d-segments { list-style: none; margin: 8px 0 0; padding: 0; }
+.d-list li, .d-segments li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 0; }
+.d-list .t { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.output-list .t > span, .output-list small { display: block; overflow: hidden; text-overflow: ellipsis; }
+.output-list small { color: var(--fg-3); font-size: var(--fs-12); }
+.d-list .r { flex: none; font-size: var(--fs-12); font-variant-numeric: tabular-nums; }
+.d-segments { border-top: 1px dashed var(--line); padding-top: 8px; }
+.d-segments li { justify-content: space-between; }
+.detail-link { border: 0; border-radius: var(--r-ctl); background: transparent; color: var(--fg-2); padding: 4px 6px; margin-top: 4px; cursor: pointer; font-size: var(--fs-12); }
+.detail-link:hover { background: var(--bg-2); color: var(--fg-1); }
+.detail-link:disabled { cursor: default; opacity: .5; }

@@ -1,6 +1,7 @@
 // session/update → AgentUpdate（phase-1.md 6.2.2 映射表）。
 import type { AgentUpdate, ToolKindT } from '../types';
 import { isRecord, newId, str } from '../util';
+import type { ToolFile } from '@aic/protocol';
 
 const TOOL_KIND: Record<string, ToolKindT> = {
   read: 'read', edit: 'edit', move: 'edit', delete: 'delete', search: 'search', execute: 'execute', fetch: 'fetch', think: 'think',
@@ -42,15 +43,21 @@ export function blockText(c: unknown): string | null {
 
 const lines = (s: unknown) => (typeof s === 'string' && s.length ? s.split(/\r?\n/) : []);
 
-/** diff 块：只写“修改 <path>（+a −b）”，正文留给 1.3 的 diff 面板。行数按去掉相同的开头和结尾后统计 */
-function diffSummary(d: Record<string, unknown>): string {
+/** 保留原有文字摘要，同时提供无正文的行数；不把未知原文当成空文件。 */
+export function diffFile(d: Record<string, unknown>): ToolFile | null {
+  const path = str(d.path); if (!path) return null;
+  const known = (d.oldText === null || typeof d.oldText === 'string') && typeof d.newText === 'string';
   const a = lines(d.oldText);
   const b = lines(d.newText);
   let p = 0;
   while (p < a.length && p < b.length && a[p] === b[p]) p++;
   let q = 0;
   while (q < a.length - p && q < b.length - p && a[a.length - 1 - q] === b[b.length - 1 - q]) q++;
-  return `修改 ${str(d.path) ?? '文件'}（+${b.length - p - q} −${a.length - p - q}）`;
+  return { path, added: known ? b.length - p - q : null, removed: known ? a.length - p - q : null, created: d.oldText === null };
+}
+function diffSummary(d: Record<string, unknown>): string {
+  const f = diffFile(d);
+  return f ? `修改 ${f.path}（+${f.added ?? '未报告'} −${f.removed ?? '未报告'}）` : '修改文件（路径未报告）';
 }
 
 const PLAN_STATUS = new Set(['pending', 'in_progress', 'completed']);
@@ -218,6 +225,8 @@ export class UpdateMapper {
         if (text) this.emit({ kind: 'tool_output', toolId: t.id, text });
       } else if (c.type === 'diff') {
         this.emit({ kind: 'tool_output', toolId: t.id, text: diffSummary(c) });
+        const file = diffFile(c);
+        if (file) this.emit({ kind: 'tool_update', toolId: t.id, files: [file] });
       }
       // terminal 块不会出现（没有声明 terminal 能力）
     }

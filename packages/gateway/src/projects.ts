@@ -4,12 +4,13 @@ import type { Db } from './db';
 import { validateProjectDir } from './fsbrowse';
 import type { TaskService } from './tasks';
 import { Errors, newId, now } from './util';
+import { projectBranch } from './project-branch';
 
 type ProjectRow = { id: string; name: string; path: string; is_git: number; default_agent: string | null; created_at: number };
 type GroupRow = { id: string; name: string; ord: number; created_at: number };
 
 const toProject = (r: ProjectRow): Project => ({
-  id: r.id, name: r.name, path: r.path, isGit: !!r.is_git, defaultAgent: r.default_agent as AgentKind | null, createdAt: r.created_at,
+  id: r.id, name: r.name, path: r.path, isGit: !!r.is_git, branch: projectBranch(r.path), defaultAgent: r.default_agent as AgentKind | null, createdAt: r.created_at,
 });
 const toGroup = (r: GroupRow): Group => ({ id: r.id, name: r.name, ord: r.ord, createdAt: r.created_at });
 

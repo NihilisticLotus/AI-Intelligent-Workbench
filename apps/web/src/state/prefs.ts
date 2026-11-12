@@ -1,6 +1,7 @@
 // 本机偏好：只存在这台设备上，不需要服务端接口（ui-design.md 10.13）。
 import { platform } from '../platform';
 import { createStore, useStore } from './store';
+import { defaultDetailSections, validDetailSections, type DetailSection } from '../lib/details';
 
 export type Theme = 'dark' | 'light';
 export type ThoughtMode = 'collapsed' | 'expanded' | 'hidden';
@@ -17,11 +18,13 @@ export interface Prefs {
   sideOpen: boolean;
   sideWidth: number;
   sideTab: SideTab;
+  detailOpen: DetailSection[];
 }
 
 const defaults: Prefs = {
   theme: 'dark', thought: 'collapsed', sidebarCollapsed: false, sbView: 'project', collapsed: [],
   sideOpen: true, sideWidth: 440, sideTab: 'plan',
+  detailOpen: [...defaultDetailSections],
 };
 
 function load(): Prefs {
@@ -39,6 +42,7 @@ function load(): Prefs {
     if (platform.prefs.get('sidebarCollapsed') === null) out.sidebarCollapsed = true;
     out.sideOpen = false;
   }
+  out.detailOpen = validDetailSections(out.detailOpen);
   return out as unknown as Prefs;
 }
 

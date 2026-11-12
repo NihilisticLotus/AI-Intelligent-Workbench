@@ -12,6 +12,7 @@ import { Resizer, SidePanel } from './SidePanel';
 import { ErrorNotice, StatusMark, toastErrorOf } from './ui';
 import { Icon } from './Icon';
 import { IndependentTaskPanel } from './independent-task-panel';
+import { openDetail } from '../state/details';
 
 const EMPTY: EventEnvelope[] = [];
 
@@ -20,7 +21,6 @@ export function TaskView({ taskId }: { taskId: string }) {
   const log = useApp((s) => s.logs[taskId] ?? EMPTY);
   const history = useApp((s) => s.history[taskId]);
   const approvals = useApp((s) => s.approvals);
-  const project = useApp((s) => (task ? s.projects.find((p) => p.id === task.projectId) : undefined));
   const sideOpen = usePref('sideOpen');
 
   useEffect(() => { if (task) loadHistory(taskId).catch(toastErrorOf); }, [taskId, !!task]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -45,7 +45,6 @@ export function TaskView({ taskId }: { taskId: string }) {
         <header className="main-head">
           <h1 title={task.title}>{task.title}</h1>
           <StatusMark shape={shape} text={stText} />
-          {project ? <span className="meta hide-narrow" title={project.path}><Icon name="folder" />{project.name}</span> : null}
           <span className="grow" />
           <button type="button" className="btn ghost icon" aria-label={sideOpen ? '收起右侧面板' : '显示右侧面板'} aria-expanded={sideOpen}
             title="右侧面板 Ctrl+J" onClick={() => setPref('sideOpen', !sideOpen)}><Icon name="panel" /></button>
@@ -55,19 +54,19 @@ export function TaskView({ taskId }: { taskId: string }) {
             <Icon name={task.permission === 'readonly' ? 'eye' : 'warn'} />
             <span>{task.permission === 'readonly'
               ? '这个任务直接在项目目录里运行。当前是“只读”，Agent 不会修改文件；改成其他权限后会直接修改项目文件，建议用“需审批”。'
-              : `会直接修改项目文件：这个任务直接在项目目录里运行；有了独立工作副本后会在副本里修改。建议权限保持“需审批”${task.permission === 'ask' ? '（当前就是）' : ''}。`}</span>
+              : `会直接修改项目文件。建议权限保持“需审批”${task.permission === 'ask' ? '（当前就是）' : ''}；工作副本在之后的版本提供。`}</span>
           </div>
         ) : null}
         <div className="main-body">
           <section className="content" aria-label="对话">
             {history === 'error' ? <div style={{ padding: '0 var(--sp-5)' }}><ErrorNotice error={{ code: 'client.history', message: '对话记录没有载入完整', hint: '刷新页面再试一次。', actions: [{ label: '刷新页面', action: 'reload' }] }} /></div> : null}
-            <Stream task={task} items={items} loading={history !== 'done'} onOpenPlan={() => { setPref('sideOpen', true); setPref('sideTab', 'plan'); }} />
+            <Stream task={task} items={items} loading={history !== 'done'} onOpenPlan={() => openDetail('plan')} />
             {task.agent === 'independent' ? <IndependentTaskPanel task={task} /> : null}
             <Composer key={task.id} task={task} pending={pending} config={config} blocking={blocking} />
           </section>
         </div>
       </main>
-      {sideOpen ? <><Resizer /><SidePanel task={task} plan={plan} config={config} /></> : null}
+      {sideOpen ? <><Resizer /><SidePanel key={task.id} task={task} plan={plan} config={config} /></> : null}
     </>
   );
 }

@@ -1,15 +1,21 @@
-// 右侧面板：可拖动宽度（拖动条可用方向键）、可收起（Ctrl+J）；标签“计划”和“改动”。
-import { useRef } from 'react';
-import type { EventOf, Task } from '@aic/protocol';
+// 右侧详细面板：六节、设备折叠偏好与定位请求；拖宽行为保持不变。
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import type { EventOf, IndependentTaskState, Task, TaskFile, TaskUsage } from '@aic/protocol';
 import { setPref, usePref, type SideTab } from '../state/prefs';
-import { permInfo } from '../lib/format';
-import { useApp } from '../state/app';
-import { PlanList } from './Chat';
+import { api, useApp } from '../state/app';
 import { Icon } from './Icon';
-import { useAgentName } from './ui';
+import { useAgentName, asApiError } from './ui';
 import type { SessionCfg } from '../state/core';
-import { isRealAgent } from '../lib/agents';
-import { effortLabel } from '../lib/picker';
+import { useStore } from '../state/store';
+import { detailFocus } from '../state/details';
+import { contextValue, contextSummary, type DetailSection } from '../lib/details';
+import { formatTokens } from '../lib/tokens';
+import { EnvironmentDetails } from './details/environment';
+import { PlanDetails } from './details/plan';
+import { ContextDetails } from './details/context';
+import { UsageDetails } from './details/usage';
+import { ConnectionDetails } from './details/connection';
+import { OutputDetails } from './details/output';
 
 const MIN_W = 320;
 const maxW = () => Math.round(window.innerWidth * 0.62);
@@ -38,68 +44,43 @@ export function Resizer() {
 }
 
 export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'plan.update'> | null; config: SessionCfg }) {
-  const tab = usePref('sideTab');
+  const tab = usePref('sideTab'), opened = usePref('detailOpen');
   const project = useApp((s) => s.projects.find((p) => p.id === task.projectId));
+  const agent = useApp((s) => s.agents.find((a) => a.kind === task.agent));
+  const conn = useApp((s) => s.conn);
+  const usageRevision = useApp((s) => s.logs[task.id]?.filter((e) => e.type === 'turn.usage').at(-1)?.seq);
+  const fileRevision = useApp((s) => s.logs[task.id]?.filter((e) => e.type === 'tool.end').at(-1)?.seq);
+  const independentRevision = useApp((s) => s.logs[task.id]?.filter((e) => e.type === 'independent.task_changed').at(-1)?.seq);
   const agentName = useAgentName(task.agent);
-  const modelName = useApp((s) => s.agents.find((a) => a.kind === task.agent)?.models.find((m) => m.id === config.model)?.name) ?? config.models?.find((m) => m.id === config.model)?.name ?? config.model;
+  const modelName = agent?.models.find((m) => m.id === config.model)?.name ?? config.models?.find((m) => m.id === config.model)?.name ?? config.model;
   const profileId = config.profileId ?? task.profileId ?? null;
-  const profileName = useApp((s) => {
-    const list = s.agents.find((a) => a.kind === task.agent)?.profiles;
-    return (profileId ? list?.find((p) => p.id === profileId) : list?.find((p) => p.isDefault))?.name ?? null;
-  });
-  const tabs: Array<[SideTab, string]> = [['plan', '计划'], ['diff', '改动']];
-  const select = (t: SideTab) => setPref('sideTab', t);
-  return (
-    <aside className="side" aria-label="上下文面板">
-      <div className="side-head">
-        <div className="tabs" role="tablist" aria-label="上下文面板"
-          onKeyDown={(e) => {
-            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
-            const i = tabs.findIndex(([k]) => k === tab);
-            const n = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length]![0];
-            select(n);
-            document.getElementById('st-' + n)?.focus();
-          }}>
-          {tabs.map(([k, label]) => (
-            <button key={k} type="button" role="tab" id={'st-' + k} aria-controls={'sp-' + k} aria-selected={tab === k}
-              tabIndex={tab === k ? 0 : -1} onClick={() => select(k)}>
-              {label}{k === 'plan' && plan ? <span className="count">{plan.data.items.filter((x) => x.status === 'completed').length}/{plan.data.items.length}</span> : null}
-            </button>
-          ))}
-        </div>
-        <span className="grow" />
-        <button type="button" className="btn ghost icon sm" aria-label="收起右侧面板" title="收起 Ctrl+J" onClick={() => setPref('sideOpen', false)}><Icon name="x" /></button>
-      </div>
-
-      <div className="side-body pane-pad" id="sp-plan" role="tabpanel" aria-labelledby="st-plan" hidden={tab !== 'plan'}>
-        {plan ? <PlanList items={plan.data.items} /> : (
-          <div className="empty" style={{ padding: 'var(--sp-5) 0' }}><h3>还没有计划</h3><p>Agent 给出步骤计划后会显示在这里，并随进度更新。</p></div>
-        )}
-        <h3 className="side-h3">上下文</h3>
-        <dl className="ctx">
-          <dt>项目</dt><dd title={project?.path}>{project?.name ?? '—'}</dd>
-          <dt>Agent</dt><dd>{agentName}</dd>
-          <dt>模型</dt><dd>{modelName ?? '默认'}{config.effort ? `，思考强度 ${effortLabel(config.effort)}` : ''}</dd>
-          {profileName ? <><dt>账号</dt><dd>{profileName}</dd></> : null}
-          {config.usage && config.usage.size > 0 ? (
-            <><dt>上下文</dt><dd>已用 {Math.round((config.usage.used / config.usage.size) * 100)}%（{fmtTokens(config.usage.used)} / {fmtTokens(config.usage.size)}）
-              {config.usage.cost ? `，花费 ${config.usage.cost.amount.toFixed(2)} ${config.usage.cost.currency}` : ''}</dd></>
-          ) : null}
-          <dt>权限</dt><dd>{permInfo[task.permission].label}</dd>
-          <dt>工作区</dt><dd>{isRealAgent(task.agent) ? '直接在项目目录里修改；独立工作副本将在后续版本提供' : '独立工作副本将在后续版本提供'}</dd>
-        </dl>
-      </div>
-
-      <div className="side-body" id="sp-diff" role="tabpanel" aria-labelledby="st-diff" hidden={tab !== 'diff'}>
-        <div className="empty"><h3>改动面板在有了独立工作副本后提供</h3><p>那时 Agent 的每处修改都会先进这里，看完 diff 再决定合并、丢弃或回滚。</p></div>
-      </div>
-    </aside>
-  );
-}
-
-/** 上下文用量：1234 → 1.2k，1234567 → 1.2M */
-function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
-  if (n >= 1000) return (n / 1000).toFixed(1).replace(/\.0$/, '') + 'k';
-  return String(Math.round(n));
+  const profileName = (profileId ? agent?.profiles?.find((p) => p.id === profileId) : agent?.profiles?.find((p) => p.isDefault))?.name ?? null;
+  const [usage, setUsage] = useState<TaskUsage | null>(null), [files, setFiles] = useState<TaskFile[] | null>(null);
+  const [independent, setIndependent] = useState<IndependentTaskState | null>(null);
+  const [usageError, setUsageError] = useState<string | null>(null), [fileError, setFileError] = useState<string | null>(null), [independentError, setIndependentError] = useState<string | null>(null);
+  useEffect(() => { let live = true; void api.taskUsage(task.id).then((v) => { if (live) { setUsage(v); setUsageError(null); } }).catch((e) => { if (live) setUsageError(asApiError(e).message); }); return () => { live = false; }; }, [task.id, usageRevision, conn]);
+  useEffect(() => { let live = true; void api.taskFiles(task.id).then((v) => { if (live) { setFiles(v); setFileError(null); } }).catch((e) => { if (live) setFileError(asApiError(e).message); }); return () => { live = false; }; }, [task.id, fileRevision, independentRevision, conn]);
+  useEffect(() => { if (task.agent !== 'independent') return; let live = true; void api.independentTask(task.id).then((v) => { if (live) { setIndependent(v); setIndependentError(null); } }).catch((e) => { if (live) setIndependentError(asApiError(e).message); }); return () => { live = false; }; }, [task.id, task.agent, task.status, independentRevision, conn]);
+  const focus = useStore(detailFocus, (s) => s);
+  useEffect(() => { if (!focus || tab !== 'plan') return; const el = document.getElementById('detail-' + focus.section); if (el) { el.scrollIntoView({ block: 'nearest' }); el.focus({ preventScroll: true }); detailFocus.set(() => null); } }, [focus, tab]);
+  const value = contextValue(config.usage, independent?.context);
+  const sections: Array<{ key: DetailSection; title: string; summary: string; body: ReactNode }> = [
+    { key: 'environment', title: '环境', summary: project?.name ?? '未报告', body: <EnvironmentDetails project={project} task={task} profileName={profileName} /> },
+    { key: 'plan', title: '计划', summary: plan ? `${plan.data.items.filter((x) => x.status === 'completed').length} / ${plan.data.items.length}` : '未报告', body: <PlanDetails plan={plan} /> },
+    { key: 'context', title: '上下文', summary: contextSummary(value, agentName, modelName), body: <><ContextDetails value={value} agent={agentName} model={modelName} config={config} />{independentError ? <p className="d-note" role="alert">{independentError}</p> : null}</> },
+    { key: 'usage', title: '会话 token 用量', summary: usage ? `${formatTokens(usage.total.totalTokens)} · ${usage.turns} 轮` : usageError ? '读取失败' : '正在读取', body: <UsageDetails usage={usage} independent={independent} config={config} error={usageError} /> },
+    { key: 'connection', title: '连接', summary: '未报告', body: <ConnectionDetails agent={agent} /> },
+    { key: 'output', title: '输出', summary: files ? `${files.length} 个文件` : fileError ? '读取失败' : '正在读取', body: <OutputDetails files={files} error={fileError} /> },
+  ];
+  const tabs: Array<[SideTab, string]> = [['plan', '详细'], ['diff', '改动']];
+  return <aside className="side" aria-label="详细面板"><div className="side-head">
+    <div className="tabs" role="tablist" aria-label="详细面板" onKeyDown={(e) => { if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return; e.preventDefault(); const next = tab === 'plan' ? 'diff' : 'plan'; setPref('sideTab', next); document.getElementById('st-' + next)?.focus(); }}>
+      {tabs.map(([key, title]) => <button key={key} type="button" role="tab" id={'st-' + key} aria-controls={'sp-' + key} aria-selected={tab === key} tabIndex={tab === key ? 0 : -1} onClick={() => setPref('sideTab', key)}>{title}</button>)}
+    </div><span className="grow" /><button type="button" className="btn ghost icon sm" aria-label="收起右侧面板" title="收起 Ctrl+J" onClick={() => setPref('sideOpen', false)}><Icon name="x" /></button>
+  </div><div className="side-body pane-pad" id="sp-plan" role="tabpanel" aria-labelledby="st-plan" hidden={tab !== 'plan'}>
+    {sections.map((section) => { const open = opened.includes(section.key); return <section key={section.key} id={'detail-' + section.key} className={'d-section' + (open ? ' open' : '')} tabIndex={-1} aria-label={section.title}>
+      <h3><button type="button" className="d-toggle" aria-expanded={open} aria-controls={'detail-body-' + section.key} onClick={() => setPref('detailOpen', open ? opened.filter((x) => x !== section.key) : [...opened, section.key])}><Icon name="right" /><span>{section.title}</span><span className="sub" title={section.summary}>{section.summary}</span></button></h3>
+      <div className="d-body" id={'detail-body-' + section.key} hidden={!open}>{section.body}</div>
+    </section>; })}
+  </div><div className="side-body" id="sp-diff" role="tabpanel" aria-labelledby="st-diff" hidden={tab !== 'diff'}><div className="empty"><h3>改动面板</h3><p>之后的版本提供。</p></div></div></aside>;
 }

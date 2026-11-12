@@ -27,6 +27,7 @@ import { IndependentApiDriver } from './model-driver';
 import { IndependentTurnEngine, type IndependentApprovalClock } from './turn-engine';
 import { independentModelTools } from './tool-definitions';
 import { usableCapability } from './capabilities';
+import { independentTurnUsage } from '../usage';
 const STOP_TEXT = {
   completed: '本回合已完成，等待你验收。', cancelled: '本回合已停止，实际工具与连接已收尾。',
   interrupted: '本回合已中断，请核对记录后继续。', timed_out: '已达到回合时间上限。',
@@ -282,10 +283,12 @@ export class IndependentTaskRuntime {
         `你是 AI Console 独立编码 Agent。用中文与用户沟通。遵守项目规则，先读后改；修改与命令必须经用户审批。不要读取第三方 Agent 的凭据，不要输出密钥。工具返回范围、用量和错误必须如实说明。可用 Node 可执行文件：${process.execPath}\n项目规则：\n${rules.files.map((f) => f.path + '\n' + f.text).join('\n')}`,
         previous && tail ? { previousBinding: this.store.get(String(previous.id)).binding, tailHash: tail.hash } : undefined);
         try {
+          const firstRequest = this.ledger.snapshot(taskId).attemptedRequests;
           const result = await engine.run(turn.id, signal);
           if (result.stop === 'tool_error' || result.stop === 'interrupted') this.db.run('UPDATE independent_task_settings SET recovery_required=1 WHERE task_id=?', taskId);
           host.update({ kind: 'notice', level: result.stop === 'completed' ? 'info' : 'warn', text: STOP_TEXT[result.stop!] });
-          return { stopReason: result.stop === 'completed' ? 'end_turn' : result.stop === 'cancelled' || result.stop === 'interrupted' ? 'cancelled' : 'error' };
+          return { stopReason: result.stop === 'completed' ? 'end_turn' : result.stop === 'cancelled' || result.stop === 'interrupted' ? 'cancelled' : 'error',
+            usage: independentTurnUsage(this.ledger.entries(taskId).filter((r) => r.ordinal > firstRequest)) };
         } finally {
           if (this.db.get("SELECT id FROM independent_turns WHERE task_id=? AND status='running'", taskId)
             || this.db.get("SELECT id FROM independent_tool_calls WHERE task_id=? AND state IN ('pending','approved','running')", taskId)

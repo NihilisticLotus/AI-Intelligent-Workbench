@@ -1,6 +1,6 @@
 // 演示 Agent：不需要登录、不碰磁盘，按真实 Agent 的节奏产生思考、流式回复、工具调用、计划和审批。
 // 用于在没有任何真实 Agent 时走通整个界面，也用作接口契约测试的对手方。
-import type { PermissionLevel, PromptInput } from '@aic/protocol';
+import type { PermissionLevel, PromptInput, TurnTokenUsage } from '@aic/protocol';
 import { AbortError, newId, sleep } from './util';
 import type {
   AgentAdapter, AgentCaps, AgentConnection, ModelInfo, PermissionRequest, SessionHost, SpawnOptions, StopReason,
@@ -108,13 +108,16 @@ class FakeConnection implements AgentConnection {
     }
   }
 
-  async prompt(input: PromptInput, signal: AbortSignal): Promise<{ stopReason: StopReason }> {
+  async prompt(input: PromptInput, signal: AbortSignal): Promise<{ stopReason: StopReason; usage?: TurnTokenUsage }> {
     this.turn++;
     try {
       const images = input.attachments?.filter((a) => a.kind === 'image') ?? [];
       if (images.length) await this.say('收到 ' + images.length + ' 张图片：' + images.map((a) => a.name + '、' + a.width + ' × ' + a.height).join('；'), signal);
       else await this.run(input.text, signal);
-      return { stopReason: 'end_turn' };
+      // 明确的演示数据：前三轮覆盖圆环的普通、警告、临界区间。
+      this.host.update({ kind: 'usage', used: [76_200, 150_000, 190_000][Math.min(this.turn - 1, 2)]!, size: 200_000 });
+      return { stopReason: 'end_turn', usage: { inputTokens: 1000, outputTokens: 200, thoughtTokens: 50,
+        cacheReadTokens: 400, cacheWriteTokens: 100, totalTokens: 1200 } };
     } catch (e) {
       if (e instanceof AbortError || signal.aborted) return { stopReason: 'cancelled' };
       throw e;

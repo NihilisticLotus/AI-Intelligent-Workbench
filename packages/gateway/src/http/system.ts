@@ -16,6 +16,7 @@ export function systemRoutes(s: Services) {
       version: s.version,
       protocol: PROTOCOL_VERSION,
       features: {
+        [FeatureKey.TaskUsage]: true,
         [FeatureKey.FakeAgent]: true,
         [FeatureKey.RealAgents]: true,
         [FeatureKey.Profiles]: true,

@@ -172,7 +172,7 @@ const app = acp.agent({ name: 'fake-acp-agent' })
     turn++;
     if (turnFile) writeFileSync(turnFile, String(turn));
     const st = await runSteps(params.sessionId, t.steps ?? [], client);
-    return { stopReason: st ?? t.stop ?? 'end_turn' };
+    return { stopReason: st ?? t.stop ?? 'end_turn', ...(t.usage === undefined ? {} : { usage: t.usage }) };
   })
   .onNotification('session/cancel', ({ params }) => {
     log({ method: 'session/cancel', params });

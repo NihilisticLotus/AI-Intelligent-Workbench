@@ -254,6 +254,24 @@ export type Approval = z.infer<typeof Approval>;
 const Base = { seq: z.number().int().positive(), ts: Ts, taskId: Id.nullable(), sessionId: Id.nullable() };
 const ev = <T extends string, D extends z.ZodTypeAny>(type: T, data: D) => z.object({ ...Base, type: z.literal(type), data });
 
+/** 每项只保留上游报告的非负安全整数，null 表示未报告。 */
+const TokenCount = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER).nullable();
+export const TurnTokenUsage = z.object({
+  inputTokens: TokenCount, outputTokens: TokenCount, thoughtTokens: TokenCount,
+  cacheReadTokens: TokenCount, cacheWriteTokens: TokenCount, totalTokens: TokenCount,
+}).strict();
+export type TurnTokenUsage = z.infer<typeof TurnTokenUsage>;
+export const TurnUsage = TurnTokenUsage.extend({ source: z.enum(['agent', 'independent']) }).strict();
+export type TurnUsage = z.infer<typeof TurnUsage>;
+export const TaskUsage = z.object({
+  segments: z.array(z.object({
+    sessionId: Id.nullable(), agent: AgentKind, model: z.string().nullable(), startedAt: Ts,
+    turns: z.number().int().nonnegative(), reportedTurns: z.number().int().nonnegative(), totals: TurnUsage,
+  }).strict()),
+  total: TurnUsage, turns: z.number().int().nonnegative(), reportedTurns: z.number().int().nonnegative(),
+}).strict();
+export type TaskUsage = z.infer<typeof TaskUsage>;
+
 export const ToolKind = z.enum(['read', 'search', 'edit', 'create', 'delete', 'execute', 'fetch', 'think', 'other']);
 export const EventEnvelope = z.discriminatedUnion('type', [
   ev('task.created', z.object({ task: Task })),
@@ -265,6 +283,7 @@ export const EventEnvelope = z.discriminatedUnion('type', [
   })),
   ev('session.ended', z.object({ reason: z.string() })),
   ev('message.user', z.object({ messageId: Id, text: z.string(), attachments: z.array(AttachmentInfo).max(10).optional() })),
+  ev('turn.usage', z.object({ messageId: Id, usage: TurnUsage }).strict()),
   ev('message.delta', z.object({ messageId: Id, text: z.string() })),
   ev('message.done', z.object({ messageId: Id, text: z.string().optional() })),
   ev('thought.delta', z.object({ messageId: Id, text: z.string() })),
@@ -401,6 +420,7 @@ export const AUTH_HEADER = 'authorization';
 
 /** /hello 里 features 的已知键；客户端遇到不认识的键直接忽略 */
 export const FeatureKey = {
+  TaskUsage: 'taskUsage',
   FakeAgent: 'agents.fake',          // 演示 Agent
   RealAgents: 'agents.real',         // 1.2 起
   Approvals: 'approvals',
@@ -856,6 +876,7 @@ export type IndependentToolArguments = z.infer<typeof IndependentToolArguments>;
 export const IndependentUsage = z.object({
   inputTokens: z.number().int().nonnegative().nullable(), outputTokens: z.number().int().nonnegative().nullable(),
   cacheReadTokens: z.number().int().nonnegative().nullable(), cacheWriteTokens: z.number().int().nonnegative().nullable(),
+  thoughtTokens: TokenCount.optional(), totalTokens: TokenCount.optional(),
 }).strict();
 export type IndependentUsage = z.infer<typeof IndependentUsage>;
 export const IndependentToolCall = z.object({

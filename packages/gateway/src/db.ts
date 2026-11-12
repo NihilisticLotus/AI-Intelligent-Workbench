@@ -228,6 +228,16 @@ const MIGRATIONS: string[] = [
     context_json TEXT, updated_at INTEGER NOT NULL
   );
   `,
+  // v13：每条用户消息对应唯一一条用量；会话启动失败时 session_id 为空。
+  `
+  CREATE TABLE turn_usage (
+    task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    session_id TEXT REFERENCES sessions(id) ON DELETE SET NULL,
+    message_id TEXT NOT NULL, usage_json TEXT NOT NULL, at INTEGER NOT NULL,
+    PRIMARY KEY (task_id, message_id)
+  );
+  CREATE INDEX idx_turn_usage_session ON turn_usage(task_id,session_id,at);
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

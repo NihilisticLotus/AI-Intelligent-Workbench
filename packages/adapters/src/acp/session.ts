@@ -1,6 +1,7 @@
 // AcpSession：实现 AgentConnection，三家共用（phase-1.md 6.2.1–6.2.3、6.3.2、6.5.4）。
 // 一个进程只跑一个会话（6.3.1 总表“每个进程的会话数”）。
-import { ErrorCode, type PromptInput, type AgentKind, type PermissionLevel } from '@aic/protocol';
+import { ErrorCode, type PromptInput, type AgentKind, type PermissionLevel, type TurnTokenUsage } from '@aic/protocol';
+import { promptUsage } from './usage';
 import { redact } from '../redact';
 import {
   AgentError, type AgentCaps, type AgentConnection, type AgentUpdate, type AuthMethodInfo, type LogFn, type McpServerSpec, type ProbeOptions,
@@ -263,7 +264,7 @@ export class AcpSession implements AgentConnection {
 
   // ---------- 回合 ----------
 
-  async prompt(input: PromptInput, signal: AbortSignal): Promise<{ stopReason: StopReason }> {
+  async prompt(input: PromptInput, signal: AbortSignal): Promise<{ stopReason: StopReason; usage?: TurnTokenUsage }> {
     if (this.conn.isClosed) throw agentErrors.crashed(this.spec.kind, this.spec.displayName);
     this.turnMessages.clear(); this.turnTools = false; this.turnCompactions.clear();
     const prompt: Record<string, unknown>[] = [];
@@ -295,6 +296,7 @@ export class AcpSession implements AgentConnection {
         sessionId: this.agentSessionId, prompt,
       }, 0));
       const stop = this.driftCancelled ? 'cancelled' : str(resp.stopReason) ?? 'end_turn';
+      const usage = promptUsage(resp.usage);
       if (stop === 'cancelled') { this.mapper.endTurn('cancelled'); return { stopReason: 'cancelled' }; }
       this.mapper.endTurn('end_turn');
       if (!this.turnTools && this.turnMessages.size === 1) {
@@ -305,9 +307,9 @@ export class AcpSession implements AgentConnection {
           : textResponseError(text, this.spec.kind, this.spec.displayName, this.secrets);
         if (failure) throw failure;
       }
-      if (stop === 'refusal') return { stopReason: 'refusal' };
+      if (stop === 'refusal') return { stopReason: 'refusal', ...(usage ? { usage } : {}) };
       if (stop === 'max_tokens' || stop === 'max_turn_requests') this.notice('info', MAX_TOKENS_NOTICE);
-      return { stopReason: 'end_turn' };
+      return { stopReason: 'end_turn', ...(usage ? { usage } : {}) };
     } catch (e) {
       if ((signal.aborted || this.driftCancelled) && (killed || this.conn.isClosed)) { this.mapper.endTurn('cancelled'); return { stopReason: 'cancelled' }; }
       if (signal.aborted && errCode(e) === -32800) { this.mapper.endTurn('cancelled'); return { stopReason: 'cancelled' }; }

@@ -157,9 +157,9 @@ describe('持久请求预算', () => {
     const directory = temporary(), file = path.join(directory, 'migration.db'); const { db } = setup(file);
     db.run("INSERT INTO task_drafts(task_id,text,annotations_json,updated_at) VALUES ('task','原草稿','[]',1)");
     databases.splice(databases.indexOf(db), 1); db.close();
-    const old = new DatabaseSync(file); old.exec('DROP TABLE independent_task_settings; DROP TABLE independent_request_attempts; DROP TABLE independent_request_budgets; PRAGMA user_version=10;'); old.close();
+    const old = new DatabaseSync(file); old.exec('DROP TABLE turn_usage; DROP TABLE independent_task_settings; DROP TABLE independent_request_attempts; DROP TABLE independent_request_budgets; PRAGMA user_version=10;'); old.close();
     for (let i = 0; i < 2; i++) { const migrated = openDb(file);
-      expect(migrated.get('PRAGMA user_version')).toEqual({ user_version: 12 }); expect(migrated.get('SELECT text FROM task_drafts')).toEqual({ text: '原草稿' });
+      expect(migrated.get('PRAGMA user_version')).toEqual({ user_version: 13 }); expect(migrated.get('SELECT text FROM task_drafts')).toEqual({ text: '原草稿' });
       expect(migrated.get('SELECT id FROM sessions')).toEqual({ id: 'session' }); expect(migrated.all('SELECT * FROM independent_request_attempts')).toEqual([]); migrated.close(); }
   });
   it('预留后子进程崩溃，重开数据库仍耗尽额度，不产生重发', async () => {

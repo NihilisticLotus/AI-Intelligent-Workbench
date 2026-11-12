@@ -45,6 +45,14 @@ async function setup(respond: (n: number, body: any) => unknown = () => done('�
 }
 
 describe('正式独立任务的离线接口与闭环', () => {
+  it('三轮独立 HTTP 用量不串轮，保留上游报告的总量和思考', async () => {
+    const f = await setup(() => ({ ...done('用量夹具'), usage: { prompt_tokens: 10, completion_tokens: 3,
+      total_tokens: 13, completion_tokens_details: { reasoning_tokens: 2 } } }));
+    for (let i = 0; i < 3; i++) { await f.s.tasks.prompt(f.task.id, `第 ${i + 1} 轮`); await f.s.tasks.idle(); }
+    const result = (await gateway!.api('GET', `/tasks/${f.task.id}/usage`, { token: f.token })).json;
+    expect(result).toMatchObject({ turns: 3, reportedTurns: 3, total: { inputTokens: 30, outputTokens: 9, thoughtTokens: 6, totalTokens: 39, cacheReadTokens: null } });
+    expect(f.count()).toBe(3);
+  }, 60_000);
   it('同模型补预算保留绑定与私有续传，下一回合实际 HTTP 成功且账本不重置', async () => {
     const f = await setup(() => ({ choices: [{ index: 0, message: { role: 'assistant', content: '已完成', reasoning_content: '合成思考资料' }, finish_reason: 'stop' }], usage: { prompt_tokens: 10, completion_tokens: 2 } }));
     await f.s.tasks.prompt(f.task.id, '第一轮'); await f.wait();
@@ -56,6 +64,9 @@ describe('正式独立任务的离线接口与闭环', () => {
     expect(f.count()).toBe(2); expect(f.state().requests.map((r) => r.status)).toEqual(['succeeded', 'succeeded']);
     expect(f.bodies[1].messages.find((m: any) => m.role === 'assistant').reasoning_content).toBe('合成思考资料');
     expect(f.s.independentRuntime.store.entries(sessionId).slice(0, original.length)).toEqual(original);
+    const usage = (await gateway!.api('GET', `/tasks/${f.task.id}/usage`, { token: f.token })).json;
+    expect(usage).toMatchObject({ turns: 2, reportedTurns: 2, total: { source: 'independent', inputTokens: 20, outputTokens: 4, totalTokens: null } });
+    expect(usage.segments).toHaveLength(1);
   }, 60_000);
   it('新任务缺省持久化分开工具；历史无版本配置保持合并，旧客户端更新不降级新版本', async () => {
     const f = await setup(); const { fileToolVersion: _version, ...oldOptions } = f.options;
@@ -266,9 +277,9 @@ describe('正式独立任务的离线接口与闭环', () => {
     const f = await setup(); f.s.independentRuntime.ledger.reserve(f.state().binding, { kind: 'model', requestHash: 'c'.repeat(64) });
     // 用 SQLite 的备份语句生成独立副本，避免读取实际用户数据。
     const file = path.join(temporary(), 'old.sqlite'); f.s.db.run('VACUUM INTO ?', file);
-    const old = new DatabaseSync(file); old.exec('DROP TABLE independent_task_settings; ALTER TABLE independent_request_attempts DROP COLUMN binding_json; ALTER TABLE independent_request_attempts DROP COLUMN currency; ALTER TABLE independent_request_budgets DROP COLUMN revision; PRAGMA user_version=11;'); old.close();
+    const old = new DatabaseSync(file); old.exec('DROP TABLE turn_usage; DROP TABLE independent_task_settings; ALTER TABLE independent_request_attempts DROP COLUMN binding_json; ALTER TABLE independent_request_attempts DROP COLUMN currency; ALTER TABLE independent_request_budgets DROP COLUMN revision; PRAGMA user_version=11;'); old.close();
     for (let i = 0; i < 2; i++) { const migrated = openDb(file); try {
-      expect(migrated.get('PRAGMA user_version')).toEqual({ user_version: 12 });
+      expect(migrated.get('PRAGMA user_version')).toEqual({ user_version: 13 });
       const row = migrated.get('SELECT binding_json,currency FROM independent_request_attempts')!;
       expect(JSON.parse(String(row.binding_json))).toEqual(f.state().binding); expect(row.currency).toBe(null);
     } finally { migrated.close(); } }

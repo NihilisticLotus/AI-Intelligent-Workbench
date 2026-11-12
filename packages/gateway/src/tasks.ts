@@ -14,6 +14,7 @@ import type { EventStore } from './events';
 import { AppError, AbortError, Errors, newId, now } from './util';
 import type { IndependentTaskRuntime } from './independent/task-runtime';
 import type { IndependentTaskOptions } from '@aic/protocol';
+import { emptyUsage, recordTurnUsage } from './usage';
 
 type TaskRow = {
   id: string; project_id: string; group_id: string | null; title: string; prompt: string;
@@ -617,7 +618,7 @@ export class TaskService {
     const abort = new AbortController();
     this.turnAborts.set(taskId, abort);
     this.setStatus(taskId, 'running');
-    const turn = this.runTurn(taskId, text, abort, inputs);
+    const turn = this.runTurn(taskId, messageId, text, abort, inputs);
     this.turns.add(turn);
     void turn.finally(() => this.turns.delete(turn));
     return messageId;
@@ -633,8 +634,10 @@ export class TaskService {
     this.events.append({ type: 'error', taskId, sessionId, data: { error } });
   }
 
-  private async runTurn(taskId: string, text: string, abort: AbortController, attachments: PromptAttachment[]) {
+  private async runTurn(taskId: string, messageId: string, text: string, abort: AbortController, attachments: PromptAttachment[]) {
     let rt: Runtime | undefined;
+    const source = this.getRow(taskId).agent === 'independent' ? 'independent' : 'agent';
+    let usage = emptyUsage(source);
     let watchdog: NodeJS.Timeout | undefined;
     let noResponse = false;
     this.approvalTimedOut.delete(taskId);
@@ -669,6 +672,7 @@ export class TaskService {
       }
       rt.lastActive = now();
       if (rt.redactor.active) this.flushRedactor(taskId, rt.sessionId, rt.redactor);
+      if (r.usage && !abort.signal.aborted && r.stopReason !== 'cancelled' && r.stopReason !== 'error') usage = { ...r.usage, source };
       // 审批超时：不放行，本轮结束后任务暂停（不进入待验收）
       const timedOut = this.approvalTimedOut.has(taskId);
       if (timedOut && r.stopReason !== 'error') {
@@ -700,6 +704,7 @@ export class TaskService {
       }
     } finally {
       if (watchdog) clearInterval(watchdog);
+      recordTurnUsage(this.db, this.events, taskId, rt?.sessionId ?? null, messageId, usage);
       this.activity.delete(taskId);
       if (this.turnAborts.get(taskId) === abort) this.turnAborts.delete(taskId);
       this.approvalTimedOut.delete(taskId);

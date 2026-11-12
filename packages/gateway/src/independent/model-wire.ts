@@ -17,6 +17,9 @@ const unknownUsage = (): IndependentUsage => ({ inputTokens: null, outputTokens:
 function usage(raw: unknown, kind: 'chat' | 'responses' | 'messages'): IndependentUsage {
   if (raw == null) return unknownUsage(); const u = obj(raw);
   return { inputTokens: count(kind === 'chat' ? u.prompt_tokens : u.input_tokens), outputTokens: count(kind === 'chat' ? u.completion_tokens : u.output_tokens),
+    ...(u.total_tokens !== undefined ? { totalTokens: count(u.total_tokens) } : {}),
+    ...((kind === 'chat' ? u.completion_tokens_details?.reasoning_tokens : u.output_tokens_details?.reasoning_tokens) !== undefined
+      ? { thoughtTokens: count(kind === 'chat' ? u.completion_tokens_details?.reasoning_tokens : u.output_tokens_details?.reasoning_tokens) } : {}),
     cacheReadTokens: count(kind === 'chat' ? u.prompt_tokens_details?.cached_tokens : kind === 'responses' ? u.input_tokens_details?.cached_tokens : u.cache_read_input_tokens),
     cacheWriteTokens: count(kind === 'chat' ? u.prompt_tokens_details?.cache_write_tokens : kind === 'messages' ? u.cache_creation_input_tokens : undefined) };
 }

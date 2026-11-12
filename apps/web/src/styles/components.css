@@ -1,7 +1,7 @@
 /* 业务组件：对话、工具调用、计划、审批、输入区。迁移自 design/prototype/assets/components.css */
 /* ---------- 对话流 ---------- */
 .stream { flex: 1; overflow: auto; padding: var(--sp-3) var(--sp-5) var(--sp-6); min-height: 0; }
-.stream-inner { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--sp-4); }
+.stream-inner { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: var(--sp-5); }
 
 .msg { display: grid; grid-template-columns: 28px 1fr; gap: var(--sp-3); }
 .msg .who { padding-top: 2px; }
@@ -10,12 +10,18 @@
 .msg .head b { color: var(--fg-1); font-size: var(--fs-13); font-weight: 600; }
 .msg .text p { margin: 4px 0 0; max-width: 44em; }
 .msg .text code { background: var(--bg-3); padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
-.msg.user .text { background: var(--bg-2); border-radius: var(--r-card); padding: 10px 14px; }
+.msg.user { display: flex; justify-content: flex-end; }
+.msg.user > .who, .msg.user .head { display: none; }
+.msg.user > div { min-width: 0; max-width: min(var(--chat-user-width), var(--chat-user-max)); display: flex; flex-direction: column; align-items: flex-end; }
+.msg.user .text { max-width: 100%; background: var(--chat-user-bg); border-radius: var(--chat-user-radius); padding: var(--chat-user-padding); }
 .msg.user .text p:first-child { margin-top: 0; }
+.msg.turn { grid-template-columns: var(--chat-avatar-column) minmax(0, 1fr); gap: var(--sp-2); }
+.msg.turn .who .ag { width: var(--chat-avatar-size); height: var(--chat-avatar-size); font-size: var(--chat-avatar-font); }
+.msg.turn .head b { font-weight: 500; }
 .attach { display: inline-flex; gap: 6px; align-items: center; margin-top: 8px; padding: 4px 8px; background: var(--bg-3); border-radius: var(--r-ctl); font-size: var(--fs-12); color: var(--fg-2); }
 
 /* 工具调用卡片：原生 details，键盘可操作；平时只是一行轻文字 */
-.tools-group { display: flex; flex-direction: column; gap: 0; margin: calc(var(--sp-2) * -1) 0 0 40px; }
+.tools-group { display: flex; flex-direction: column; gap: 0; margin: calc(var(--sp-2) * -1) 0 0 40px; border: 0; box-shadow: none; background: transparent; }
 .tool > summary {
   list-style: none; display: flex; align-items: center; gap: var(--sp-2);
   padding: 4px 8px; margin-left: -8px; cursor: pointer; border-radius: var(--r-ctl); font-size: var(--fs-13); color: var(--fg-3);
@@ -69,7 +75,7 @@
 .pending-strip { display: flex; align-items: center; gap: var(--sp-2); padding: 6px 8px 6px 12px; margin-bottom: var(--sp-2); border-radius: var(--r-card); background: var(--attn-weak); font-size: var(--fs-13); }
 .pending-strip svg.i { color: var(--attn); }
 .pending-strip .grow { flex: 1; }
-.compose-box { border: 1px solid var(--line-strong); border-radius: var(--r-dialog); background: var(--bg-0); }
+.compose-box { border: 1px solid var(--line); border-radius: var(--compose-radius); background: var(--bg-1); }
 .compose-box:focus-within { outline: 2px solid var(--accent); outline-offset: -1px; border-color: transparent; }
 .compose-box textarea { width: 100%; min-height: 60px; resize: vertical; border: 0; background: transparent; padding: 12px 14px 4px; outline: none; display: block; }
 .compose-bar { display: flex; align-items: center; gap: var(--sp-2); padding: 6px 8px; flex-wrap: wrap; }

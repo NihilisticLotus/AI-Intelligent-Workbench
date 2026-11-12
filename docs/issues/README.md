@@ -76,3 +76,4 @@
 | [ISSUE-0061](ISSUE-0061-watchdog-long-tool.md) | 无回应看门狗会停掉长时间没有输出的工具 | open | bug | 2026-11-11 | |
 | [ISSUE-0062](ISSUE-0062-text-error-heuristic.md) | 按回复开头文字判定模型失败，可能把正常的简短回答当成错误 | open | bug | 2026-11-11 | |
 | [ISSUE-0063](ISSUE-0063-step-1.4-baseline-environment.md) | 1.4 开工环境无法通过既有 Windows 进程与文件宿主测试 | fixed | 验收未通过 / 外部依赖 | 2026-11-12 | 2026-11-12 |
+| [ISSUE-0064](ISSUE-0064-sidebar-new-button-shrink.md) | 项目较多时侧栏新建任务按钮被挤扁 | fixed | bug | 2026-11-12 | 2026-11-12 |

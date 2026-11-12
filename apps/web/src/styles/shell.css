@@ -5,7 +5,7 @@
 /* 侧栏：可折叠为图标栏（Ctrl+B） */
 .sidebar {
   width: 252px; flex: none; background: var(--bg-0);
-  display: flex; flex-direction: column; gap: 2px;
+  display: flex; flex-direction: column; gap: 1px;
   padding: var(--sp-3) var(--sp-2); overflow: hidden auto;
   transition: width var(--dur-slow) var(--ease);
 }
@@ -14,7 +14,7 @@
 .brand-mark { width: 24px; height: 24px; border-radius: 6px; background: var(--fg-1); color: var(--bg-1); display: grid; place-items: center; font: 700 11px/1 var(--font-code); flex: none; }
 .sb-top .grow { flex: 1; }
 .sb-item {
-  display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 0 8px;
+  display: flex; align-items: center; gap: 10px; min-height: var(--sidebar-item-height); padding: 0 8px;
   border-radius: var(--r-ctl); color: var(--fg-2); text-decoration: none; font-size: var(--fs-13);
   border: 0; background: none; cursor: pointer; width: 100%; text-align: left; white-space: nowrap; position: relative;
 }
@@ -23,8 +23,13 @@
 .sb-item .badge { margin-left: auto; }
 .sb-item.attn { color: var(--attn); font-weight: 600; }
 .sb-label { overflow: hidden; text-overflow: ellipsis; }
-.sb-new { margin: 0 0 var(--sp-3); width: 100%; justify-content: flex-start; }
+.sb-new { margin: 0 0 var(--sp-3); width: 100%; justify-content: flex-start; flex: none; }
 .sb-new kbd { margin-left: auto; }
+.btn.primary.sb-new { background: transparent; color: var(--fg-1); box-shadow: inset 0 0 0 1px var(--line-strong); }
+.btn.primary.sb-new:hover { background: var(--bg-2); filter: none; }
+.sb-new svg.i { color: var(--fg-2); }
+.sb-item svg.i { color: var(--fg-3); }
+.sb-item[aria-current="page"] svg.i { color: var(--fg-1); }
 .sb-section { display: flex; align-items: center; gap: 2px; padding: 18px 4px 4px 8px; font-size: var(--fs-12); color: var(--fg-3); white-space: nowrap; }
 .sb-section .grow { flex: 1; }
 .btn.icon.xs { width: 24px; height: 24px; padding: 0; min-height: 0; color: var(--fg-3); }
@@ -70,8 +75,8 @@
 /* 主区 */
 /* min-height: 0：窄屏下 .app 变成纵向排列时，主区不能被内容撑高，否则底部导航被挤出屏幕 */
 .main { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
-.main-head { display: flex; align-items: center; gap: var(--sp-3); height: 56px; padding: 0 var(--sp-5); flex: none; min-width: 0; }
-.main-head h1 { font-size: var(--fs-16); font-weight: 600; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.main-head { display: flex; align-items: center; gap: var(--sp-2); height: var(--main-head-height); padding: 0 var(--sp-5); flex: none; min-width: 0; }
+.main-head h1 { font-size: var(--fs-14); font-weight: 600; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .main-head .grow { flex: 1; }
 .main-head .meta { display: inline-flex; align-items: center; gap: 6px; color: var(--fg-3); font-size: var(--fs-12); white-space: nowrap; min-width: 0; overflow: hidden; }
 .main-body { flex: 1; min-height: 0; display: flex; }

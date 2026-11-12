@@ -45,6 +45,12 @@
   --fs-12: 12px; --fs-13: 13px; --fs-14: 14px; --fs-16: 16px; --fs-20: 20px; --fs-26: 26px;
   --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px; --sp-5: 24px; --sp-6: 32px; --sp-7: 48px;
   --r-ctl: 6px; --r-card: 8px; --r-dialog: 12px; --r-pill: 999px;
+  /* 轻量对话：尺寸共享于深浅主题，表面颜色分别定义。 */
+  --chat-user-bg: #2e3035;
+  --chat-user-radius: 16px; --chat-user-max: 640px; --chat-user-width: 78%;
+  --chat-user-padding: 9px 14px;
+  --chat-avatar-size: 20px; --chat-avatar-column: 22px; --chat-avatar-font: 10px;
+  --compose-radius: 16px; --main-head-height: 48px; --sidebar-item-height: 32px;
   --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--line);
   --dur-fast: 120ms; --dur-base: 180ms; --dur-slow: 260ms;
   --ease: cubic-bezier(0.2, 0, 0, 1);
@@ -58,6 +64,7 @@
   --bg-2: #ffffff;
   --bg-3: #e9e9ea;
   --bg-viewport: #8c8c8c;
+  --chat-user-bg: #e9e9ea;
   --line: #d2d3d6;
   --line-strong: #a9abb0;
   --fg-1: #1c1d20;

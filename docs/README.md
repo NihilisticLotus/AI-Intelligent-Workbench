@@ -14,7 +14,7 @@
 
 | 文档 | 日期 | 说明 |
 |---|---|---|
-| [research/usage-quota.md](research/usage-quota.md) | 2026-11-12 | 1.4 用量与额度离线初稿：固定适配器字段、统计范围与待验证项；真实结果待补 |
+| [research/usage-quota.md](research/usage-quota.md) | 2026-11-13 | 1.4 用量与额度调研：固定版本、官方来源、三家及独立 Agent 三轮真实结果；用户决定本步保持额度未知 |
 | [research/context.md](research/context.md) | 2026-11-05 | 切换模型不丢上下文：记忆方案、同类产品、ACP 能力 |
 | [research/handoff.md](research/handoff.md) | 2026-11-06 | 各家工作台的会话交接做法，自动交接方案 |
 | [research/media-gen.md](research/media-gen.md) | 2026-11-06 | 图片 / 视频 / 音频生成选型，28 条关键断言已独立核查 |
@@ -28,14 +28,14 @@
 
 | 文档 | 说明 |
 |---|---|
-| [plans/phase-1.md](plans/phase-1.md) | 第一阶段：本机浏览器版，7 步（2026-11-08 重新规划，1.1、1.2 已完成）；第 2 节是接口规则，第 7 节是进度盘点 |
+| [plans/phase-1.md](plans/phase-1.md) | 第一阶段：本机浏览器版，7 步，1.1～1.4 已完成；第 2 节是接口规则，第 10.16 节是 1.4 结论 |
 
 ## 过程记录
 
 | 目录 | 说明 |
 |---|---|
 | [acceptance/](acceptance/) | 每一步的验收记录 |
-| [acceptance/step-1.4.md](acceptance/step-1.4.md) | 分阶段验收与当前进度；阶段 0 基线恢复通过，历史环境阻塞见 ISSUE-0063 |
-| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 部分通过：原生三家图片 / 切换、Claude 恢复拒绝、CodeBuddy 十分钟遮挡审批与通知、Windows 拖入、受控停服恢复通过；独立真实文本 / 工具审批 / 图片 / 续接 / 取消恢复通过，公共能力目录通过，两份旧密钥按授权清理。用户指定 Luna 单条恢复回复 OK；原智谱目录最新单次 HTTP 200 / data_not_array，无快照，目录识别未通过。终端脱敏、固定解析分类及分页空游标修正已补齐，744 项默认测试及类型 / 构建通过；固定分类真实网页及持久化已验证，新增截图未验证。真实失败标记、干净 Windows 与两处历史根因仍未验证或查明。详见追加记录和问题单 |
+| [acceptance/step-1.4.md](acceptance/step-1.4.md) | 2026-11-13 第 10.15 节五项通过；853 通过 / 3 跳过，真实三轮与双主题证据、反向回归、当前进度；原生拖入未验证见 ISSUE-0070 |
+| [acceptance/step-1.3.md](acceptance/step-1.3.md) | 2026-11-12 已判定通过；完整历史、真实补验和遗留问题见末尾结论，1.4 接手的 ISSUE-0060～0062 已修复 |
 | [devlog/](devlog/) | 开发笔记，每月一个文件，只追加 |
 | [issues/](issues/README.md) | 问题收纳：总表 + 每个问题一个文件 |

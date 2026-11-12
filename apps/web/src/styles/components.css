@@ -235,3 +235,16 @@
 .detail-link { border: 0; border-radius: var(--r-ctl); background: transparent; color: var(--fg-2); padding: 4px 6px; margin-top: 4px; cursor: pointer; font-size: var(--fs-12); }
 .detail-link:hover { background: var(--bg-2); color: var(--fg-1); }
 .detail-link:disabled { cursor: default; opacity: .5; }
+
+/* 用量提示只来自报告事件；圆环无窗口时保持空心。 */
+.context-ring-wrap { position: relative; display: inline-flex; flex: none; order: 9; }
+.context-ring { display: grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 50%; background: transparent; cursor: pointer; color: var(--fg-2); }
+.context-ring:hover { background: var(--bg-3); }
+.context-ring .track { stroke: var(--line-strong); }
+.context-ring .progress { stroke: currentColor; }
+.context-ring.attn { color: var(--attn); }
+.context-ring.danger { color: var(--err); }
+.usage-tip { display: none; position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 20; width: max-content; max-width: min(420px, 80vw); padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--r-ctl); background: var(--bg-2); color: var(--fg-1); font-size: var(--fs-12); box-shadow: 0 4px 16px #0003; }
+.context-ring-wrap:hover .usage-tip, .context-ring-wrap:focus-within .usage-tip { display: block; }
+.turn-usage { color: var(--fg-3); font-size: var(--fs-12); margin: 10px 0 0; width: fit-content; border-radius: var(--r-ctl); }
+.plan { position: relative; }

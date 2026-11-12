@@ -3,7 +3,7 @@
 //  1. 同一个 seq 只应用一次（重连补发、历史与实时重叠都不会重复）。
 //  2. 乱序到达按 seq 处理：任务日志始终按 seq 升序；实体（任务、审批、Agent）只接受比上次更新更新的事件。
 //  3. 这里全是纯函数，不碰网络和界面，方便测试。
-import type { AgentInfo, ApiError, Approval, EventEnvelope, EventOf, ModelInfo, Task, AttachmentInfo } from '@aic/protocol';
+import type { AgentInfo, ApiError, Approval, EventEnvelope, EventOf, ModelInfo, Task, AttachmentInfo, TurnUsage } from '@aic/protocol';
 
 /** 1.2：登录流程的最新状态（agent.login 事件），键为 loginId */
 export type LoginInfo = EventOf<'agent.login'>['data'] & { ts: number };
@@ -409,6 +409,7 @@ export type TurnStep =
   | Extract<TimelineItem, { kind: 'approval' }>;
 export interface TurnItem {
   kind: 'turn'; key: string; agent: string | null; model: string | null;
+  usage?: TurnUsage;
   /** 第一段输出的时间、最后一次活动的时间 */
   ts: number; endTs: number;
   /** 过程：除最终回答之外的全部步骤（最终回答的思考也算过程） */
@@ -421,8 +422,10 @@ export interface TurnItem {
 }
 export type ViewItem = Exclude<TimelineItem, { kind: 'agent' | 'tools' }> | TurnItem;
 
-export function groupTurns(items: readonly TimelineItem[]): ViewItem[] {
+export function groupTurns(items: readonly TimelineItem[], usages: ReadonlyMap<string, TurnUsage> = new Map()): ViewItem[] {
   const out: ViewItem[] = [];
+  let userId: string | null = null;
+  const lastReplies = new Map<string, TurnItem>();
   let buf: TurnStep[] = [];
   let deferred: ViewItem[] = [];
   const flush = () => {
@@ -453,18 +456,22 @@ export function groupTurns(items: readonly TimelineItem[]): ViewItem[] {
         if (!s.resolved && s.approval.status === 'pending') pending = true;
       }
     }
-    out.push({
+    const turn: TurnItem = {
       kind: 'turn', key: 'turn:' + buf[0]!.key, agent: first?.agent ?? null, model: first?.model ?? null,
       ts: Number.isFinite(ts) ? ts : 0, endTs, steps, answer, done: !running && !pending, pendingApproval: pending,
-    });
+    };
+    out.push(turn);
+    if (userId) lastReplies.set(userId, turn);
     out.push(...deferred);
     buf = []; deferred = [];
   };
   for (const it of items) {
     if (it.kind === 'agent' || it.kind === 'tools' || it.kind === 'approval') buf.push(it);
     else if (it.kind === 'plan' && buf.length) deferred.push(it); // 计划放到这一轮的后面，不打断这一轮
-    else { flush(); out.push(it); }
+    else { flush(); out.push(it); if (it.kind === 'user') userId = it.id; }
   }
   flush();
+  // 同一用户轮次可能被系统提示分成几段，真实用量只挂在最后一段回复。
+  for (const [id, reply] of lastReplies) { const usage = usages.get(id); if (usage) reply.usage = usage; }
   return out;
 }

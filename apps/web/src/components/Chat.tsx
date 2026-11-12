@@ -18,6 +18,7 @@ import { focusApprovalStore } from './focus';
 import { MessageAttachments } from './Attachments';
 import { AnnotationLayer } from './Annotations';
 import { IndependentApproval } from './independent-task-panel';
+import { turnUsages, turnUsageText } from '../lib/usage';
 
 const busyStatuses = new Set<Task['status']>(['running', 'waiting', 'queued']);
 
@@ -35,7 +36,8 @@ export function Stream({ task, items, loading, onOpenPlan }: { task: Task; items
   const ref = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
   // 一轮回复的过程收进“用时 N 秒”，最终回答单独显示（和 Codex 等常见 Agent 软件一致）
-  const view = useMemo(() => groupTurns(items), [items]);
+  const events = useApp((s) => s.logs[task.id]);
+  const view = useMemo(() => groupTurns(items, turnUsages(events ?? [])), [items, events]);
   /** 最后一条用户消息的位置：它之后的错误才是“当前的” */
   const lastUserIdx = useMemo(() => { for (let i = view.length - 1; i >= 0; i--) if (view[i]!.kind === 'user') return i; return -1; }, [view]);
   // 用户在底部附近时，新内容到来自动滚到底；往上翻看时不打扰
@@ -117,6 +119,7 @@ function Turn({ it, task }: { it: TurnItem; task: Task }) {
   // 有待处理的审批时必须展开；否则进行中且还没开始回答时展开，其余收起；用户手动开合后以用户为准
   const isOpen = it.pendingApproval || (open ?? (working && !answer?.text));
   const secs = durationText(Math.max(1000, (working ? now : it.endTs) - it.ts));
+  const usage = it.usage ? turnUsageText(it.usage) : null;
   return (
     <article className="msg turn" aria-label={`${name} 的回复`}>
       <div className="who"><AgentBadge kind={kind} /></div>
@@ -140,6 +143,7 @@ function Turn({ it, task }: { it: TurnItem; task: Task }) {
             {!answer.done ? <span className="thinking" aria-hidden="true" /> : null}
           </div>
         ) : !hasProcess ? <p className="thinking" aria-label="正在生成">正在回复</p> : null}
+        {usage ? <p className="turn-usage" tabIndex={0} aria-label={usage.detail} title={usage.detail}>{usage.summary}</p> : null}
       </div>
     </article>
   );

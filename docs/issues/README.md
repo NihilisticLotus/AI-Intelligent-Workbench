@@ -78,3 +78,4 @@
 | [ISSUE-0063](ISSUE-0063-step-1.4-baseline-environment.md) | 1.4 开工环境无法通过既有 Windows 进程与文件宿主测试 | fixed | 验收未通过 / 外部依赖 | 2026-11-12 | 2026-11-12 |
 | [ISSUE-0064](ISSUE-0064-sidebar-new-button-shrink.md) | 项目较多时侧栏新建任务按钮被挤扁 | fixed | bug | 2026-11-12 | 2026-11-12 |
 | [ISSUE-0065](ISSUE-0065-independent-badge-light-contrast.md) | 浅色主题独立 Agent 徽标文字对比度不足 | fixed | bug | 2026-11-12 | 2026-11-12 |
+| [ISSUE-0066](ISSUE-0066-plan-hidden-text-overflow.md) | 计划辅助文字溢出导致定位时整页滚动 | fixed | bug | 2026-11-13 | 2026-11-13 |

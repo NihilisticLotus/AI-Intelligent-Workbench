@@ -1,6 +1,7 @@
 # AI Console 设计文档
 
-> 版本 0.4.30 · 2026-11-12 · 状态：设计中
+> 版本 0.4.31 · 2026-11-13 · 状态：设计中
+> v0.4.31 输入框圆环展示最新会话报告，每轮用量按用户消息 ID 回放并只在该轮最后回复展示；无窗口不显示比例，未知不补零。
 > v0.4.30 1.4 用量按用户消息持久化，任务按会话汇总；详细面板使用只读分支与常用环境，输出暂取成功工具和已写入回执，不读取文件正文。MCP 传输能力与服务列表分开表示，见 15.5、phase-1 第 10 节。
 > v0.4.29 能力来源过期不再等同未知：运行时统一按“非冲突即可用”取值，过期值照用并在界面提示复核；冲突或配置修订后无适用证据仍为未知。能力解析、优先级和证据过期时间不变（ISSUE-0059，phase-1 9.37）。
 > v0.4.28 独立会话的私有续传适用性扩展：除绑定外，系统提示（含项目规则正文）或工具开关不同、或消息产生于当前人工总结之前时，只移除本次输入的专用资料并保留可移植原文，原始记录与 modelWire 校验不变（ISSUE-0056）。请求结算记录只增可选 networkDetail（fake_ip_proxy），只对应 network 失败，不记录解析地址（ISSUE-0058）。见 phase-1 9.36。
@@ -1270,7 +1271,7 @@ audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, action TEXT, de
 
 | 数据 | 来源 | 现状 |
 |---|---|---|
-| 当前上下文 token、窗口大小、累计费用 | ACP `usage_update`（稳定版：used、size、cost） | Gateway 已记成 `session.usage` 事件，详细面板显示上下文与费用；输入框圆环待阶段 4 |
+| 当前上下文 token、窗口大小、累计费用 | ACP `usage_update`（稳定版：used、size、cost） | Gateway 已记成 `session.usage` 事件，详细面板显示上下文与费用；输入框圆环已接入 |
 | 每轮输入、输出、思考、缓存读写 | ACP `PromptResponse.usage`（草案：inputTokens、outputTokens、thoughtTokens、cachedReadTokens、cachedWriteTokens） | 已规范化、落盘并在详细面板汇总；各家真实报告范围待阶段 9 补验 |
 | 上下文分类明细（系统提示、工具、MCP、记忆、对话） | ACP 没有。Claude Code 的 `/context` 能给出，需研究能否通过扩展拿到 | 待研究；拿不到时只显示总量 |
 | 订阅账号的周期额度 | ACP 没有，各家单独研究（zcode-acp 有智谱的配额接口可参考） | 待研究；拿不到时写“额度未知” |

@@ -23,6 +23,7 @@ import { AnnotationChip, clearAnnotations, draftAnnotations, onAnnotationsChange
 import { clearDraft, loadDraft, localDraft, saveDraft } from '../state/drafts';
 import { composeWithAnnotations } from '../lib/annotations';
 import { openIndependentConfig } from './independent-task-panel';
+import { ContextRing } from './ContextRing';
 
 const busyStatuses = new Set<Task['status']>(['running', 'waiting', 'queued']);
 
@@ -162,6 +163,7 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
             {working ? (
               <button type="button" className="btn" style={{ order: 7 }} onClick={stop} disabled={!online} aria-label="停止 Agent"><Icon name="stop" />停止</button>
             ) : null}
+            <ContextRing usage={config.usage} />
             <button type="button" className="btn primary" aria-label="发送" disabled={!canSend} aria-busy={sending} onClick={()=>void send()}><Icon name="send" />发送</button>
           </div>
         </div>

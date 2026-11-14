@@ -14,6 +14,8 @@ export function independentCommandEnv(home: string, source: NodeJS.ProcessEnv = 
     if (value !== undefined && ['SYSTEMROOT', 'WINDIR', 'PATH', 'PATHEXT', 'COMSPEC', 'LANG', 'LC_ALL'].includes(name.toUpperCase())) result[name.toUpperCase()] = value;
   }
   return { ...result, HOME: home, USERPROFILE: home, APPDATA: path.join(home, 'roaming'),
+    // Windows 已知目录可能为空，显式把 PowerShell 模块缓存限制在本次私有目录，避免相对路径落入项目。
+    PSModuleAnalysisCachePath: path.join(home, 'local', 'ModuleAnalysisCache'),
     LOCALAPPDATA: path.join(home, 'local'), TEMP: path.join(home, 'temp'), TMP: path.join(home, 'temp') };
 }
 

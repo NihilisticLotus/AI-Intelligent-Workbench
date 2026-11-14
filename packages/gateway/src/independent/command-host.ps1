@@ -38,6 +38,12 @@ public static class AicCommandHost {
     static extern bool AssignProcessToJobObject(IntPtr job, IntPtr process);
     [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
     [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+    [DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateProcess(IntPtr process, uint code);
+    // 仅结束当前可信宿主；内核关闭作业句柄并收尾子孙进程。
+    // PowerShell 的托管退出回调可能等待仍在执行的管线，不能把已完成命令拖成超时。
+    public static void Exit(uint code) {
+        if (!TerminateProcess(GetCurrentProcess(), code)) Environment.Exit((int)code);
+    }
     // 不把作业句柄交给命令；保留到宿主退出，由内核关闭最后句柄并收尾作业。
     static IntPtr job;
     static readonly object outputLock = new object();
@@ -82,7 +88,7 @@ public static class AicCommandHost {
         // Gateway 保持输入管道打开。Gateway 崩溃或主动结束管道后，作业随宿主退出。
         Task.Run((Action)(() => {
             try { while (Console.In.ReadLine() != null) {} } catch {}
-            Environment.Exit(125);
+            Exit(125);
         }));
         var arguments = new StringBuilder();
         foreach (string arg in args) {
@@ -104,16 +110,18 @@ public static class AicCommandHost {
         // 仍持有输出管道的后台进程也属于本次命令，交由 Gateway 的时限或取消收尾。
         Task.WaitAll(output, error);
         Frame("{\"type\":\"exit\",\"exitCode\":" + process.ExitCode + "}");
-        Environment.Exit(0);
+        // 子命令已退出，两路输出已读完，最终帧也已 Flush，才终止宿主自身。
+        Exit(0);
     }
 }
 '@
     [AicCommandHost]::Attach()
     $line = [Console]::ReadLine()
-    if ($null -eq $line) { [Environment]::Exit(125) }
+    if ($null -eq $line) { [AicCommandHost]::Exit(125) }
     $request = ConvertFrom-Json -InputObject $line
     [AicCommandHost]::Run([string]$request.program, [string[]]$request.args, [string]$request.cwd)
 } catch {
     [Console]::Out.WriteLine('{"type":"host_error"}')
+    if ('AicCommandHost' -as [type]) { [AicCommandHost]::Exit(125) }
     [Environment]::Exit(125)
 }

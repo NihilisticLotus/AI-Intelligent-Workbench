@@ -46,13 +46,30 @@ afterEach(async () => {
 });
 
 describe('独立命令环境', () => {
+  it('模块分析缓存固定在本次私有目录，不继承外部指定路径', () => {
+    const home = path.resolve('fixture-private');
+    const env = independentCommandEnv(home, { PSModuleAnalysisCachePath: 'outside-cache' });
+    expect(env.PSModuleAnalysisCachePath).toBe(path.join(home, 'local', 'ModuleAnalysisCache'));
+    expect(path.isAbsolute(env.PSModuleAnalysisCachePath!)).toBe(true);
+  });
+
   it('仅继承系统白名单并设置私有目录', () => {
-    const env = independentCommandEnv('D:\\fixture', { Path: 'system-bin', SystemRoot: 'D:\\Windows', OPENAI_API_KEY: 'fixture-openai', ANTHROPIC_AUTH_TOKEN: 'fixture-anthropic', NODE_OPTIONS: '--require hook', HTTPS_PROXY: 'private-proxy', CLAUDE_CONFIG_DIR: 'user-config' });
-    expect(env).toEqual({ PATH: 'system-bin', SYSTEMROOT: 'D:\\Windows', HOME: 'D:\\fixture', USERPROFILE: 'D:\\fixture', APPDATA: 'D:\\fixture\\roaming', LOCALAPPDATA: 'D:\\fixture\\local', TEMP: 'D:\\fixture\\temp', TMP: 'D:\\fixture\\temp' });
+    const env = independentCommandEnv('D:\\fixture', { Path: 'system-bin', SystemRoot: 'D:\\Windows', OPENAI_API_KEY: 'fixture-openai', ANTHROPIC_AUTH_TOKEN: 'fixture-anthropic', PSModuleAnalysisCachePath: 'untrusted-cache', NODE_OPTIONS: '--require hook', HTTPS_PROXY: 'private-proxy', CLAUDE_CONFIG_DIR: 'user-config' });
+    expect(env).toEqual({ PATH: 'system-bin', SYSTEMROOT: 'D:\\Windows', HOME: 'D:\\fixture', USERPROFILE: 'D:\\fixture', APPDATA: 'D:\\fixture\\roaming', LOCALAPPDATA: 'D:\\fixture\\local', PSModuleAnalysisCachePath: 'D:\\fixture\\local\\ModuleAnalysisCache', TEMP: 'D:\\fixture\\temp', TMP: 'D:\\fixture\\temp' });
   });
 });
 
 describe.runIf(process.platform === 'win32')('独立命令 Windows 作业宿主', () => {
+  it('已完成命令及时结算，不等待托管宿主退出回调，完整保留输出与退出码', async () => {
+    const { dir, executor } = setup();
+    const result = await executor.run(command('console.log(JSON.stringify({ finishedAt: Date.now(), text: "合成结果" }));process.exitCode=7;'), { cwd: dir });
+    expect(result).toMatchObject({ reason: 'completed', exitCode: 7, stderr: '', truncated: false });
+    const output = JSON.parse(result.stdout) as { finishedAt: number; text: string };
+    expect(output.text).toBe('合成结果');
+    // 从子命令已输出最终结果计时，排除系统启动/编译耗时；原托管退出会额外等待约两秒。
+    expect(Date.now() - output.finishedAt).toBeLessThan(1500);
+  });
+
   it('保留中文、两路输出、非零退出与原始参数，不经过 shell', async () => {
     const { dir, executor } = setup();
     const args = ['', '空 格', '"quoted"', 'trailing\\', '\\"', '& echo injected', '$HOME', 'a\nb'];

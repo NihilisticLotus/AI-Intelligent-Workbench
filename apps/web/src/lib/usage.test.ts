@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EventEnvelope, TurnUsage } from '@aic/protocol';
-import { ringState, turnUsages, turnUsageText } from './usage';
+import { usageCoverageText, ringState, turnUsages, turnUsageText } from './usage';
 import { buildTimeline, groupTurns } from '../state/core';
 
 const empty: TurnUsage = { inputTokens: null, outputTokens: null, thoughtTokens: null, cacheReadTokens: null, cacheWriteTokens: null, totalTokens: null, source: 'agent' };
@@ -28,4 +28,21 @@ describe('圆环与每轮用量', () => {
     expect(view.map((v)=>v.usage)).toEqual([undefined,reported,empty]);
     expect(groupTurns(buildTimeline(events.slice(0,6)),turnUsages(events.slice(0,6))).filter((v)=>v.kind==='turn').every((v)=>v.usage===undefined)).toBe(true);
   });
+});
+
+it('完整、全部未知和空任务不会冒充部分合计', () => {
+  const counts = { totalTokens: 2, inputTokens: 2, outputTokens: 2, thoughtTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  expect(usageCoverageText({ total: reported, segments: [], turns: 2, reportedTurns: 2, reportedCounts: counts })).toEqual([]);
+  expect(usageCoverageText({ total: empty, segments: [], turns: 0, reportedTurns: 0 })).toEqual([]);
+});
+it.each(['失败', '取消'])('无回复%s轮次在用户消息保留用量，回放不重复且不影响后续回复', (reason) => {
+  const events = [event('message.user', { messageId: 'u1', text: reason }, 1),
+    event('session.notice', { text: reason }, 2), event('turn.usage', { messageId: 'u1', usage: empty }, 3),
+    event('message.user', { messageId: 'u2', text: '正常轮次' }, 4), event('message.done', { messageId: 'a2', text: '回答' }, 5),
+    event('turn.usage', { messageId: 'u2', usage: reported }, 6)];
+  const timeline = buildTimeline(events), view = groupTurns(timeline, turnUsages(events));
+  expect(view.filter((item) => item.kind === 'user').map((item) => item.usage)).toEqual([empty, undefined]);
+  expect(view.filter((item) => item.kind === 'turn').map((item) => item.usage)).toEqual([reported]);
+  expect(groupTurns(timeline, turnUsages(events))).toEqual(view);
+  expect(groupTurns(buildTimeline(events.slice(0, 2)), new Map()).some((item) => 'usage' in item)).toBe(false);
 });

@@ -2,7 +2,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { ApiError, Approval, Task, AttachmentInfo } from '@aic/protocol';
+import type { ApiError, Approval, Task, AttachmentInfo, TurnUsage } from '@aic/protocol';
 import { groupTurns, type PlanEntry, type ResolvedInfo, type TimelineItem, type ToolItem, type TurnItem, type TurnStep, type ViewItem } from '../state/core';
 import { platform } from '../platform';
 import { approve, loadDevices, useApp } from '../state/app';
@@ -77,7 +77,7 @@ export function Stream({ task, items, loading, onOpenPlan, active = true }: { ta
 
 function Item({ it, task, onOpenPlan, live }: { it: ViewItem; task: Task; onOpenPlan: () => void; live: boolean }) {
   switch (it.kind) {
-    case 'user': return <UserMsg anchor={it.key} text={it.text} ts={it.ts} taskId={task.id} attachments={it.attachments} />;
+    case 'user': return <UserMsg usage={it.usage} anchor={it.key} text={it.text} ts={it.ts} taskId={task.id} attachments={it.attachments} />;
     case 'turn': return <Turn it={it} task={task} />;
     case 'plan': return <PlanInline items={it.items} onOpen={onOpenPlan} />;
     case 'approval': return <ApprovalCard approval={it.approval} resolvedInLog={it.resolved} task={task} />;
@@ -97,13 +97,15 @@ function ConfigNote({ it, fallbackAgent }: { it: Extract<TimelineItem, { kind: '
   return <div className="sysnote" role="note"><span>已切换为{parts.join('，')}（{how.replace('（', '，').replace('）', '')}），从下一条消息生效</span></div>;
 }
 
-function UserMsg({ anchor, text, ts, taskId, attachments }: { anchor: string; text: string; ts: number; taskId: string; attachments?: AttachmentInfo[] }) {
+export function UserMsg({ anchor, text, ts, taskId, attachments, usage }: { anchor: string; text: string; ts: number; taskId: string; attachments?: AttachmentInfo[]; usage?: TurnUsage }) {
+  const usageText = usage ? turnUsageText(usage) : null;
   return (
     <article className="msg user" data-key={anchor} aria-label="你的消息">
       <div className="who"><span className="me" aria-hidden="true">你</span></div>
       <div>
         <div className="head"><b>你</b><span>{clock(ts)}</span></div>
         <div className="text"><RichText text={text} />{attachments?.length?<MessageAttachments taskId={taskId} items={attachments}/>:null}</div>
+        {usageText ? <p className="turn-usage" tabIndex={0} aria-label={usageText.detail} title={usageText.detail}>{usageText.summary}</p> : null}
       </div>
     </article>
   );

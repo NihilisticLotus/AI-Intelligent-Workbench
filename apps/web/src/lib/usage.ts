@@ -1,4 +1,4 @@
-import type { EventEnvelope, TurnUsage } from '@aic/protocol';
+import type { EventEnvelope, TurnUsage, TaskUsage } from '@aic/protocol';
 import type { SessionCfg } from '../state/core';
 import { contextValue } from './details';
 import { formatTokens } from './tokens';
@@ -26,4 +26,15 @@ export function turnUsages(events: readonly EventEnvelope[]) {
   const result = new Map<string, TurnUsage>();
   for (const ev of events) if (ev.type === 'turn.usage') result.set(ev.data.messageId, ev.data.usage);
   return result;
+}
+
+/** 不用“任一字段已报告”的轮数冒充各字段覆盖范围。 */
+export function usageCoverageText(usage: TaskUsage): string[] {
+  if (!usage.turns) return [];
+  if (!usage.reportedCounts) return ['各项仅合计已报告的值；当前服务未提供逐项覆盖轮数，无法确认合计是否完整。'];
+  return fields.flatMap((key, index) => {
+    const count = usage.reportedCounts![key];
+    return count > 0 && count < usage.turns
+      ? [`${labels[index]}为部分合计：仅 ${count} / ${usage.turns} 轮报告，未报告的轮次不计入。`] : [];
+  });
 }

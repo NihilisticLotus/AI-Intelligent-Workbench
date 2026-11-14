@@ -270,7 +270,15 @@ export const TurnTokenUsage = z.object({
 export type TurnTokenUsage = z.infer<typeof TurnTokenUsage>;
 export const TurnUsage = TurnTokenUsage.extend({ source: z.enum(['agent', 'independent']) }).strict();
 export type TurnUsage = z.infer<typeof TurnUsage>;
+/** 每个字段有真实报告的轮数；可选以兼容旧 Gateway。 */
+export const UsageReportedCounts = z.object({
+  inputTokens: z.number().int().nonnegative(), outputTokens: z.number().int().nonnegative(),
+  thoughtTokens: z.number().int().nonnegative(), cacheReadTokens: z.number().int().nonnegative(),
+  cacheWriteTokens: z.number().int().nonnegative(), totalTokens: z.number().int().nonnegative(),
+}).strict();
+export type UsageReportedCounts = z.infer<typeof UsageReportedCounts>;
 export const TaskUsage = z.object({
+  reportedCounts: UsageReportedCounts.optional(),
   segments: z.array(z.object({
     sessionId: Id.nullable(), agent: AgentKind, model: z.string().nullable(), startedAt: Ts,
     turns: z.number().int().nonnegative(), reportedTurns: z.number().int().nonnegative(), totals: TurnUsage,

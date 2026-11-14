@@ -21,3 +21,11 @@ describe('每轮和任务用量契约', () => {
     expect(TaskUsage.safeParse({ segments: [{ sessionId: 's', agent: 'fake', model: null, startedAt: 1, turns: 1, reportedTurns: 1, totals: usage, extra: true }], total: usage, turns: 1, reportedTurns: 1 }).success).toBe(false);
   });
 });
+
+it('逐项覆盖计数可选，保留零并拒绝缺项、负数和小数', () => {
+  const counts = { totalTokens: 1, inputTokens: 2, outputTokens: 0, thoughtTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 };
+  const body = { segments: [], total: usage, turns: 2, reportedTurns: 2, reportedCounts: counts };
+  expect(TaskUsage.parse(body).reportedCounts).toEqual(counts);
+  for (const totalTokens of [-1, 0.5, null, '1']) expect(TaskUsage.safeParse({ ...body, reportedCounts: { ...counts, totalTokens } }).success).toBe(false);
+  expect(TaskUsage.safeParse({ ...body, reportedCounts: { totalTokens: 1 } }).success).toBe(false);
+});

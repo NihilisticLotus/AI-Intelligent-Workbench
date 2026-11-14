@@ -51,6 +51,8 @@ export function taskUsage(db: Db, taskId: string): TaskUsage {
     return { sessionId, agent: first.agent_id ?? task.agent, model: first.model, startedAt: first.started_at ?? first.at,
       turns: group.length, reportedTurns: values.filter(reported).length, totals: sumUsage(values, values[0]!.source) };
   });
-  return TaskUsage.parse({ segments, turns: rows.length, reportedTurns: segments.reduce((n, s) => n + s.reportedTurns, 0),
+  const values = rows.map((row) => TurnUsage.parse(JSON.parse(row.usage_json)));
+  const reportedCounts = Object.fromEntries(tokenFields.map((key) => [key, values.filter((value) => value[key] !== null).length]));
+  return TaskUsage.parse({ reportedCounts, segments, turns: rows.length, reportedTurns: segments.reduce((n, s) => n + s.reportedTurns, 0),
     total: sumUsage(segments.map((s) => s.totals), source) });
 }

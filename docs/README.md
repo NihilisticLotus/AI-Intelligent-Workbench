@@ -39,3 +39,10 @@
 | [acceptance/step-1.3.md](acceptance/step-1.3.md) | 2026-11-12 已判定通过；完整历史、真实补验和遗留问题见末尾结论，1.4 接手的 ISSUE-0060～0062 已修复 |
 | [devlog/](devlog/) | 开发笔记，每月一个文件，只追加 |
 | [issues/](issues/README.md) | 问题收纳：总表 + 每个问题一个文件 |
+
+### 2026-11-14 用量审查修复
+
+- [ISSUE-0071：部分用量覆盖提示](issues/ISSUE-0071-partial-usage-coverage.md)
+- [ISSUE-0072：无回复轮次用量](issues/ISSUE-0072-missing-reply-usage.md)
+- 修复验证与浏览器限制追加在 [step-1.4](acceptance/step-1.4.md)，不覆盖历史验收。
+- [ISSUE-0073：收尾文件宿主复验](issues/ISSUE-0073-file-host-validation-timeout.md)

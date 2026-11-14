@@ -83,3 +83,6 @@
 | [ISSUE-0068](ISSUE-0068-reported-cost-without-unit.md) | 上游费用缺少单位时，面板仍展示无单位数字 | fixed | bug / 外部依赖 | 2026-11-13 | 2026-11-13 |
 | [ISSUE-0069](ISSUE-0069-invalid-context-usage-coercion.md) | 空上下文用量被强制转换成零 | fixed | bug | 2026-11-13 | 2026-11-13 |
 | [ISSUE-0070](ISSUE-0070-native-attachment-drag-verification.md) | 起始页原生文件拖入路径尚未补验 | open | 验收未通过（未验证） / 外部依赖 | 2026-11-13 | — |
+| [ISSUE-0071](ISSUE-0071-partial-usage-coverage.md) | 部分用量合计缺少完整性提示 | fixed | bug | 2026-11-14 | 2026-11-14 |
+| [ISSUE-0072](ISSUE-0072-missing-reply-usage.md) | 无回复的失败或取消轮次漏掉用量 | fixed | bug | 2026-11-14 | 2026-11-14 |
+| [ISSUE-0073](ISSUE-0073-file-host-validation-timeout.md) | P2 收尾文件宿主中断与超时 | fixed | 验收未通过 | 2026-11-14 | 2026-11-14 |

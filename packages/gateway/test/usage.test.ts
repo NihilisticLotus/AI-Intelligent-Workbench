@@ -45,6 +45,20 @@ describe('用量持久化与汇总', () => {
     s.db.run('DELETE FROM tasks WHERE id=?', id);
     expect(s.db.all('SELECT * FROM turn_usage WHERE task_id=?', id)).toEqual([]);
   });
+  it('逐字段报告轮数覆盖部分、真实零和无报告轮次，跨会话及重开仍一致', async () => {
+    const { id, s } = await setup(true);
+    recordTurnUsage(s.db, s.events, id, null, 'm1', { ...emptyUsage('agent'), totalTokens: 12, inputTokens: 10, outputTokens: 0 });
+    recordTurnUsage(s.db, s.events, id, null, 'm2', { ...emptyUsage('agent'), inputTokens: 20 });
+    let result = taskUsage(s.db, id);
+    expect(result).toMatchObject({ turns: 2, reportedTurns: 2, total: { totalTokens: 12, inputTokens: 30, outputTokens: 0 },
+      reportedCounts: { totalTokens: 1, inputTokens: 2, outputTokens: 1, thoughtTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } });
+    s.db.run('INSERT INTO sessions(id,task_id,agent_id,model,status,started_at) VALUES (?,?,?,?,?,?)', 'other', id, 'fake', null, 'idle', 1);
+    recordTurnUsage(s.db, s.events, id, 'other', 'm3', emptyUsage('agent'));
+    result = taskUsage(s.db, id);
+    expect(result.turns).toBe(3); expect(result.reportedCounts?.totalTokens).toBe(1);
+    const reopened = openDb(path.join(t!.dataDir, 'data.db'));
+    try { expect(taskUsage(reopened, id)).toEqual(result); } finally { reopened.close(); }
+  });
   it('未报告、失败和取消都写未知；已知用量与事件在同一事务回滚', async () => {
     const { id, s } = await setup(true);
     const adapter = s.agents.get('fake')!;

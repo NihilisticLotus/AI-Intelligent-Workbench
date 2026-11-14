@@ -420,7 +420,7 @@ export interface TurnItem {
   /** 有还没处理的审批：过程必须展开，审批卡片不能藏起来 */
   pendingApproval: boolean;
 }
-export type ViewItem = Exclude<TimelineItem, { kind: 'agent' | 'tools' }> | TurnItem;
+export type ViewItem = Exclude<TimelineItem, { kind: 'agent' | 'tools' | 'user' }> | (Extract<TimelineItem, { kind: 'user' }> & { usage?: TurnUsage }) | TurnItem;
 
 export function groupTurns(items: readonly TimelineItem[], usages: ReadonlyMap<string, TurnUsage> = new Map()): ViewItem[] {
   const out: ViewItem[] = [];
@@ -473,5 +473,7 @@ export function groupTurns(items: readonly TimelineItem[], usages: ReadonlyMap<s
   flush();
   // 同一用户轮次可能被系统提示分成几段，真实用量只挂在最后一段回复。
   for (const [id, reply] of lastReplies) { const usage = usages.get(id); if (usage) reply.usage = usage; }
-  return out;
+  // 无回复的已结束轮次仍有用量事件，显示在用户消息下，不添加虚构回复。
+  return out.map((item) => item.kind === 'user' && !lastReplies.has(item.id) && usages.has(item.id)
+    ? { ...item, usage: usages.get(item.id)! } : item);
 }

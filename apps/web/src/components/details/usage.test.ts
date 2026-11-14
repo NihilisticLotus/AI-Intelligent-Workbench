@@ -23,3 +23,16 @@ it.each([{ amount: 0, currency: 'USD' }, { amount: 2.15, currency: 'credits' }])
   expect(html).toContain(`费用 ${amount} ${currency}`);
   expect(html).not.toContain('费用未知');
 });
+
+it('两轮都有部分字段时仍标明大字合计只覆盖一轮，真实零也计入覆盖', () => {
+  const partial: TaskUsage = { ...usage, turns: 2, reportedTurns: 2, total: { ...usage.total, totalTokens: 12, inputTokens: 30, outputTokens: 0 },
+    reportedCounts: { totalTokens: 1, inputTokens: 2, outputTokens: 1, thoughtTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 } };
+  const html = renderToStaticMarkup(createElement(UsageDetails, { usage: partial, independent: null, error: null, config: { model: null, effort: null } }));
+  expect(html).toContain('合计为部分合计：仅 1 / 2 轮报告');
+  expect(html).toContain('输出为部分合计：仅 1 / 2 轮报告');
+  expect(html).not.toContain('输入为部分合计');
+  expect(html).not.toContain('其中 1 轮 Agent 未报告用量');
+});
+it('旧服务无逐项计数时明确说明覆盖未知', () => {
+  expect(render(0, 'USD')).toContain('无法确认合计是否完整');
+});

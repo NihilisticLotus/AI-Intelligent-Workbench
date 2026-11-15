@@ -54,3 +54,5 @@
 - [ISSUE-0091：CodeBuddy 真实补验额度限制](issues/ISSUE-0091-codebuddy-workspace-real-quota.md)
 - [ISSUE-0092：独立任务看板失败原因](issues/ISSUE-0092-board-independent-failure.md)
 - [1.5 验收与当前进度](acceptance/step-1.5.md)
+
+- [ISSUE-0093：显式模型自动回退](issues/ISSUE-0093-explicit-model-fallback.md)

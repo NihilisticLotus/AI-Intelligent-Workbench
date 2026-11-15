@@ -216,12 +216,14 @@ describe('第 10 条：H1 换模型', () => {
     expect(((await t!.api('GET', `/tasks/${task.id}`, { token })).json as Task).model).toBe('beta');
   });
 
-  it('启动时没能下发保存的模型：任务记录改成 Agent 实际用的', async () => {
+  it('启动时没能下发保存的模型：停止并保留选择，不发送默认模型消息', async () => {
     const sc = scenario({});
     const { token, projectId, ws } = await setup(sc);
     const task = (await t!.api('POST', '/tasks', { token, body: { projectId, prompt: 'a', agent: 'claude', model: 'beta' } })).json as Task;
-    await ws.waitEvent(statusIs(task.id, 'review'), 10_000);
-    expect(((await t!.api('GET', `/tasks/${task.id}`, { token })).json as Task).model).toBeNull();
+    await ws.waitEvent(statusIs(task.id, 'failed'), 10_000);
+    expect(((await t!.api('GET', `/tasks/${task.id}`, { token })).json as Task).model).toBe('beta');
+    expect(sc.log().filter(l => l.method === 'session/prompt')).toHaveLength(0);
+    expect(ws.events().some(e => e.taskId === task.id && e.type === 'error' && e.data.error.message.includes('指定的模型'))).toBe(true);
   });
 });
 

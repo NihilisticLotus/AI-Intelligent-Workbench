@@ -12,6 +12,11 @@ const mk = (body: ApiError, reason: AgentErrorReason) => new AgentError(body, re
 
 /** 常用的错误构造 */
 export const agentErrors = {
+  modelUnavailable: (kind: AgentKind, name: string) => mk({
+    code: ErrorCode.AgentUnavailable, message: `${name} 没能使用任务指定的模型，已停止`,
+    hint: '本轮消息没有发送给模型。请查看最新模型列表并重新选择；不会自动改用其他模型。',
+    actions: [{ label: '换模型', action: ErrorActionKey.SwitchModel, args: { kind } }],
+  }, 'failed'),
   authRequired: (kind: AgentKind, name: string) => mk({
     code: ErrorCode.AgentAuthRequired, message: `${name} 需要登录`,
     hint: '登录完成后回到任务里点 [继续]',

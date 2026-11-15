@@ -149,7 +149,7 @@ const app = acp.agent({ name: 'fake-acp-agent' })
     if (bad) throw err(bad);
     if (configId === (cfg.modelId ?? 'model')) {
       if (!cfg.models.some((m) => m.value === value)) throw err({ code: -32602, message: `Invalid params: Invalid value for config option model: ${value}` });
-      state.model = value;
+      if (!sc.stickyModel) state.model = value;
       const eff = effortsOf(value);
       if (eff && !eff.includes(state.effort)) state.effort = eff[0];
     } else if (configId === (cfg.effortId ?? 'effort')) {

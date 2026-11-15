@@ -55,6 +55,26 @@ async function setup(sc: Sc, extra: Parameters<typeof startGw>[0] = {}) {
 
 const statusIs = (taskId: string, s: string) => (e: EventEnvelope) => e.type === 'task.updated' && e.taskId === taskId && (e.data as { task: Task }).task.status === s;
 
+it.each(['missing', 'rejected', 'unchanged'] as const)('显式模型 %s 时保留选择、释放名额且不向其他模型发送消息', async failure => {
+  const sc = scenario({ config: CONFIG }), f = await setup(sc);
+  // 先有可选 beta 的旧缓存，再模拟新会话目录或配置行为变化。
+  expect((await f.gw.gw.services.agentSvc.test('claude', { sendMessage: false })).ok).toBe(true);
+  writeFileSync(path.join(sc.dir, 'scenario.json'), JSON.stringify({
+    config: { ...CONFIG, ...(failure === 'missing' ? { models: [MODELS[0]] } : {}) },
+    ...(failure === 'rejected' ? { setErrors: { 'model:beta': { code: -32602, message: '模型设置失败' } } } : {}),
+    ...(failure === 'unchanged' ? { stickyModel: true } : {}),
+  }));
+  const response = await f.gw.api('POST', '/tasks', { token: f.token, body: { projectId: f.projectId, agent: 'claude', model: 'beta', permission: 'ask', prompt: '不能发给其他模型' } });
+  expect(response.status).toBe(201); await f.gw.gw.services.tasks.idle();
+  const task = f.gw.gw.services.tasks.get(response.json.id);
+  expect(task.model).toBe('beta'); expect(task.status).toBe('failed');
+  expect(sc.log().filter(item => item.method === 'session/prompt')).toHaveLength(0);
+  expect(f.gw.gw.services.agentSvc.runningCount('claude')).toBe(0);
+  const events = f.gw.gw.services.events.read({ taskId: task.id, after: 0, limit: 200 });
+  expect(events.find(e => e.type === 'error')?.data.error.message).toContain('指定的模型');
+  expect(events.some(e => e.type === 'session.started')).toBe(false);
+});
+
 it('新任务把登记的副本目录传给假 ACP 的 session/new', async () => {
   const sc = scenario({ config: CONFIG, turns: [{ steps: [{ update: { sessionUpdate: 'agent_message_chunk', content: text('完成') } }] }] });
   const f = await setup(sc);

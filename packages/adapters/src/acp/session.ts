@@ -245,21 +245,26 @@ export class AcpSession implements AgentConnection {
     // H1：模型已经在启动时指定（Agent 不能在会话里换模型），不再走 setConfig
     if (want.model && this.caps.modelSwitch === 'none' && this.launchedModel === want.model) {
       if (this.state.model === null) this.state = { ...this.state, model: want.model };
-      want.model = null;
     }
     if (want.model && this.state.models.length && !this.state.models.some((m) => m.id === want.model)) {
-      this.notice('warn', `原来选的模型 ${want.model} 现在不可用，已改用 ${this.state.model ?? 'Agent 默认模型'}`);
-      want.model = null;
+      throw agentErrors.modelUnavailable(this.spec.kind, this.spec.displayName);
     }
+    // 显式模型是发送消息的前置条件；不能把目录过期或设置失败变成其他模型的计费请求。
+    if (want.model && want.model !== this.state.model) {
+      try { await this.setConfig({ model: want.model }, { quiet: true }); }
+      catch { throw agentErrors.modelUnavailable(this.spec.kind, this.spec.displayName); }
+    }
+    if (want.model && this.state.model !== want.model) throw agentErrors.modelUnavailable(this.spec.kind, this.spec.displayName);
+    // 强度单独失败仍提示，不把已经生效的模型当作失败，也不改变用户的模型选择。
     try {
       await this.setConfig({
-        ...(want.model && want.model !== this.state.model ? { model: want.model } : {}),
         ...(want.effort && want.effort !== this.state.effort ? { effort: want.effort } : {}),
       }, { quiet: true });
     } catch (e) {
       const msg = e instanceof AgentError ? `${e.body.message}${e.body.hint ? `：${e.body.hint}` : ''}` : String(e);
-      this.notice('warn', `没能恢复原来的模型或思考强度（${msg}），已使用 ${this.state.model ?? 'Agent 默认模型'}`);
+      this.notice('warn', `没能恢复原来的思考强度（${msg}），模型选择保持不变`);
     }
+    if (want.model && this.state.model !== want.model) throw agentErrors.modelUnavailable(this.spec.kind, this.spec.displayName);
   }
 
   // ---------- 回合 ----------
@@ -636,7 +641,7 @@ async function spawnInner(spec: AcpAgentSpec, rt: AcpRuntime, opts: SpawnOptions
   try {
     await session.applyInitial();
   } catch (e) {
-    // 权限模式设置不上：会话不能交给用户使用
+    // 权限模式或显式模型未生效：关闭会话，不发送用户消息。
     await session.close().catch(() => {});
     throw e;
   }

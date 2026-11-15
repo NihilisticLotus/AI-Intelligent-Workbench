@@ -108,4 +108,4 @@
 | [ISSUE-0091](ISSUE-0091-codebuddy-workspace-real-quota.md) | CodeBuddy 自带模型无额度，核对自定义模型补验 | investigating | 外部依赖 | 2026-11-15 | |
 | [ISSUE-0092](ISSUE-0092-board-independent-failure.md) | 看板遗漏独立 Agent 请求失败原因 | fixed | bug | 2026-11-15 | 2026-11-15 |
 
-| [ISSUE-0093](ISSUE-0093-explicit-model-fallback.md) | 显式模型失效后自动回退并发送消息 | investigating | bug | 2026-11-15 | |
+| [ISSUE-0093](ISSUE-0093-explicit-model-fallback.md) | 显式模型失效后自动回退并发送消息 | fixed | bug | 2026-11-15 | 2026-11-15 |

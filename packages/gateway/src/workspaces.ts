@@ -1,7 +1,7 @@
 // 工作区只由登记记录寻址；任务副本与原项目之间不建立链接。
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
-import { copyFile, lstat, mkdir, readFile, readdir, realpath, rm } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, readFile, readdir, realpath, rm, writeFile, chmod } from 'node:fs/promises';
 import path from 'node:path';
 import { WorkspaceRecord, WorkspaceRequest, type WorkspaceChange, type WorkspaceChanges, type WorkspaceFile, type WorkspaceFileDiff } from '@aic/protocol';
 import type { Db } from './db';
@@ -86,7 +86,9 @@ function equivalent(a: WorkspaceFile[], b: WorkspaceFile[]) {
 }
 
 export class WorkspaceManager {
-  private busy = new Set<string>();
+  private pending = new Map<string, Promise<unknown>>();
+  private changesCache = new Map<string, { fingerprint: string; until: number; value: { result: WorkspaceChanges; tree: string } }>();
+  invalidate(taskId: string) { this.changesCache.delete(taskId); }
   constructor(private readonly db: Db, readonly git: Git, private readonly dataDir: string) {}
 
   get(taskId: string): WorkspaceRecord | undefined {
@@ -97,9 +99,10 @@ export class WorkspaceManager {
     this.db.run('INSERT INTO workspace_records(task_id,record_json,updated_at) VALUES(?,?,?) ON CONFLICT(task_id) DO UPDATE SET record_json=excluded.record_json,updated_at=excluded.updated_at', record.taskId, JSON.stringify(record), Date.now());
   }
   private async exclusive<T>(id: string, operation: () => Promise<T>): Promise<T> {
-    if (this.busy.has(id)) return fail('workspace.busy', '工作区正在处理另一项操作，请稍后重试。');
-    this.busy.add(id);
-    try { return await operation(); } finally { this.busy.delete(id); }
+    const previous = this.pending.get(id);
+    const next = (previous ?? Promise.resolve()).catch(() => {}).then(operation);
+    this.pending.set(id, next);
+    try { return await next; } finally { if (this.pending.get(id) === next) this.pending.delete(id); }
   }
   private async root() {
     await mkdir(this.dataDir, { recursive: true });
@@ -288,6 +291,10 @@ export class WorkspaceManager {
     if (!record.baseRef) return fail('workspace.base', '工作副本没有可比较的基准。');
     const opts = this.options(record);
     const current = record.kind === 'copy' ? record.snapshotFiles : await this.currentFiles(record);
+    // git 内容指纹让外部编辑立即失效；copy 以最新快照为准，快照完成即失效。
+    const fingerprint = JSON.stringify([record.baseRef, record.snapshotAfter, current.map(f => [f.path, f.hash, f.size])]);
+    const cached = this.changesCache.get(record.taskId);
+    if (cached && cached.until > Date.now() && cached.fingerprint === fingerprint) return cached.value;
     const tree = record.kind === 'copy' ? record.snapshotAfter! : await this.buildTree(record, current);
     const baseEntries = (await this.git.checked(['ls-tree','-rlz', record.baseRef], opts)).toString().split('\0').filter(Boolean);
     const baseSizes = new Map<string, number>();
@@ -335,7 +342,9 @@ export class WorkspaceManager {
     for (const initial of record.largeFiles) if (!afterSizes.has(initial.path) && !files.some(f => f.path === initial.path)) {
       files.push({ path: initial.path, status: 'D', added: 0, removed: 0, binary: true, tooLarge: true, beforeSize: initial.size, afterSize: 0 });
     }
-    return { tree, result: { files, added: files.reduce((n,f) => n+f.added,0), removed: files.reduce((n,f) => n+f.removed,0) } };
+    const value = { tree, result: { files, revision: createHash('sha256').update(fingerprint).digest('hex'), added: files.reduce((n,f) => n+f.added,0), removed: files.reduce((n,f) => n+f.removed,0) } };
+    this.changesCache.set(record.taskId, { fingerprint, until: Date.now() + 1500, value });
+    return value;
   }
   diff(taskId: string): Promise<WorkspaceChanges> {
     return this.exclusive(taskId, async () => (await this.changes(await this.checkedRecord(taskId))).result);
@@ -357,6 +366,47 @@ export class WorkspaceManager {
         if (e instanceof GitError && e.kind === 'output_limit') return { file: { ...file, tooLarge: true }, patch: null };
         throw e;
       }
+    });
+  }
+
+  restoreFile(taskId: string, relative: string): Promise<WorkspaceChanges> {
+    workspaceRelative(relative);
+    return this.exclusive(taskId, async () => {
+      const record = await this.checkedRecord(taskId);
+      if (record.state !== 'ready') return fail('workspace.state', '工作副本尚未准备好。');
+      const { result } = await this.changes(record);
+      const file = result.files.find(f => f.path === relative);
+      if (!file) return fail('workspace.file', '该文件不在任务改动列表中。');
+      if (record.largeFiles.some(f => f.path === relative || f.path === file.oldPath)) return fail('workspace.large', '此文件超过快照上限，不能还原。');
+      const names = [...new Set([file.path, ...(file.oldPath ? [file.oldPath] : [])])];
+      const before = await Promise.all(names.map(async name => {
+        const target = await safePath(record.path, name, true);
+        try {
+          const stat = await lstat(target);
+          if (!stat.isFile() || stat.size > SNAPSHOT_FILE_LIMIT) return fail('workspace.large', '此文件无法安全还原，请先备份后手动处理。');
+          return { name, target, bytes: await readFile(target), mode: stat.mode };
+        } catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; return { name, target, bytes: null, mode: null }; }
+      }));
+      const basePath = file.oldPath ?? file.path;
+      const bytes = file.status === 'A' ? null : await this.git.checked(['show', record.baseRef! + ':' + basePath], { ...this.options(record), maxOutput: SNAPSHOT_FILE_LIMIT });
+      try {
+        for (const item of before) {
+          await safePath(record.path, item.name, true);
+          if (item.name === basePath && bytes !== null) {
+            await mkdir(path.dirname(item.target), { recursive: true });
+            await safePath(record.path, item.name, true); await writeFile(item.target, bytes);
+          } else await rm(item.target, { force: true });
+        }
+        if (record.kind === 'copy') await this.takeSnapshot(record, '还原单个文件');
+      } catch (e) {
+        for (const item of before) {
+          await safePath(record.path, item.name, true);
+          if (item.bytes === null) await rm(item.target, { force: true });
+          else { await writeFile(item.target, item.bytes); if (process.platform !== 'win32') await chmod(item.target, item.mode!); }
+        }
+        throw e;
+      } finally { this.invalidate(taskId); }
+      return (await this.changes(record)).result;
     });
   }
 

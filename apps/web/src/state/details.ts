@@ -10,3 +10,8 @@ export function openDetail(section: DetailSection) {
   if (!opened.includes(section)) setPref('detailOpen', [...opened, section]);
   detailFocus.set(() => ({ section, sequence: ++sequence }));
 }
+
+export const changeFocus = createStore<string | null>(null);
+export function openChanges(path: string) {
+  setPref('sideTab', 'diff'); setPref('sideOpen', true); changeFocus.set(() => path);
+}

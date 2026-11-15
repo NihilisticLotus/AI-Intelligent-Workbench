@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import path from 'node:path';
 import { createFakeAdapter, type AgentAdapter, type SpawnOptions } from '@aic/adapters';
@@ -47,6 +47,21 @@ describe('任务工作副本接入', () => {
       expect(count.toString().trim()).toBe('3');
     }
     expect((await f.services.tasks.workspaces!.diff(task.id)).files).toContainEqual(expect.objectContaining({path:'result.txt',status:'A'}));
+  });
+  it.each([true,false])('%s git：演示适配器夹具实际修改三类文件并发布合计', async isGit => {
+    const f = await setup(async o => {
+      o.host.update({kind:'tool_start',toolId:'three-files',toolKind:'edit',title:'三文件验收',target:'modify.txt'});
+      writeFileSync(path.join(o.cwd,'added.txt'),'新增\n'); writeFileSync(path.join(o.cwd,'modify.txt'),'修改\n'); unlinkSync(path.join(o.cwd,'delete.txt'));
+      o.host.update({kind:'tool_end',toolId:'three-files',ok:true,summary:'三文件写入完成'});
+    });
+    writeFileSync(path.join(f.project.path,'modify.txt'),'原始\n'); writeFileSync(path.join(f.project.path,'delete.txt'),'删除\n');
+    if (isGit) for (const args of [['init','-b','main'],['add','--all'],['commit','-m','初始']]) await f.git.checked(args,{cwd:f.project.path});
+    const task=await f.create(); await f.services.tasks.idle();
+    const changes=await f.services.tasks.workspaces!.diff(task.id);
+    expect(changes.files.map(x=>[x.path,x.status]).sort()).toEqual([['added.txt','A'],['delete.txt','D'],['modify.txt','M']]);
+    expect(readFileSync(path.join(f.project.path,'modify.txt'),'utf8')).toBe('原始\n'); expect(existsSync(path.join(f.project.path,'delete.txt'))).toBe(true); expect(existsSync(path.join(f.project.path,'added.txt'))).toBe(false);
+    const events=f.services.events.read({after:0,limit:1000,taskId:task.id}).filter(e=>e.type==='task.changes_updated');
+    expect(events.at(-1)?.data).toEqual({added:2,removed:2,fileCount:3}); expect(events.length).toBeGreaterThanOrEqual(2);
   });
   it('非 git 同项目串行，取消排队者不会释放正在运行的任务', async () => {
     const releases: (() => void)[] = [];

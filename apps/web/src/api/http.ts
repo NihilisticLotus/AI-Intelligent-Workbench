@@ -1,3 +1,4 @@
+import { WorkspaceChanges, WorkspaceFileDiff } from '@aic/protocol';
 // REST 客户端：所有请求都走 /api/v1，统一处理错误格式 ApiError。
 // 只认一个基础地址 baseUrl（默认同源 ''）；以后局域网或外网访问时只是换这个地址。
 // 凭据由 getAuthHeaders 提供（见 credentials.ts）：浏览器是 HttpOnly Cookie（credentials: 'include'）+ X-AIC-Key，
@@ -204,6 +205,9 @@ export class HttpClient {
   saveEnvironment(body: CreateEnvironmentBody) { return this.request('POST', '/environments', { body, parse: oneOf(SavedEnvironment) }); }
   deleteEnvironment(id: string) { return this.request('DELETE', `/environments/${encodeURIComponent(id)}`, { parse: oneOf(OkResult) }); }
   taskUsage(id: string) { return this.request('GET', `/tasks/${encodeURIComponent(id)}/usage`, { parse: oneOf(TaskUsage) }); }
+  taskChanges(id: string) { return this.request('GET', `/tasks/${encodeURIComponent(id)}/changes`, { parse: oneOf(WorkspaceChanges) }); }
+  taskFileDiff(id: string, path: string) { return this.request('GET', `/tasks/${encodeURIComponent(id)}/changes/file`, { query: { path }, parse: oneOf(WorkspaceFileDiff) }); }
+  restoreWorkspaceFile(id: string, path: string) { return this.request('POST', `/tasks/${encodeURIComponent(id)}/changes/restore`, { body: { path }, parse: oneOf(WorkspaceChanges) }); }
   taskFiles(id: string) { return this.request('GET', `/tasks/${encodeURIComponent(id)}/files`, { parse: listOf(TaskFile) }).then((r) => r.items); }
   createProject(name: string, path: string) { return this.request('POST', '/projects', { body: { name, path }, parse: oneOf(Project) }); }
   patchProject(id: string, body: { name?: string }) { return this.request('PATCH', `/projects/${encodeURIComponent(id)}`, { body, parse: oneOf(Project) }); }

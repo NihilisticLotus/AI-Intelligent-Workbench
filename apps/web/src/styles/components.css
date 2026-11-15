@@ -266,3 +266,29 @@
 .msg.nav-flash { animation: nav-flash .9s var(--ease); border-radius: var(--r-card); }
 @keyframes nav-flash { 0% { box-shadow: 0 0 0 6px var(--bg-2); background: var(--bg-2); } 100% { box-shadow: 0 0 0 6px transparent; background: transparent; } }
 @media (prefers-reduced-motion: reduce) { .msg.nav-flash { animation: none; } }
+
+/* 改动面板：复用主题中的增删颜色，长路径与代码只在局部滚动。 */
+.changes-panel { display: flex; flex-direction: column; min-height: 100%; min-width: 0; }
+.changes-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.changes-heading strong { flex: 1; font-size: 12px; }
+.changes-note { padding: 8px 16px; overflow-wrap: anywhere; }
+.changes-files { list-style: none; margin: 0; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.changes-files button { width: 100%; display: flex; text-align: left; align-items: center; gap: 9px; padding: 8px 16px; background: transparent; color: inherit; border: 0; cursor: pointer; }
+.changes-files button.selected { background: var(--diff-add); }
+.changes-files button:hover { background: var(--bg-3); }
+.change-mark { flex: 0 0 18px; font-family: var(--font-code); }
+.change-A { color: var(--ok); } .change-D { color: var(--err); }
+.change-path { flex: 1; min-width: 0; overflow-wrap: anywhere; font-size: 12px; }
+.change-path small { display: block; opacity: .65; font-size: 10px; }
+.change-stats { flex: 0 0 auto; font-size: 11px; }
+.change-file-head { display: flex; align-items: center; gap: 8px; padding: 10px 16px; border-bottom: 1px solid var(--line); }
+.change-file-head strong { flex: 1; min-width: 0; overflow-wrap: anywhere; font: 12px var(--font-code); }
+.diff-scroll { overflow: auto; max-height: 60vh; }
+.diff-table { border-collapse: collapse; width: 100%; font: 11px/1.7 var(--font-code); }
+.diff-table th { white-space: nowrap; text-align: left; font-size: 10px; opacity: .65; font-weight: normal; }
+.diff-table td, .diff-table th { padding: 0 8px; }
+.diff-table td:first-child, .diff-table td:nth-child(2) { text-align: right; width: 32px; user-select: none; opacity: .65; }
+.diff-table code { white-space: pre; font: inherit; }
+.diff-add { background: var(--diff-add); } .diff-remove { background: var(--diff-del); }
+.diff-header, .diff-note { opacity: .7; }
+.changes-actions { margin-top: auto; padding: 16px; border-top: 1px solid var(--line); }

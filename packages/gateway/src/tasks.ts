@@ -96,6 +96,7 @@ export class TaskService {
   private emitTimers = new Map<string, NodeJS.Timeout>();
   private pending = new Map<string, PendingApproval>();
   private turns = new Set<Promise<void>>();
+  private changeJobs = new Set<Promise<void>>();
   /** 这一轮里有审批超时：回合结束后任务暂停（不进入待验收） */
   private approvalTimedOut = new Set<string>();
   /** 每个任务最近一次启动时注入的密钥（启动失败时的兜底错误也要脱敏） */
@@ -166,6 +167,34 @@ export class TaskService {
       ...(record ? { largeFiles: record.largeFiles.map(f => f.path) } : {}),
     };
     return task.agent === 'independent' && this.independentRuntime ? { ...task, independent: this.independentRuntime.reference(id) } : task;
+  }
+
+  async workspaceOperation<T>(id: string, operation: (manager: WorkspaceManager) => Promise<T>, write = false): Promise<T> {
+    const task = this.get(id);
+    if (!this.workspaces || !['worktree', 'copy'].includes(task.workspace?.kind ?? '')) throw Errors.invalidState('旧任务没有独立工作副本，请查看工具记录。');
+    if (task.workspace?.state !== 'ready') throw Errors.invalidState('工作副本尚未准备好。');
+    if (write && (this.isBusy(id) || FINAL.includes(task.status))) throw Errors.invalidState('请等任务空闲且未结束时再还原文件。');
+    if (write) this.configuring.add(id);
+    try { return await operation(this.workspaces); }
+    catch (e) {
+      if (e instanceof WorkspaceError) throw new AppError(e.code === 'workspace.path' ? 400 : 409, { code: e.code, message: e.message, actions: [] });
+      if (e instanceof GitError) throw Errors.invalidState(e.message);
+      throw e;
+    } finally { if (write) this.configuring.delete(id); }
+  }
+
+  refreshChanges(taskId: string): Promise<void> {
+    if (!['worktree', 'copy'].includes(this.getRow(taskId).workspace_kind ?? '') || !this.workspaces?.get(taskId)) return Promise.resolve();
+    this.workspaces.invalidate(taskId);
+    const job = this.workspaces.diff(taskId).then(changes => {
+      this.events.append({ type: 'task.changes_updated', taskId, sessionId: null, data: { added: changes.added, removed: changes.removed, fileCount: changes.files.length } });
+    }).catch(() => { /* 读取时仍在写文件时不发布旧统计；面板的读取错误与下次工具事件负责刷新。 */ });
+    this.changeJobs.add(job); void job.finally(() => this.changeJobs.delete(job)); return job;
+  }
+
+  async restoreWorkspaceFile(id: string, relative: string) {
+    const result = await this.workspaceOperation(id, manager => manager.restoreFile(id, relative), true);
+    this.syncWorkspace(id); await this.refreshChanges(id); return result;
   }
 
   private syncWorkspace(id: string) {
@@ -529,7 +558,7 @@ export class TaskService {
         if (text) this.events.append({ ...base, type: 'tool.output', data: { toolId: u.toolId, text } });
         break;
       }
-      case 'tool_end': this.events.append({ ...base, type: 'tool.end', data: { toolId: u.toolId, ok: u.ok, summary: u.summary === null ? null : clean(u.summary), ...(u.rejected ? { rejected: true } : {}) } }); break;
+      case 'tool_end': this.events.append({ ...base, type: 'tool.end', data: { toolId: u.toolId, ok: u.ok, summary: u.summary === null ? null : clean(u.summary), ...(u.rejected ? { rejected: true } : {}) } }); void this.refreshChanges(taskId); break;
       case 'plan': this.events.append({ ...base, type: 'plan.update', data: { items: secrets.length ? u.items.map((i) => ({ ...i, text: clean(i.text) })) : u.items } }); break;
       case 'config': {
         const row = this.getRow(taskId);
@@ -767,7 +796,7 @@ export class TaskService {
     try {
       releaseProject = await this.acquireProject(taskId, abort.signal);
       if (this.getRow(taskId).workspace_kind === 'copy' && this.workspaces) {
-        await this.workspaces.snapshot(taskId, '回合开始前'); this.syncWorkspace(taskId); snapshotStarted = true;
+        await this.workspaces.snapshot(taskId, '回合开始前'); this.syncWorkspace(taskId); snapshotStarted = true; void this.refreshChanges(taskId);
       }
       rt = await this.ensureRuntime(taskId, abort.signal);
       if (abort.signal.aborted) throw new AbortError();
@@ -812,9 +841,11 @@ export class TaskService {
         this.events.append({ type: 'session.notice', taskId, sessionId: rt.sessionId, data: { level: 'warn', text: '有审批超时没有处理，没有放行；任务已暂停，可以继续发消息' } });
       }
       await finishSnapshot();
+      await this.refreshChanges(taskId);
       this.setStatus(taskId, r.stopReason === 'cancelled' || timedOut ? 'paused' : r.stopReason === 'error' ? 'failed' : 'review');
     } catch (e) {
       try { await finishSnapshot(); } catch (error) { e = error; }
+      await this.refreshChanges(taskId);
       if (rt?.redactor.active) this.flushRedactor(taskId, rt.sessionId, rt.redactor);
       // 用户点了 [停止]：不管启动阶段抛的是什么（取消、或进程被结束导致的错误），都按暂停处理
       if (snapshotFailed) {
@@ -1167,7 +1198,7 @@ export class TaskService {
   async shutdown() {
     if (this.idleTimer) { clearInterval(this.idleTimer); this.idleTimer = null; }
     for (const abort of this.turnAborts.values()) abort.abort();
-    await Promise.allSettled([...this.turns]);
+    await Promise.allSettled([...this.turns]); await Promise.allSettled([...this.changeJobs]);
     for (const t of this.emitTimers.values()) clearTimeout(t);
     this.emitTimers.clear();
     for (const p of [...this.pending.values()]) p.cleanup();

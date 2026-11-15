@@ -1,3 +1,4 @@
+import { WorkspaceChangeTotals } from './workspaces';
 import { TaskWorkspace, WorkspaceGlobs } from './workspaces';
 // AI Console 共享协议：Gateway 与所有客户端（浏览器、以后的桌面软件和手机应用）共用的类型与校验。
 // 规则见 docs/plan-phase1.md 第 2 节：只通过 /api/v1 的 REST + WebSocket 对接；类型只在这里定义一次。
@@ -299,6 +300,7 @@ export type TaskFile = z.infer<typeof TaskFile>;
 export const EventEnvelope = z.discriminatedUnion('type', [
   ev('task.created', z.object({ task: Task })),
   ev('task.updated', z.object({ task: Task })),
+  ev('task.changes_updated', WorkspaceChangeTotals),
   ev('session.started', z.object({
     agent: AgentKind, model: z.string().nullable(),
     /** 1.2 新增：会话使用的账号；resumed 表示这次是恢复原来的会话（H1） */

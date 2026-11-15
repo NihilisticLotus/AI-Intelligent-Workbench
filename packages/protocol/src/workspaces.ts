@@ -39,7 +39,12 @@ export const WorkspaceChange = z.object({
   binary: z.boolean(), tooLarge: z.boolean(), beforeSize: z.number().nonnegative(), afterSize: z.number().nonnegative(),
 });
 export type WorkspaceChange = z.infer<typeof WorkspaceChange>;
-export const WorkspaceChanges = z.object({ files: z.array(WorkspaceChange), added: z.number(), removed: z.number() });
+export const WorkspaceChanges = z.object({ files: z.array(WorkspaceChange), added: z.number(), removed: z.number(), revision: z.string().optional() });
 export type WorkspaceChanges = z.infer<typeof WorkspaceChanges>;
 export const WorkspaceFileDiff = z.object({ file: WorkspaceChange, patch: z.string().nullable() });
 export type WorkspaceFileDiff = z.infer<typeof WorkspaceFileDiff>;
+
+export const RestoreWorkspaceFileBody = z.object({ path: z.string().min(1).max(4096) }).strict();
+export const WorkspaceChangeTotals = WorkspaceChanges.pick({ added: true, removed: true }).extend({ fileCount: z.number().int().nonnegative() });
+export const WorkspaceDiffLine = z.object({ kind: z.enum(['context', 'add', 'remove', 'header', 'note']), text: z.string(), oldLine: z.number().nullable(), newLine: z.number().nullable() });
+export type WorkspaceDiffLine = z.infer<typeof WorkspaceDiffLine>;

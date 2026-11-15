@@ -1,7 +1,7 @@
 // 正式任务宿主：配置、记账、上下文、工具与审批均由 Gateway 持有，不借用第三方 Agent 认证。
 import {
   IndependentTaskOptions, IndependentTaskState, IndependentApprovalDetail, IndependentHistoryPage,
-  IndependentCommandSpec,
+  IndependentCommandSpec, IndependentRelativePath,
   type AgentInfo, type IndependentTaskReference, type PermissionLevel, type IndependentToolCall, type IndependentCapabilityField,
 } from '@aic/protocol';
 import { redact } from '@aic/adapters';
@@ -229,7 +229,8 @@ export class IndependentTaskRuntime {
     }, {
       execute: async (call: IndependentToolCall, identity: { taskId: string; sessionId: string; turnId: string }, signal: AbortSignal, turnClock?: IndependentApprovalClock) => {
         clock = turnClock;
-        const toolId = newId('tool'); host.update({ kind: 'tool_start', toolId, toolKind: call.name === 'command' ? 'execute' : ['write_file', 'create_file', 'replace_text'].includes(call.name) ? 'edit' : 'read', title: call.name, target: null });
+        const target = IndependentRelativePath.safeParse(call.arguments && typeof call.arguments === 'object' && 'path' in call.arguments ? call.arguments.path : undefined);
+        const toolId = newId('tool'); host.update({ kind: 'tool_start', toolId, toolKind: call.name === 'command' ? 'execute' : ['write_file', 'create_file', 'replace_text'].includes(call.name) ? 'edit' : 'read', title: call.name, target: target.success ? target.data : null });
         let ok = false;
         try {
           if (!allowedTools.has(call.name)) return { role: 'tool', callId: call.id, name: call.name, outcome: 'error', text: '本次任务未声明这个工具，未执行' };

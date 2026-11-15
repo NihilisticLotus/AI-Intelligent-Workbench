@@ -1,3 +1,5 @@
+import { ChangesPanel } from './ChangesPanel';
+import type { WorkspaceChanges } from '@aic/protocol';
 // 右侧详细面板：六节、设备折叠偏好与定位请求；拖宽行为保持不变。
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { EventOf, IndependentTaskState, Task, TaskFile, TaskUsage } from '@aic/protocol';
@@ -51,6 +53,19 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
   const conn = useApp((s) => s.conn);
   // 每次收到事件都会重算选择器；从末尾找，避免长任务里反复复制整段历史（ISSUE-0076）。
   const usageRevision = useApp((s) => lastSeq(s.logs[task.id], 'turn.usage'));
+  const changesRevision = useApp((s) => lastSeq(s.logs[task.id], 'task.changes_updated'));
+  const [changes, setChanges] = useState<WorkspaceChanges | null>(null), [changesError, setChangesError] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+  const isolated = ['worktree', 'copy'].includes(task.workspace?.kind ?? '');
+  const ready = task.workspace?.state === 'ready';
+  useEffect(() => { setChanges(null); setChangesError(null); }, [task.id]);
+  useEffect(() => {
+    if (!isolated || !ready) return;
+    let live = true, reading = false;
+    const read = async () => { if (reading) return; reading = true; try { const value = await api.taskChanges(task.id); if (live) { setChanges(previous => JSON.stringify(previous) === JSON.stringify(value) ? previous : value); setChangesError(null); } } catch (e) { if (live) setChangesError(asApiError(e).message); } finally { reading = false; } };
+    void read(); const timer = tab === 'diff' ? setInterval(() => void read(), 3000) : null;
+    return () => { live = false; if (timer) clearInterval(timer); };
+  }, [task.id, task.status, ready, isolated, changesRevision, conn, reload, tab]);
   const fileRevision = useApp((s) => lastSeq(s.logs[task.id], 'tool.end'));
   const independentRevision = useApp((s) => lastSeq(s.logs[task.id], 'independent.task_changed'));
   const agentName = useAgentName(task.agent);
@@ -61,7 +76,7 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
   const [independent, setIndependent] = useState<IndependentTaskState | null>(null);
   const [usageError, setUsageError] = useState<string | null>(null), [fileError, setFileError] = useState<string | null>(null), [independentError, setIndependentError] = useState<string | null>(null);
   useEffect(() => { let live = true; void api.taskUsage(task.id).then((v) => { if (live) { setUsage(v); setUsageError(null); } }).catch((e) => { if (live) setUsageError(asApiError(e).message); }); return () => { live = false; }; }, [task.id, usageRevision, conn]);
-  useEffect(() => { let live = true; void api.taskFiles(task.id).then((v) => { if (live) { setFiles(v); setFileError(null); } }).catch((e) => { if (live) setFileError(asApiError(e).message); }); return () => { live = false; }; }, [task.id, fileRevision, independentRevision, conn]);
+  useEffect(() => { if (isolated) return; let live = true; void api.taskFiles(task.id).then((v) => { if (live) { setFiles(v); setFileError(null); } }).catch((e) => { if (live) setFileError(asApiError(e).message); }); return () => { live = false; }; }, [task.id, fileRevision, independentRevision, conn, isolated]);
   useEffect(() => { if (task.agent !== 'independent') return; let live = true; void api.independentTask(task.id).then((v) => { if (live) { setIndependent(v); setIndependentError(null); } }).catch((e) => { if (live) setIndependentError(asApiError(e).message); }); return () => { live = false; }; }, [task.id, task.agent, task.status, independentRevision, conn]);
   const focus = useStore(detailFocus, (s) => s);
   useEffect(() => { if (!focus || tab !== 'plan') return; const el = document.getElementById('detail-' + focus.section); if (el) { el.scrollIntoView({ block: 'nearest' }); el.focus({ preventScroll: true }); detailFocus.set(() => null); } }, [focus, tab]);
@@ -72,7 +87,7 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
     { key: 'context', title: '上下文', summary: contextSummary(value, agentName, modelName), body: <><ContextDetails value={value} agent={agentName} model={modelName} config={config} />{independentError ? <p className="d-note" role="alert">{independentError}</p> : null}</> },
     { key: 'usage', title: '会话 token 用量', summary: usage ? `${formatTokens(usage.total.totalTokens)} · ${usage.turns} 轮` : usageError ? '读取失败' : '正在读取', body: <UsageDetails usage={usage} independent={independent} config={config} error={usageError} /> },
     { key: 'connection', title: '连接', summary: '未报告', body: <ConnectionDetails agent={agent} /> },
-    { key: 'output', title: '输出', summary: files ? `${files.length} 个文件` : fileError ? '读取失败' : '正在读取', body: <OutputDetails files={files} error={fileError} /> },
+    { key: 'output', title: '输出', summary: isolated ? changes ? `${changes.files.length} 个文件` : changesError ? '读取失败' : '正在读取' : files ? `${files.length} 个文件` : fileError ? '读取失败' : '正在读取', body: <OutputDetails files={files} error={isolated ? changesError : fileError} changes={isolated ? changes : undefined} isolated={isolated} /> },
   ];
   const tabs: Array<[SideTab, string]> = [['plan', '详细'], ['diff', '改动']];
   return <aside className="side" aria-label="详细面板"><div className="side-head">
@@ -84,5 +99,5 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
       <h3><button type="button" className="d-toggle" aria-expanded={open} aria-controls={'detail-body-' + section.key} onClick={() => setPref('detailOpen', open ? opened.filter((x) => x !== section.key) : [...opened, section.key])}><Icon name="right" /><span>{section.title}</span><span className="sub" title={section.summary}>{section.summary}</span></button></h3>
       <div className="d-body" id={'detail-body-' + section.key} hidden={!open}>{section.body}</div>
     </section>; })}
-  </div><div className="side-body" id="sp-diff" role="tabpanel" aria-labelledby="st-diff" hidden={tab !== 'diff'}><div className="empty"><h3>改动面板</h3><p>之后的版本提供。</p></div></div></aside>;
+  </div><div className="side-body" id="sp-diff" role="tabpanel" aria-labelledby="st-diff" hidden={tab !== 'diff'}><ChangesPanel task={task} changes={changes} error={changesError} refresh={() => setReload(n => n + 1)} /></div></aside>;
 }

@@ -1,5 +1,5 @@
 // 任务、事件、Agent、审批
-import { PrepareWorkspaceBody } from '@aic/protocol';
+import { PrepareWorkspaceBody, RestoreWorkspaceFileBody } from '@aic/protocol';
 import { Hono } from 'hono';
 import { ApprovalsQuery, CreateTaskBody, EventsQuery, PatchTaskBody, PutTaskDraftBody, TasksQuery, type TaskDraft } from '@aic/protocol';
 import { PutIndependentTaskBody, IndependentRecoveryBody, IndependentHistoryQuery, IndependentCheckpointBody } from '@aic/protocol';
@@ -16,6 +16,9 @@ export function taskRoutes(s: Services) {
   r.post('/tasks', async (c) => c.json(await s.tasks.create(await readBody(c, CreateTaskBody)), 201));
   r.get('/tasks/:id', (c) => c.json(s.tasks.get(c.req.param('id'))));
   r.post('/tasks/:id/workspace/prepare', async (c) => { await readBody(c, PrepareWorkspaceBody); return c.json(await s.tasks.confirmWorkspace(c.req.param('id'))); });
+  r.get('/tasks/:id/changes', async c => { const id = c.req.param('id'); return c.json(await s.tasks.workspaceOperation(id, manager => manager.diff(id))); });
+  r.get('/tasks/:id/changes/file', async c => { const id = c.req.param('id'); return c.json(await s.tasks.workspaceOperation(id, manager => manager.fileDiff(id, c.req.query('path') ?? ''))); });
+  r.post('/tasks/:id/changes/restore', async c => { const body = await readBody(c, RestoreWorkspaceFileBody); return c.json(await s.tasks.restoreWorkspaceFile(c.req.param('id'), body.path)); });
   r.get('/tasks/:id/usage', (c) => c.json(taskUsage(s.db, c.req.param('id'))));
   r.get('/tasks/:id/files', (c) => c.json({ items: taskFiles(s.db, c.req.param('id')), nextCursor: null }));
   r.patch('/tasks/:id', async (c) => c.json(await s.tasks.patch(c.req.param('id'), await readBody(c, PatchTaskBody))));

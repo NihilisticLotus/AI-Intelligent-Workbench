@@ -1,3 +1,4 @@
+import { openChanges } from '../state/details';
 // 对话流：用户消息、Agent 消息（含思考过程）、工具调用、计划、审批卡片、系统提示。
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import Markdown from 'react-markdown';
@@ -243,6 +244,7 @@ function ToolRow({ t }: { t: ToolItem }) {
         </span>
       </summary>
       <div className="detail">
+        {['edit', 'create', 'delete'].includes(t.kind) && t.target ? <button type="button" className="detail-link" onClick={() => openChanges(t.target!)}>在改动面板中查看</button> : null}
         {t.title && t.target ? <div className="out-head">{t.title}</div> : null}
         {hasDetail ? (
           <>

@@ -4,7 +4,8 @@
 import type { AgentKind, ApiError, Approval, PermissionLevel, Task, TaskStatus, AttachmentInfo, PromptAttachment } from '@aic/protocol';
 import { ErrorCode, visionOf } from '@aic/protocol';
 import type { z } from 'zod';
-import type { CreateTaskBody, PatchTaskBody, TasksQuery } from '@aic/protocol';
+import type { CreateTaskBody, PatchTaskBody, TasksQuery, TaskActivity } from '@aic/protocol';
+import { TaskQueue } from './task-queue';
 import { AgentError, redact as redactText, redactExact, StreamRedactor, type SessionConfigState } from '@aic/adapters';
 import { errorLogText } from './error-log';
 import type { AgentAdapter, AgentConnection, AgentRegistry, AgentUpdate, PermissionOutcome, PermissionRequest, SessionHost } from './agents/registry';
@@ -121,7 +122,8 @@ export class TaskService {
   agentSvc: AgentService | null = null;
   independentRuntime: IndependentTaskRuntime | null = null;
   workspaces: WorkspaceManager | null = null;
-  private projectTails = new Map<string, Promise<void>>();
+  private projectQueue = new TaskQueue(() => 1, (_key, ids) => this.queueChanged(ids));
+  private turnActivity = new Map<string, TaskActivity>();
   private configuring = new Set<string>();
 
   constructor(private db: Db, private events: EventStore, private agents: AgentRegistry, opts: TaskServiceOptions = {}) {
@@ -164,6 +166,10 @@ export class TaskService {
   get(id: string): Task {
     const row = this.getRow(id);
     const task = toTask(row);
+    const projectQueue = this.projectQueue.position(id), agentQueue = this.agentSvc?.queuePosition(id);
+    if (projectQueue) task.queue = { scope: 'project', ...projectQueue };
+    else if (agentQueue) task.queue = { scope: 'agent', ...agentQueue };
+    if (['running', 'waiting'].includes(task.status)) task.activity = this.turnActivity.get(id);
     const record = this.workspaces?.get(id);
     task.permissionLevels=(task.agent==='fake'||task.agent==='independent')&&!!record&&['worktree','copy'].includes(row.workspace_kind??'')?['readonly','ask','workspace','full']:['readonly','ask'];
     const operation=this.workspaces?.operation(id);
@@ -317,27 +323,25 @@ export class TaskService {
     return project.path;
   }
 
+  queueChanged(ids: string[]) {
+    for (const id of ids) if (this.db.get('SELECT id FROM tasks WHERE id=?', id)) this.emitUpdated(id);
+  }
+  moveQueuedTask(id: string, position: number): Task {
+    const task = this.get(id);
+    if (task.status !== 'queued' || !task.queue) throw Errors.invalidState('任务已不在等待队列，请刷新后查看');
+    if (task.queue.scope === 'project') this.projectQueue.move(id, position);
+    else this.agentSvc!.moveQueuedTask(id, position);
+    return this.get(id);
+  }
   private async acquireProject(id: string, signal: AbortSignal): Promise<() => void> {
     const row = this.getRow(id);
     if (row.workspace_kind !== 'copy' && row.workspace_kind !== 'shadow') return () => {};
-    const previous = this.projectTails.get(row.project_id);
-    let release!: () => void;
-    const current = new Promise<void>(resolve => { release = resolve; });
-    const tail = (previous ?? Promise.resolve()).then(() => current);
-    this.projectTails.set(row.project_id, tail);
-    const done = () => { release(); if (this.projectTails.get(row.project_id) === tail) void tail.then(() => { if (this.projectTails.get(row.project_id) === tail) this.projectTails.delete(row.project_id); }); };
-    if (previous) {
+    const release = await this.projectQueue.acquire(row.project_id, id, () => {
       this.setStatus(id, 'queued');
       this.events.append({ type: 'session.notice', taskId: id, sessionId: null, data: { level: 'info', text: '等待同项目的任务结束' } });
-      let cancelled!: () => void;
-      const aborted = new Promise<never>((_, reject) => { cancelled = () => reject(new AbortError()); signal.addEventListener('abort', cancelled, { once: true }); if (signal.aborted) cancelled(); });
-      try { await Promise.race([previous, aborted]); }
-      catch (error) { done(); throw error; }
-      finally { signal.removeEventListener('abort', cancelled); }
-    }
-    if (signal.aborted) { done(); throw new AbortError(); }
-    this.setStatus(id, 'running');
-    return done;
+    }, signal);
+    if (signal.aborted) { release!(); throw new AbortError(); }
+    this.setStatus(id, 'running'); return release!;
   }
 
   /** 按最近活动倒序；游标分页 */
@@ -599,6 +603,11 @@ export class TaskService {
     const streamKey = u.kind === 'message' ? `m:${u.messageId}` : u.kind === 'thought' ? `t:${u.messageId}` : u.kind === 'tool_output' ? `o:${u.toolId}` : null;
     if (red?.active) this.flushRedactor(taskId, sessionId, red, streamKey ?? undefined);
     const clean = (s: string) => (secrets.length ? redactExact(s, secrets) : s);
+    const activity = this.turnActivity.get(taskId);
+    if (activity && (u.kind === 'tool_start' || u.kind === 'tool_end' || u.kind === 'message' || u.kind === 'thought')) {
+      const action = u.kind === 'tool_start' ? clean(u.title).slice(0, 500) : u.kind === 'tool_end' ? '正在继续处理' : u.kind === 'thought' ? '正在思考' : '正在回复';
+      if (activity.action !== action) { activity.action = action; this.emitUpdated(taskId); }
+    }
     const piece = (key: string, text: string) => (red?.active ? red.push(key, text) : text);
     switch (u.kind) {
       case 'thought': {
@@ -745,7 +754,7 @@ export class TaskService {
     // 并发上限：超出时任务进入“排队中”，有进程空出来就按顺序启动。不是回合的启动（换账号）不排队
     let release: () => void = () => {};
     if (svc) {
-      const r = await svc.acquire(row.agent, () => this.setStatus(taskId, 'queued'), signal, { wait: !opts.noQueue });
+      const r = await svc.acquire(row.agent, () => this.setStatus(taskId, 'queued'), signal, { wait: !opts.noQueue, taskId });
       if (!r) throw new SlotBusyError();
       release = r;
     }
@@ -829,6 +838,7 @@ export class TaskService {
     this.attachments?.markUsed(taskId, attachments.map((a) => a.id));
     const abort = new AbortController();
     this.turnAborts.set(taskId, abort);
+    this.turnActivity.set(taskId, { startedAt: now(), action: '正在准备运行' });
     this.setStatus(taskId, 'running');
     const turn = this.runTurn(taskId, messageId, text, abort, inputs);
     this.turns.add(turn);
@@ -853,6 +863,7 @@ export class TaskService {
     let watchdog: NodeJS.Timeout | undefined;
     let noResponse = false;
     let releaseProject: (() => void) | undefined;
+    let releaseDemo: (() => void) | undefined;
     let snapshotStarted = false;
     let snapshotFailed = false;
     const finishSnapshot = async () => {
@@ -865,11 +876,18 @@ export class TaskService {
     this.approvalTimedOut.delete(taskId);
     try {
       releaseProject = await this.acquireProject(taskId, abort.signal);
+      if (this.getRow(taskId).agent === 'fake' && this.agentSvc) {
+        releaseDemo = (await this.agentSvc.acquire('fake', () => this.setStatus(taskId, 'queued'), abort.signal, { taskId }))!;
+        if (abort.signal.aborted) throw new AbortError();
+        this.setStatus(taskId, 'running');
+      }
+      this.turnActivity.set(taskId, { startedAt: now(), action: '正在准备运行' });
       if (this.getRow(taskId).workspace_kind === 'copy' && this.workspaces) {
         await this.workspaces.snapshot(taskId, '回合开始前'); this.syncWorkspace(taskId); snapshotStarted = true; void this.refreshChanges(taskId);
       }
       rt = await this.ensureRuntime(taskId, abort.signal);
       if (abort.signal.aborted) throw new AbortError();
+      this.turnActivity.set(taskId, { startedAt: now(), action: '正在处理任务' }); this.emitUpdated(taskId);
       rt.lastActive = now();
       this.activity.set(taskId, now());
       let lastNotice = -Infinity;
@@ -943,7 +961,8 @@ export class TaskService {
       }
     } finally {
       if (watchdog) clearInterval(watchdog);
-      releaseProject?.();
+      releaseDemo?.(); releaseProject?.();
+      this.turnActivity.delete(taskId);
       recordTurnUsage(this.db, this.events, taskId, rt?.sessionId ?? null, messageId, usage);
       this.activity.delete(taskId);
       this.activeTools.delete(taskId);

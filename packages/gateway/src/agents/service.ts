@@ -11,7 +11,8 @@ import {
 import type { Db } from '../db';
 import type { EventStore } from '../events';
 import type { ProfileRow, ProfileService } from '../profiles';
-import { AbortError, Errors, newId, now } from '../util';
+import { Errors, newId, now } from '../util';
+import { TaskQueue } from '../task-queue';
 import type { AgentRegistry } from './registry';
 
 const DEFAULT_LIMIT = 2;
@@ -36,8 +37,10 @@ export class AgentService {
   private detecting = new Map<AgentKind, Promise<DetectResult>>();
   private staticCatalog = new Map<AgentKind, Catalog>();
   private profileLogin = new Map<string, boolean | null>();
-  private running = new Map<AgentKind, number>();
-  private queues = new Map<AgentKind, (() => void)[]>();
+  onQueueChange: (ids: string[]) => void = () => {};
+  private pool = new TaskQueue(key => this.concurrencyLimit(key as AgentKind), (key, ids) => {
+    this.pushStatus(key as AgentKind); this.onQueueChange(ids);
+  });
   private logins = new Map<string, LoginRec>();
   private probing = new Map<AgentKind, Promise<void>>();
   profiles!: ProfileService;
@@ -275,7 +278,7 @@ export class AgentService {
       authMethods: d?.authMethods ?? [],
       ...(a.usesNativeConfig ? { usesNativeConfig: true, authMethods: [] } : {}),
       modelsSource: a.real ? cat.source : 'cache',
-      runningSessions: this.running.get(a.id) ?? 0,
+      runningSessions: this.pool.running(a.id),
       concurrencyLimit: this.concurrencyLimit(a.id),
       ...(d?.checkedAt ? { checkedAt: d.checkedAt } : {}),
       ...(caps ? { caps } : {}),
@@ -306,7 +309,7 @@ export class AgentService {
       models: [], efforts: null,
       message: `${a.displayName} 已关闭。在 Agent 页打开后才会检测和使用`,
       engineLocation: d?.engineLocation ?? null,
-      runningSessions: this.running.get(a.id) ?? 0,
+      runningSessions: this.pool.running(a.id),
       concurrencyLimit: this.concurrencyLimit(a.id),
       ...(d?.checkedAt ? { checkedAt: d.checkedAt } : {}),
       permissionLevels: a.id==='fake'?(a.permissionLevels??['readonly','ask','workspace','full']):(a.permissionLevels??['readonly','ask']).filter(p=>p==='readonly'||p==='ask'),
@@ -401,57 +404,16 @@ export class AgentService {
 
   // ---------- 并发上限 ----------
 
-  /** 占一个会话名额；满了就排队（onQueued 在开始排队时调用）。返回释放函数；wait 为 false 且已满时返回 null */
-  async acquire(kind: AgentKind, onQueued?: () => void, signal?: AbortSignal, opts: { wait?: boolean } = {}): Promise<(() => void) | null> {
-    const a = this.registry.get(kind);
-    if (!a?.real) return () => {};
-    if (signal?.aborted) throw new AbortError();
-    const n = this.running.get(kind) ?? 0;
-    if (n < this.concurrencyLimit(kind)) {
-      this.running.set(kind, n + 1);
-      this.pushStatus(kind);
-      return this.releaser(kind);
-    }
-    if (opts.wait === false) return null;
-    onQueued?.();
-    await new Promise<void>((resolve, reject) => {
-      // 已经取消的信号不会再触发 abort 事件：直接放弃排队，否则会一直挂在队列里
-      if (signal?.aborted) { reject(new AbortError()); return; }
-      const q = this.queues.get(kind) ?? [];
-      this.queues.set(kind, q);
-      // 名额在 drain() 里同步占好（running + 1），这里只负责唤醒
-      const go = () => { signal?.removeEventListener('abort', onAbort); resolve(); };
-      const onAbort = () => { const i = q.indexOf(go); if (i >= 0) q.splice(i, 1); reject(new AbortError()); };
-      q.push(go);
-      signal?.addEventListener('abort', onAbort, { once: true });
-    });
-    this.pushStatus(kind);
-    return this.releaser(kind);
+  /** 第三方占会话名额；演示占当前回合名额，等待者可按任务调序。 */
+  async acquire(kind: AgentKind, onQueued?: () => void, signal?: AbortSignal, opts: { wait?: boolean; taskId?: string } = {}): Promise<(() => void) | null> {
+    if (!this.registry.get(kind)) return () => {};
+    return this.pool.acquire(kind, opts.taskId ?? newId('slot'), onQueued, signal, opts.wait !== false);
   }
-
-  private releaser(kind: AgentKind) {
-    let done = false;
-    return () => {
-      if (done) return;
-      done = true;
-      this.running.set(kind, Math.max(0, (this.running.get(kind) ?? 1) - 1));
-      this.drain(kind);
-      this.pushStatus(kind);
-    };
-  }
-
-  /** 放行排队的会话：每放行一个就同步占一个名额，不会超过上限 */
-  private drain(kind: AgentKind) {
-    const q = this.queues.get(kind) ?? [];
-    while (q.length && (this.running.get(kind) ?? 0) < this.concurrencyLimit(kind)) {
-      this.running.set(kind, (this.running.get(kind) ?? 0) + 1);
-      q.shift()!();
-    }
-  }
-
-  /** 排队中的会话数（测试用） */
-  queued(kind: AgentKind) { return this.queues.get(kind)?.length ?? 0; }
-  runningCount(kind: AgentKind) { return this.running.get(kind) ?? 0; }
+  private drain(kind: AgentKind) { this.pool.drain(kind); }
+  queuePosition(taskId: string) { return this.pool.position(taskId); }
+  moveQueuedTask(taskId: string, position: number) { this.pool.move(taskId, position); }
+  queued(kind: AgentKind) { return this.pool.queued(kind); }
+  runningCount(kind: AgentKind) { return this.pool.running(kind); }
 
   // ---------- 登录 ----------
 

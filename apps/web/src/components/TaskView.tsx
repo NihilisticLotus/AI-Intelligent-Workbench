@@ -13,6 +13,7 @@ import { ErrorNotice, StatusMark, toastErrorOf } from './ui';
 import { Icon } from './Icon';
 import { IndependentTaskPanel } from './independent-task-panel';
 import { openDetail } from '../state/details';
+import { WorkViewSwitch } from './work-view-switch';
 
 const EMPTY: EventEnvelope[] = [];
 
@@ -43,6 +44,7 @@ export function TaskView({ taskId, active = true }: { taskId: string; active?: b
     <>
       <main className="main">
         <header className="main-head">
+          <WorkViewSwitch />
           <h1 title={task.title}>{task.title}</h1>
           <StatusMark shape={shape} text={stText} />
           {task.workspace?.branch ? <span className="mono task-branch" title={task.workspace.branch}><Icon name="branch" /> {task.workspace.branch}</span> : null}

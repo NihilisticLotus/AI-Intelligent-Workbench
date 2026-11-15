@@ -6,6 +6,7 @@ import './styles/shell.css';
 import './styles/components.css';
 import './styles/interact.css';
 import './styles/app.css';
+import './styles/board.css';
 import { App } from './App';
 import { applyThemeNow } from './state/prefs';
 import { installFolderPicker } from './components/FolderPicker';

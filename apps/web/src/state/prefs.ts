@@ -18,12 +18,17 @@ export interface Prefs {
   sideOpen: boolean;
   sideWidth: number;
   sideTab: SideTab;
+  workView: 'chat' | 'board';
+  boardTab: 'summary' | 'diff';
+  boardProject: string;
+  boardGroup: string;
   detailOpen: DetailSection[];
 }
 
 const defaults: Prefs = {
   theme: 'dark', thought: 'collapsed', sidebarCollapsed: false, sbView: 'project', collapsed: [],
   sideOpen: true, sideWidth: 440, sideTab: 'plan',
+  workView: 'chat', boardTab: 'summary', boardProject: '', boardGroup: '',
   detailOpen: [...defaultDetailSections],
 };
 
@@ -43,6 +48,8 @@ function load(): Prefs {
     out.sideOpen = false;
   }
   out.detailOpen = validDetailSections(out.detailOpen);
+  if (!['chat', 'board'].includes(String(out.workView))) out.workView = 'chat';
+  if (!['summary', 'diff'].includes(String(out.boardTab))) out.boardTab = 'summary';
   return out as unknown as Prefs;
 }
 

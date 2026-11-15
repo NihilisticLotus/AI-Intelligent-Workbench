@@ -104,3 +104,6 @@
 
 | [ISSUE-0088](ISSUE-0088-native-auto-permission-bypass.md) | 原生自动权限模式会跳过工作台规则入口 | deferred | 设计冲突 | 2026-11-15 | |
 | [ISSUE-0089](ISSUE-0089-windows-test-host-timeouts.md) | Windows 文件宿主全量回归出现超时 | fixed | 验收未通过 | 2026-11-15 | 2026-11-15 |
+| [ISSUE-0090](ISSUE-0090-board-pointer-drag.md) | 内嵌浏览器拖动看板卡片未更新队列 | fixed | 验收未通过 | 2026-11-15 | 2026-11-15 |
+| [ISSUE-0091](ISSUE-0091-codebuddy-workspace-real-quota.md) | CodeBuddy 自带模型无额度，核对自定义模型补验 | investigating | 外部依赖 | 2026-11-15 | |
+| [ISSUE-0092](ISSUE-0092-board-independent-failure.md) | 看板遗漏独立 Agent 请求失败原因 | fixed | bug | 2026-11-15 | 2026-11-15 |

@@ -17,6 +17,8 @@ import { ProjectSettingsPage } from './pages/project-settings-page';
 import { PairingPage } from './pages/PairingPage';
 import { NewTaskPage } from './pages/new-task-page';
 import { Icon } from './components/Icon';
+import { BoardView } from './components/board-view';
+import { WorkViewSwitch } from './components/work-view-switch';
 
 export function App() {
   const bootState = useApp((s) => s.boot);
@@ -52,6 +54,7 @@ function Shell() {
   const sbCollapsed = usePref('sidebarCollapsed');
   const sideOpen = usePref('sideOpen');
   const sideWidth = usePref('sideWidth');
+  const workView = usePref('workView');
   const approvals = useApp((s) => s.approvals);
   const tasks = useApp((s) => s.tasks);
   const pending = useMemo(() => Object.values(approvals).filter((a) => a.status === 'pending').sort((a, b) => a.createdAt - b.createdAt), [approvals]);
@@ -93,7 +96,7 @@ function Shell() {
         const curId = (document.activeElement as HTMLElement | null)?.id?.replace(/^ap-/, '');
         const i = pending.findIndex((a) => a.id === curId);
         const next = pending[(i + 1) % Math.max(1, pending.length)];
-        if (next) { navigate({ page: 'task', taskId: next.taskId }); requestFocusApproval(next.id); }
+        if (next) { setPref('workView', 'chat'); navigate({ page: 'task', taskId: next.taskId }); requestFocusApproval(next.id); }
       } else if (e.key === 'Escape' && routeStore.get().page !== 'new' && matchMedia('(max-width: 1279px)').matches && prefsStore.get().sideOpen && !document.querySelector('.popover, .menu')) {
         setPref('sideOpen', false);
       }
@@ -109,11 +112,12 @@ function Shell() {
       <Sidebar onSearch={openPalette} />
       <button type="button" className="sb-scrim" aria-label="关闭任务列表" tabIndex={-1} onClick={() => setDrawer(false)} />
       <div className="route-surface" hidden={route.page === 'new'}>
-      {pageRoute.page === 'task' ? <TaskView key={pageRoute.taskId} taskId={pageRoute.taskId} active={route.page !== 'new'} /> : null}
+      {workView === 'board' && (pageRoute.page === 'task' || pageRoute.page === 'home') ? <BoardView taskId={pageRoute.page === 'task' ? pageRoute.taskId : undefined} /> : null}
+      {pageRoute.page === 'task' && workView === 'chat' ? <TaskView key={pageRoute.taskId} taskId={pageRoute.taskId} active={route.page !== 'new'} /> : null}
       {pageRoute.page === 'agents' ? <AgentsPage /> : null}
       {pageRoute.page === 'settings' ? <SettingsPage /> : null}
       {pageRoute.page === 'project-settings' ? <ProjectSettingsPage key={pageRoute.projectId} projectId={pageRoute.projectId}/> : null}
-      {pageRoute.page === 'home' ? <Home /> : null}
+      {pageRoute.page === 'home' && workView === 'chat' ? <Home /> : null}
       {pageRoute.page === 'feature' ? (
         <main className="main"><div className="content-scroll"><div className="page">
           <div className="empty"><h3>这个页面还没有开放</h3><p>它会在后续阶段提供。</p></div>
@@ -164,7 +168,7 @@ export function Home() {
   const hasTasks = useApp((s) => Object.keys(s.tasks).length > 0);
   return (
     <main className="main">
-      <header className="main-head"><h1>任务</h1></header>
+      <header className="main-head"><WorkViewSwitch /><h1>任务</h1></header>
       <div className="content-scroll">
         <div className="empty" style={{ paddingTop: '18vh' }}>
           <h3>{hasTasks ? '选择一个任务，或新建任务' : '还没有任务'}</h3>

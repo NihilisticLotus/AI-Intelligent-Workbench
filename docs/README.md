@@ -47,3 +47,10 @@
 - [ISSUE-0072：无回复轮次用量](issues/ISSUE-0072-missing-reply-usage.md)
 - 修复验证与浏览器限制追加在 [step-1.4](acceptance/step-1.4.md)，不覆盖历史验收。
 - [ISSUE-0073：收尾文件宿主复验](issues/ISSUE-0073-file-host-validation-timeout.md)
+
+### 2026-11-15 任务看板
+
+- [ISSUE-0090：看板拖动手柄验收](issues/ISSUE-0090-board-pointer-drag.md)
+- [ISSUE-0091：CodeBuddy 真实补验额度限制](issues/ISSUE-0091-codebuddy-workspace-real-quota.md)
+- [ISSUE-0092：独立任务看板失败原因](issues/ISSUE-0092-board-independent-failure.md)
+- [1.5 验收与当前进度](acceptance/step-1.5.md)

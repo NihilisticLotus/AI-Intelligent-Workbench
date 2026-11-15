@@ -245,6 +245,7 @@ export class HttpClient {
     return all;
   }
   task(id: string) { return this.request('GET', `/tasks/${encodeURIComponent(id)}`, { parse: oneOf(Task) }); }
+  moveTaskQueue(id: string, position: number) { return this.request('POST', `/tasks/${encodeURIComponent(id)}/queue`, { body: { position }, parse: oneOf(Task) }); }
   deleteTask(id:string) {return this.request('DELETE',`/tasks/${encodeURIComponent(id)}`,{parse:oneOf(OkResult)});}
   createTask(body: {
     projectId: string; groupId: string | null; prompt: string; title?: string;

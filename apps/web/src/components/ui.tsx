@@ -275,7 +275,7 @@ export function runErrorAction(a: string | ActionLike, onRetryOrCtx?: (() => voi
   toast('这个操作需要更新后的界面才能完成，先刷新页面试试', 'attn');
 }
 
-export function ErrorNotice({ error, onRetry, kind = 'err', ctx, compact, onDismiss, onAction }: {
+export function ErrorNotice({ error, onRetry, kind = 'err', ctx, compact, onDismiss, onAction, beforeAction }: {
   error: ApiError; onRetry?: () => void; kind?: 'err' | 'attn';
   /** 1.2：按钮执行时的上下文（任务、Agent） */
   ctx?: ErrorActionContext;
@@ -285,6 +285,8 @@ export function ErrorNotice({ error, onRetry, kind = 'err', ctx, compact, onDism
   onDismiss?: () => void;
   /** 点了任一按钮之后（例如收起提示） */
   onAction?: () => void;
+  /** 执行操作前切换到承载该操作的视图。 */
+  beforeAction?: () => void;
 }) {
   const conn = useApp((s) => s.conn);
   const online = conn === 'online' || conn === 'replaying';
@@ -302,7 +304,7 @@ export function ErrorNotice({ error, onRetry, kind = 'err', ctx, compact, onDism
               return (
                 <button key={i} type="button" className="btn sm" disabled={needsIdle && (!online || !!c.busy)}
                   title={needsIdle && c.busy ? 'Agent 正在工作，等这一轮结束' : undefined}
-                  onClick={() => { runErrorAction(a, c); onAction?.(); }}>{a.label}</button>
+                  onClick={() => { beforeAction?.(); runErrorAction(a, c); onAction?.(); }}>{a.label}</button>
               );
             })}
           </div>

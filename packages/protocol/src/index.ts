@@ -139,10 +139,18 @@ export type CreateEnvironmentBody = z.infer<typeof CreateEnvironmentBody>;
 export const Group = z.object({ id: Id, name: z.string(), ord: z.number().int(), createdAt: Ts });
 export type Group = z.infer<typeof Group>;
 
+export const TaskQueueState = z.object({ scope: z.enum(['agent', 'project']), key: Id, position: z.number().int().positive(), total: z.number().int().positive() });
+export type TaskQueueState = z.infer<typeof TaskQueueState>;
+export const MoveQueuedTaskBody = z.object({ position: z.number().int().positive() }).strict();
+export type MoveQueuedTaskBody = z.infer<typeof MoveQueuedTaskBody>;
+export const TaskActivity = z.object({ startedAt: Ts, action: z.string().max(500) });
+export type TaskActivity = z.infer<typeof TaskActivity>;
+
 export const Task = z.object({
   id: Id, projectId: Id, groupId: Id.nullable(), title: z.string(), prompt: z.string(),
   status: TaskStatus, permission: PermissionLevel,
   permissionLevels: z.array(PermissionLevel).optional(),
+  queue: TaskQueueState.optional(), activity: TaskActivity.optional(),
   agent: AgentKind, model: z.string().nullable(), effort: z.string().nullable(),
   autoAllowLowRisk: z.boolean(), autoMergeOnPass: z.boolean(),
   lastActivityAt: Ts, createdAt: Ts, updatedAt: Ts,

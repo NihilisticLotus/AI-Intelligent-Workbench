@@ -1,5 +1,5 @@
 // 任务、事件、Agent、审批
-import { MergeWorkspaceBody, PrepareWorkspaceBody, RestoreWorkspaceFileBody } from '@aic/protocol';
+import { MergeWorkspaceBody, PrepareWorkspaceBody, RestoreWorkspaceFileBody, MoveQueuedTaskBody } from '@aic/protocol';
 import { Hono } from 'hono';
 import { ApprovalsQuery, CreateTaskBody, EventsQuery, PatchTaskBody, PutTaskDraftBody, TasksQuery, type TaskDraft } from '@aic/protocol';
 import { PutIndependentTaskBody, IndependentRecoveryBody, IndependentHistoryQuery, IndependentCheckpointBody } from '@aic/protocol';
@@ -15,6 +15,7 @@ export function taskRoutes(s: Services) {
   r.get('/tasks', (c) => c.json(s.tasks.list(parseQuery(c, TasksQuery))));
   r.post('/tasks', async (c) => c.json(await s.tasks.create(await readBody(c, CreateTaskBody)), 201));
   r.get('/tasks/:id', (c) => c.json(s.tasks.get(c.req.param('id'))));
+  r.post('/tasks/:id/queue', async c => c.json(s.tasks.moveQueuedTask(c.req.param('id'), (await readBody(c, MoveQueuedTaskBody)).position)));
   r.delete('/tasks/:id',async c=>c.json(await s.tasks.deleteTask(c.req.param('id'))));
   r.post('/tasks/:id/merge',async c=>c.json(await s.tasks.finishWorkspace(c.req.param('id'),'merge',await readBody(c,MergeWorkspaceBody))));
   r.post('/tasks/:id/discard',async c=>c.json(await s.tasks.finishWorkspace(c.req.param('id'),'discard')));

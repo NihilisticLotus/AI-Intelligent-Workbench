@@ -228,6 +228,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   cleanupTimer.unref?.();
   tasks.attachments = attachments;
   tasks.agentSvc = agentSvc;
+  agentSvc.onQueueChange = ids => tasks.queueChanged(ids);
   tasks.recoverOnStartup();
   // 上次遗留的 Agent 进程（核对启动时间后结束进程树）；不在启动时预先拉起 Agent
   const orphanCleanup = processes.cleanupOrphans();

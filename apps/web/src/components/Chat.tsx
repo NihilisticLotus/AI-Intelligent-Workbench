@@ -28,10 +28,10 @@ const busyStatuses = new Set<Task['status']>(['running', 'waiting', 'queued']);
  * 任务里的错误：统一格式，actions 渲染成按钮（重新登录、继续、换模型……）；Gateway 没给按钮时按错误码补上默认的。
  * stale：后面已经有新的消息了，会发消息的按钮（继续、再试一次）不再显示，免得点了旧错误重复发送
  */
-export function TaskError({ error, task, compact, stale }: { error: ApiError; task: Task; compact?: boolean; stale?: boolean }) {
+export function TaskError({ error, task, compact, stale, beforeAction }: { error: ApiError; task: Task; compact?: boolean; stale?: boolean; beforeAction?: () => void }) {
   let e = withDefaultActions(error, { taskId: task.id, kind: task.agent });
   if (stale) e = { ...e, actions: e.actions.filter((a) => !actionNeedsIdle(a.action)) };
-  return <ErrorNotice error={e} compact={compact} ctx={{ taskId: task.id, kind: task.agent, busy: busyStatuses.has(task.status) }} />;
+  return <ErrorNotice error={e} compact={compact} beforeAction={beforeAction} ctx={{ taskId: task.id, kind: task.agent, busy: busyStatuses.has(task.status) }} />;
 }
 
 export function Stream({ task, items, loading, onOpenPlan, active = true }: { task: Task; items: TimelineItem[]; loading: boolean; onOpenPlan: () => void; active?: boolean }) {
@@ -288,7 +288,7 @@ function PlanInline({ items, onOpen }: { items: PlanEntry[]; onOpen: () => void 
 // ---------------------------------------------------------------------
 // 审批卡片（ui-design.md 6.3）：不抢焦点；卡片聚焦时 Enter 允许、Esc 打开拒绝理由
 // ---------------------------------------------------------------------
-function ApprovalCard({ approval, resolvedInLog, task }: { approval: Approval; resolvedInLog: ResolvedInfo | null; task: Task }) {
+export function ApprovalCard({ approval, resolvedInLog, task }: { approval: Approval; resolvedInLog: ResolvedInfo | null; task: Task }) {
   const live = useApp((s) => s.approvals[approval.id]);
   const hello = useApp((s) => s.hello);
   const devices = useApp((s) => s.devices);

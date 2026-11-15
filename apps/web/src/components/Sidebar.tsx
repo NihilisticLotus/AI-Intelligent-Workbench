@@ -154,6 +154,7 @@ function Section({ sec, open, onToggle, view, projects, groups, currentTaskId }:
       const p = sec.project;
       openMenu(btn, [
         { label: '在这个项目里新建任务', onSelect: () => openNewTask({ projectId: p.id }) },
+        { label: '项目设置', onSelect: () => navigate({page:'project-settings',projectId:p.id}) },
         { label: '只看这个项目，折叠其他', onSelect: () => setPref('collapsed', projects.map((x) => 'p:' + x.id).filter((k) => k !== sec.key)) },
         { label: '重命名', onSelect: () => nameDialog({ title: '重命名项目', label: '名称', value: p.name, ok: '保存', hint: '只改工作台里的显示名称，不改文件夹名。', onSave: async (v) => { await renameProject(p.id, v); toast(`已重命名为“${v}”`); } }) },
         { label: '从列表中移除…', danger: true, onSelect: async () => {

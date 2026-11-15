@@ -46,6 +46,23 @@ async function setup(respond: (n: number, body: any) => unknown = () => done('�
 }
 
 describe('正式独立任务的离线接口与闭环', () => {
+  it.each(['allow','deny'] as const)('文件写入遵循项目 %s 规则且不弹审批',async action=>{
+    const f=await setup(n=>n===1?{choices:[{index:0,message:{role:'assistant',content:'',tool_calls:[{id:'rule-write',type:'function',function:{name:'create_file',arguments:JSON.stringify({path:'rule.txt',content:'规则测试',createParents:false})}}]},finish_reason:'tool_calls'}],usage:{prompt_tokens:10,completion_tokens:5}}:done('完成'),'separate_v2');
+    f.s.tasks.permissions.put(f.task.projectId,{revision:0,items:[{action,tool:'edit',match:null,path:'rule.txt'}]});
+    await f.s.tasks.prompt(f.task.id,'验证写入规则');await f.wait();
+    expect(f.s.tasks.listApprovals('pending')).toEqual([]);expect(existsSync(path.join(f.workspace,'rule.txt'))).toBe(action==='allow');
+    expect(f.state().tools[0]?.state).toBe(action==='allow'?'succeeded':'rejected');
+    expect(existsSync(path.join(f.originalWorkspace,'rule.txt'))).toBe(false);
+  });
+  it('读取工具不能绕过项目禁止规则',async()=>{
+    const f=await setup(n=>n===1?{choices:[{index:0,message:{role:'assistant',content:'',tool_calls:[{id:'rule-read',type:'function',function:{name:'read_file',arguments:JSON.stringify({path:'private.txt',startLine:1,maxLines:10})}}]},finish_reason:'tool_calls'}],usage:{prompt_tokens:10,completion_tokens:5}}:done('完成'),'separate_v2');
+    writeFileSync(path.join(f.workspace,'private.txt'),'离线私有测试内容');
+    f.s.tasks.permissions.put(f.task.projectId,{revision:0,items:[{action:'deny',tool:'read',match:null,path:'private.txt'}]});
+    await f.s.tasks.prompt(f.task.id,'验证读取规则');await f.wait();
+    expect(JSON.stringify(f.bodies.at(-1))).not.toContain('离线私有测试内容');
+    const messages=f.s.independentRuntime.history(f.task.id,0,100).items.map(e=>e.message);
+    expect(messages.find(m=>m.role==='tool')).toMatchObject({outcome:'rejected'});
+  });
   it('三轮独立 HTTP 用量不串轮，保留上游报告的总量和思考', async () => {
     const f = await setup(() => ({ ...done('用量夹具'), usage: { prompt_tokens: 10, completion_tokens: 3,
       total_tokens: 13, completion_tokens_details: { reasoning_tokens: 2 } } }));
@@ -280,9 +297,9 @@ describe('正式独立任务的离线接口与闭环', () => {
     const f = await setup(); f.s.independentRuntime.ledger.reserve(f.state().binding, { kind: 'model', requestHash: 'c'.repeat(64) });
     // 用 SQLite 的备份语句生成独立副本，避免读取实际用户数据。
     const file = path.join(temporary(), 'old.sqlite'); f.s.db.run('VACUUM INTO ?', file);
-    const old = new DatabaseSync(file); old.exec('DROP TABLE workspace_operations; DROP TABLE workspace_preparations; ALTER TABLE projects DROP COLUMN carry_globs; DROP TABLE workspace_records; ALTER TABLE tasks DROP COLUMN workspace_large_files; DROP TABLE saved_environments; DROP TABLE turn_usage; DROP TABLE independent_task_settings; ALTER TABLE independent_request_attempts DROP COLUMN binding_json; ALTER TABLE independent_request_attempts DROP COLUMN currency; ALTER TABLE independent_request_budgets DROP COLUMN revision; PRAGMA user_version=11;'); old.close();
+    const old = new DatabaseSync(file); old.exec('DROP TABLE permission_rules; DROP TABLE permission_rule_sets; DROP TABLE workspace_operations; DROP TABLE workspace_preparations; ALTER TABLE projects DROP COLUMN carry_globs; DROP TABLE workspace_records; ALTER TABLE tasks DROP COLUMN workspace_large_files; DROP TABLE saved_environments; DROP TABLE turn_usage; DROP TABLE independent_task_settings; ALTER TABLE independent_request_attempts DROP COLUMN binding_json; ALTER TABLE independent_request_attempts DROP COLUMN currency; ALTER TABLE independent_request_budgets DROP COLUMN revision; PRAGMA user_version=11;'); old.close();
     for (let i = 0; i < 2; i++) { const migrated = openDb(file); try {
-      expect(migrated.get('PRAGMA user_version')).toEqual({ user_version: 17 });
+      expect(migrated.get('PRAGMA user_version')).toEqual({ user_version: 18 });
       const row = migrated.get('SELECT binding_json,currency FROM independent_request_attempts')!;
       expect(JSON.parse(String(row.binding_json))).toEqual(f.state().binding); expect(row.currency).toBe(null);
     } finally { migrated.close(); } }

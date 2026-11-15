@@ -156,12 +156,13 @@ describe('任务运行时', () => {
     expect(latest.lastActivityAt).toBe(fromRest.lastActivityAt);
   });
 
-  it('审批结果带处理设备的名称；拒绝后工具结束事件标记 rejected；演示 Agent 不再提供“总是允许”', async () => {
+  it('审批结果带设备名称；拒绝后工具标记 rejected；演示 Agent 提供工作台总是允许', async () => {
     const r = await t.api('POST', '/tasks', { token, body: { projectId, prompt: '跑一下测试', agent: 'fake', permission: 'ask' } });
     await allowEditApproval(ws, r.json.id);
     const req = await ws.waitEvent(isCommandApproval(r.json.id));
     const approval = (req.data as { approval: Approval }).approval;
-    expect(approval.options.map((o) => o.kind)).toEqual(['allow_once', 'reject_once']);
+    expect(approval.options.map((o) => o.kind)).toEqual(['allow_once', 'reject_once', 'allow_always']);
+    expect(approval.canAlwaysAllow).toBe(true);
     await ws.call({ op: 'approve', data: { approvalId: approval.id, optionId: 'reject', note: '先别跑' } });
     await ws.waitEvent(statusIs(r.json.id, 'review'));
     const resolved = ws.events().find((e) => e.type === 'approval.resolved' && (e.data as { approvalId: string }).approvalId === approval.id)!;

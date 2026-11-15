@@ -1,4 +1,5 @@
 import { WorkspaceRetention, WorkspaceOperationResult, WorkspaceChanges, WorkspaceFileDiff, type MergeWorkspaceBody } from '@aic/protocol';
+import { PermissionRuleSet, PermissionRulePreview, type PutPermissionRulesBody, type PatchProjectBody } from '@aic/protocol';
 // REST 客户端：所有请求都走 /api/v1，统一处理错误格式 ApiError。
 // 只认一个基础地址 baseUrl（默认同源 ''）；以后局域网或外网访问时只是换这个地址。
 // 凭据由 getAuthHeaders 提供（见 credentials.ts）：浏览器是 HttpOnly Cookie（credentials: 'include'）+ X-AIC-Key，
@@ -216,7 +217,10 @@ export class HttpClient {
   setWorkspaceRetention(body:WorkspaceRetention) {return this.request('PUT','/settings/workspaces',{body,parse:oneOf(WorkspaceRetention)});}
   taskFiles(id: string) { return this.request('GET', `/tasks/${encodeURIComponent(id)}/files`, { parse: listOf(TaskFile) }).then((r) => r.items); }
   createProject(name: string, path: string) { return this.request('POST', '/projects', { body: { name, path }, parse: oneOf(Project) }); }
-  patchProject(id: string, body: { name?: string }) { return this.request('PATCH', `/projects/${encodeURIComponent(id)}`, { body, parse: oneOf(Project) }); }
+  patchProject(id: string, body: PatchProjectBody) { return this.request('PATCH', `/projects/${encodeURIComponent(id)}`, { body, parse: oneOf(Project) }); }
+  projectRules(id:string) {return this.request('GET',`/projects/${encodeURIComponent(id)}/rules`,{parse:oneOf(PermissionRuleSet)});}
+  putProjectRules(id:string,body:PutPermissionRulesBody) {return this.request('PUT',`/projects/${encodeURIComponent(id)}/rules`,{body,parse:oneOf(PermissionRuleSet)});}
+  approvalRule(id:string) {return this.request('GET',`/approvals/${encodeURIComponent(id)}/rule`,{parse:oneOf(PermissionRulePreview)});}
   deleteProject(id: string) { return this.request('DELETE', `/projects/${encodeURIComponent(id)}`); }
   /** 只列文件夹；子文件夹很多时分页，cursor 传上一页的 nextCursor */
   browse(path?: string | null, cursor?: string | null) {

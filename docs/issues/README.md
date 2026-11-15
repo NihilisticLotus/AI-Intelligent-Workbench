@@ -9,7 +9,7 @@
 | [ISSUE-0003](ISSUE-0003-node-sqlite-experimental.md) | node:sqlite 仍是实验特性 | open | 技术债 | 2026-11-06 | |
 | [ISSUE-0004](ISSUE-0004-start-script-first-run.md) | 启动脚本的首次运行路径未在干净环境里实测 | fixed | 验收未通过（未验证） | 2026-11-06 | 2026-11-11 |
 | [ISSUE-0005](ISSUE-0005-401-before-pairing.md) | 配对前浏览器控制台出现 401 | fixed | bug | 2026-11-06 | 2026-11-08 |
-| [ISSUE-0006](ISSUE-0006-always-allow-rules.md) | “总是允许”审批规则尚未实现 | deferred | 待办 | 2026-11-06 | |
+| [ISSUE-0006](ISSUE-0006-always-allow-rules.md) | “总是允许”审批规则尚未实现 | fixed | 待办 | 2026-11-06 | 2026-11-15 |
 | [ISSUE-0007](ISSUE-0007-claude-terminal-login.md) | Claude Code 订阅登录没有 ACP authenticate，能否全程图形化未实测 | wontfix | 外部依赖 | 2026-11-06 | 2026-11-08 |
 | [ISSUE-0008](ISSUE-0008-codebuddy-login-fragile.md) | CodeBuddy 登录态在探测中失效，且与 WorkBuddy 共用登录 | fixed | 外部依赖 | 2026-11-06 | 2026-11-07 |
 | [ISSUE-0009](ISSUE-0009-codex-global-cli-config.md) | 本机全局 codex 0.120 读不了当前的 config.toml，改用 codex-acp 自带的 0.165 | open | 外部依赖 | 2026-11-06 | |
@@ -97,3 +97,7 @@
 | [ISSUE-0082](ISSUE-0082-git-config-callbacks.md) | 继承 git 配置可能触发钩子与外部程序 | fixed | bug | 2026-11-15 | 2026-11-15 |
 | [ISSUE-0083](ISSUE-0083-copy-snapshot-original-bytes.md) | 影子快照换行规范化改变回滚原文 | fixed | bug | 2026-11-15 | 2026-11-15 |
 | [ISSUE-0084](ISSUE-0084-new-task-isolation-footer.md) | 新任务底部仍提示直接修改原项目 | fixed | bug | 2026-11-15 | 2026-11-15 |
+| [ISSUE-0085](ISSUE-0085-permission-canonical-path.md) | 权限判定混用 Windows 长短路径 | fixed | bug | 2026-11-15 | 2026-11-15 |
+
+| [ISSUE-0086](ISSUE-0086-permission-command-options.md) | 权限命令选项与复杂通配需要完整判定 | fixed | bug | 2026-11-15 | 2026-11-15 |
+| [ISSUE-0087](ISSUE-0087-rule-keyboard-focus.md) | 新权限规则调序后丢失键盘焦点 | fixed | bug | 2026-11-15 | 2026-11-15 |

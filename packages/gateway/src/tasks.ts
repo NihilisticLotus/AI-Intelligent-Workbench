@@ -17,6 +17,8 @@ import type { IndependentTaskOptions } from '@aic/protocol';
 import { emptyUsage, recordTurnUsage } from './usage';
 import { WorkspaceManager, WorkspaceError } from './workspaces';
 import { GitError } from './git';
+import { PermissionBroker } from './permission-rules';
+import type { PermissionOperation, PermissionContext, AlwaysAllowConfirmation, PermissionRulePreview } from '@aic/protocol';
 import { validateProjectDir } from './fsbrowse';
 import type { TaskWorkspace, MergeWorkspaceBody, WorkspaceOperationResult } from '@aic/protocol';
 
@@ -57,6 +59,7 @@ interface Runtime {
 const ACTIVITY_EMIT_MS = 1000;
 
 interface PendingApproval {
+  operation?: PermissionOperation;
   approval: Approval;
   resolve: (o: PermissionOutcome) => void;
   reject: (e: unknown) => void;
@@ -84,6 +87,7 @@ class SlotBusyError extends Error {
 }
 
 export class TaskService {
+  readonly permissions: PermissionBroker;
   private runtimes = new Map<string, Runtime>();
   private starting = new Map<string, Promise<Runtime>>();
   /**
@@ -121,6 +125,7 @@ export class TaskService {
   private configuring = new Set<string>();
 
   constructor(private db: Db, private events: EventStore, private agents: AgentRegistry, opts: TaskServiceOptions = {}) {
+    this.permissions=new PermissionBroker(db);
     this.noResponseNoticeMs = opts.noResponseNoticeMs ?? 60_000;
     this.noResponseCancelMs = opts.noResponseCancelMs ?? 600_000;
     this.noResponseToolCancelMs = Math.max(this.noResponseCancelMs, opts.noResponseToolCancelMs ?? 3_600_000);
@@ -540,6 +545,7 @@ export class TaskService {
       update: (u) => this.onUpdate(taskId, sessionId, u, secrets, redactor),
       requestPermission: (req, signal) => this.onPermission(taskId, sessionId, secrets.length ? {
         ...req, title: redactExact(req.title, secrets), reason: redactExact(req.reason, secrets), detail: redactExact(req.detail, secrets),
+        ...(req.operation?{operation:{...req.operation,command:req.operation.command===null?null:redactExact(req.operation.command,secrets),paths:req.operation.paths.map(p=>redactExact(p,secrets)),complete:req.operation.complete&&!secrets.some(secret=>JSON.stringify(req.operation).includes(secret))}}:{}),
       } : req, signal),
     };
   }
@@ -1143,26 +1149,36 @@ export class TaskService {
 
   // ---------- 审批 ----------
 
-  private onPermission(taskId: string, sessionId: string, req: PermissionRequest, signal: AbortSignal): Promise<PermissionOutcome> {
+  private async permissionContext(taskId:string):Promise<PermissionContext> {
+    const row=this.getRow(taskId),project=this.db.get<{path:string}>('SELECT path FROM projects WHERE id=?',row.project_id)!;
+    return {projectId:row.project_id,root:await this.runtimePath(taskId),original:project.path,level:row.permission_level,isolated:row.workspace_kind==='worktree'||row.workspace_kind==='copy'};
+  }
+  private async onPermission(taskId: string, sessionId: string, req: PermissionRequest, signal: AbortSignal): Promise<PermissionOutcome> {
     this.activity.set(taskId, now());
     const row = this.getRow(taskId);
     const pick = (kinds: string[]) => req.options.find((o) => kinds.includes(o.kind));
-    // 权限级别（9.1）：只读一律拒绝；工作区内自动 / 全自动直接放行；需审批时出卡片
-    if (row.permission_level === 'readonly') {
+    const operation=req.operation??{tool:'any' as const,command:null,paths:[],complete:false,deletion:false};
+    const context=await this.permissionContext(taskId),decision=await this.permissions.decide(operation,context);
+    if(signal.aborted)throw new AbortError();
+    if(decision.action==='deny') {
+      this.events.append({type:'session.notice',taskId,sessionId,data:{level:'warn',text:'已拒绝操作：'+decision.reason}});
       const o = pick(['reject_once', 'reject_always']);
-      return Promise.resolve(o ? { outcome: 'selected', optionId: o.id, note: '只读权限下不允许执行' } : { outcome: 'cancelled' });
+      return o ? { outcome: 'selected', optionId: o.id, note: decision.reason } : { outcome: 'cancelled' };
     }
-    if (row.permission_level === 'full' || row.permission_level === 'workspace') {
-      const o = pick(['allow_once', 'allow_always']);
-      if (o) return Promise.resolve({ outcome: 'selected', optionId: o.id });
+    if(decision.action==='allow') {
+      const o=pick(['allow_once']);
+      if(o){this.events.append({type:'session.notice',taskId,sessionId,data:{level:'info',text:(decision.ruleId?'已按规则自动允许：':'已自动允许：')+decision.reason}});return {outcome:'selected',optionId:o.id};}
     }
-    if (signal.aborted) return Promise.reject(new AbortError());
+    const preview=pick(['allow_once'])?await this.permissions.preview(operation,context):null;
+    if(signal.aborted)throw new AbortError();
+    const options=req.options.filter(o=>o.kind!=='allow_always');
+    if(preview)options.push({id:newId('opt'),kind:'allow_always',label:'总是允许…'});
 
     const t = now();
     const approval: Approval = {
       id: newId('a'), taskId, sessionId, title: req.title, reason: req.reason, detail: req.detail, cwd: req.cwd,
-      options: req.options, status: 'pending', decidedBy: null, createdAt: t, expiresAt: t + this.approvalTimeoutMs,
-      ...(row.agent === 'independent' ? { independentToolId: req.toolId } : {}),
+      options, canAlwaysAllow:!!preview, status: 'pending', decidedBy: null, createdAt: t, expiresAt: t + this.approvalTimeoutMs,
+      ...(row.agent === 'independent'&&operation.tool!=='read' ? { independentToolId: req.toolId } : {}),
     };
     this.db.run(
       'INSERT INTO approvals (id, task_id, session_id, request_json, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
@@ -1200,7 +1216,7 @@ export class TaskService {
         this.activity.set(taskId, now());
       };
       signal.addEventListener('abort', onAbort, { once: true });
-      this.pending.set(approval.id, { approval, resolve, reject, timer, cleanup });
+      this.pending.set(approval.id, { approval, operation, resolve, reject, timer, cleanup });
     });
   }
 
@@ -1225,7 +1241,12 @@ export class TaskService {
   }
 
   /** 任一设备先处理即生效（先到先得） */
-  async approve(approvalId: string, optionId: string, note: string | undefined, deviceId: string): Promise<Approval> {
+  async permissionRulePreview(approvalId:string) {
+    const p=this.pending.get(approvalId);if(!p?.operation)throw Errors.invalidState('这条审批无法生成规则');
+    const preview=await this.permissions.preview(p.operation,await this.permissionContext(p.approval.taskId));
+    if(!preview||this.pending.get(approvalId)!==p)throw Errors.invalidState('审批已变化或不能安全生成规则');return preview;
+  }
+  async approve(approvalId: string, optionId: string, note: string | undefined, deviceId: string, alwaysAllow?:AlwaysAllowConfirmation): Promise<Approval> {
     const p = this.pending.get(approvalId);
     if (!p) {
       const exists = this.db.get('SELECT id FROM approvals WHERE id = ?', approvalId);
@@ -1234,18 +1255,35 @@ export class TaskService {
     }
     const opt = p.approval.options.find((o) => o.id === optionId);
     if (!opt) throw Errors.badRequest('没有这个选项');
-    p.cleanup();
+    let responseId=optionId;
+    let confirmedRule:PermissionRulePreview|undefined;
+    if(opt.kind.startsWith('allow')) {
+      if(!p.operation)throw Errors.invalidState('审批操作已失效');
+      const context=await this.permissionContext(p.approval.taskId),decision=await this.permissions.decide(p.operation,context);
+      if(decision.action==='deny')throw Errors.invalidState('当前规则已禁止此操作：'+decision.reason);
+      if(opt.kind==='allow_always') {
+        if(!alwaysAllow)throw Errors.badRequest('请先预览并确认规则');
+        const preview=await this.permissionRulePreview(approvalId);
+        if(preview.revision!==alwaysAllow.revision)throw Errors.conflict('权限规则已变化，请重新预览');
+        const once=p.approval.options.find(o=>o.kind==='allow_once');if(!once)throw Errors.invalidState('Agent 不支持允许一次，不能写入它的原生规则');
+        if(this.pending.get(approvalId)!==p)throw Errors.invalidState('这条审批已经处理过了');
+        confirmedRule=preview;responseId=once.id;
+      } else if(alwaysAllow)throw Errors.badRequest('此选项不接受规则确认');
+    }
+    if(this.pending.get(approvalId)!==p)throw Errors.invalidState('这条审批已经处理过了');
     const status = opt.kind.startsWith('allow') ? 'allowed' : 'rejected';
     // 拒绝理由（note）ACP 不支持回传，只存在审批记录里
-    const a = this.finishApproval(approvalId, status, deviceId, optionId)!;
-    if (note) {
-      const withNote = { ...a, note };
-      this.db.run('UPDATE approvals SET request_json = ? WHERE id = ?', JSON.stringify(withNote), approvalId);
-    }
+    const a=this.db.tx(()=>{
+      if(confirmedRule)this.permissions.addAlways(this.getRow(p.approval.taskId).project_id,confirmedRule);
+      const result=this.finishApproval(approvalId,status,deviceId,optionId)!;
+      if(note)this.db.run('UPDATE approvals SET request_json = ? WHERE id = ?',JSON.stringify({...result,note}),approvalId);
+      return result;
+    });
+    p.cleanup();
     // 还有别的审批没处理（并行的工具调用）→ 仍是“等待审批”，否则回到运行中；再把结果交还 Agent
     this.recomputeStatus(p.approval.taskId);
-    // “总是允许”在 1.3 写入项目规则；1.1 先按允许一次处理
-    p.resolve({ outcome: 'selected', optionId, ...(note ? { note } : {}) });
+    // 工作台规则独立保存，永不转发 Agent 的 allow_always。
+    p.resolve({ outcome: 'selected', optionId:responseId, ...(note ? { note } : {}) });
     return a;
   }
 

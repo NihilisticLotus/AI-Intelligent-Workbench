@@ -121,6 +121,7 @@ export type PermissionOptionKind = 'allow_once' | 'allow_always' | 'reject_once'
 
 /** 权限请求（对应 ACP session/request_permission）；选项由 Agent 自己提供 */
 export interface PermissionRequest {
+  operation?: import('@aic/protocol').PermissionOperation;
   toolId: string;
   title: string;
   reason: string;

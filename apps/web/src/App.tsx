@@ -13,6 +13,7 @@ import { openNewTask } from './components/dialogs';
 import { requestFocusApproval } from './components/focus';
 import { AgentsPage } from './pages/AgentsPage';
 import { SettingsPage } from './pages/SettingsPage';
+import { ProjectSettingsPage } from './pages/project-settings-page';
 import { PairingPage } from './pages/PairingPage';
 import { NewTaskPage } from './pages/new-task-page';
 import { Icon } from './components/Icon';
@@ -111,6 +112,7 @@ function Shell() {
       {pageRoute.page === 'task' ? <TaskView key={pageRoute.taskId} taskId={pageRoute.taskId} active={route.page !== 'new'} /> : null}
       {pageRoute.page === 'agents' ? <AgentsPage /> : null}
       {pageRoute.page === 'settings' ? <SettingsPage /> : null}
+      {pageRoute.page === 'project-settings' ? <ProjectSettingsPage key={pageRoute.projectId} projectId={pageRoute.projectId}/> : null}
       {pageRoute.page === 'home' ? <Home /> : null}
       {pageRoute.page === 'feature' ? (
         <main className="main"><div className="content-scroll"><div className="page">

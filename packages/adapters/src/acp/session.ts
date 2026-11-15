@@ -353,6 +353,10 @@ export class AcpSession implements AgentConnection {
       if (n.toolCallId) this.mapper.markRejected(n.toolCallId);
       return { outcome: { outcome: 'cancelled' } };
     }
+    if(opt.kind==='allow_always') {
+      // 即使上层错误地回了原生永久授权，也不把它写入第三方配置。
+      if(n.toolCallId)this.mapper.markRejected(n.toolCallId);return {outcome:{outcome:'cancelled'}};
+    }
     if (opt.kind.startsWith('reject') && n.toolCallId) this.mapper.markRejected(n.toolCallId);
     // 用户填写的拒绝理由（note）ACP 不支持回传，只存在审批记录里
     return { outcome: { outcome: 'selected', optionId: opt.id } };

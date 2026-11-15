@@ -276,8 +276,8 @@ export async function loadHistory(taskId: string) {
 const notConnected = () => Promise.reject(new ApiRequestError({ code: 'client.offline', message: '还没有连上服务', actions: [] }));
 export const sendPrompt = (taskId: string, text: string, attachments?: string[]) => (ws ? ws.request('prompt', { taskId, text, attachments }) : notConnected());
 export const cancelTask = (taskId: string) => (ws ? ws.request('cancel', { taskId }) : notConnected());
-export const approve = (approvalId: string, optionId: string, note?: string) =>
-  ws ? ws.request('approve', note ? { approvalId, optionId, note } : { approvalId, optionId }) : notConnected();
+export const approve = (approvalId: string, optionId: string, note?: string, alwaysAllow?:import('@aic/protocol').AlwaysAllowConfirmation) =>
+  ws ? ws.request('approve',{approvalId,optionId,...(note?{note}:{}),...(alwaysAllow?{alwaysAllow}:{})}) : notConnected();
 export const switchConfig = (taskId: string, patch: { model?: string; effort?: string; profileId?: string }) =>
   ws ? ws.request('switch', { taskId, ...patch }) : notConnected();
 
@@ -312,6 +312,9 @@ export async function createProject(name: string, path: string) {
 export async function renameProject(id: string, name: string) {
   const p = await api.patchProject(id, { name });
   set((s) => ({ ...s, projects: upsert(s.projects, p) }));
+}
+export async function saveProjectSettings(id:string,body:import('@aic/protocol').PatchProjectBody) {
+  const p=await api.patchProject(id,body);set(s=>({...s,projects:upsert(s.projects,p)}));return p;
 }
 export async function removeProject(id: string) {
   await api.deleteProject(id);

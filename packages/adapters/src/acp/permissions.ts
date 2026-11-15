@@ -58,12 +58,9 @@ export function normalizePermission(params: Record<string, unknown>, ctx: { agen
     if (all.some((x) => x.id === id)) continue;
     all.push({ id, label: label(str(o.name) ?? id), kind, visible: true });
   }
-  // “总是”类选项本步隐藏（它会写进 Agent 自己的配置文件；规则引擎在 1.3，ISSUE-0006）。
-  // 例外：没有任何 allow_once 时保留 allow_always；没有 reject_once 时保留 reject_always
-  const hasAllowOnce = all.some((o) => o.kind === 'allow_once');
+  // 原生 allow_always 保留给 Gateway 识别，但不直接执行；工作台生成自己的规则预览。
   const hasRejectOnce = all.some((o) => o.kind === 'reject_once');
   for (const o of all) {
-    if (o.kind === 'allow_always' && hasAllowOnce) o.visible = false;
     if (o.kind === 'reject_always' && hasRejectOnce) o.visible = false;
   }
   const visible = all.filter((o) => o.visible);
@@ -88,9 +85,18 @@ export function normalizePermission(params: Record<string, unknown>, ctx: { agen
     try { detail = clip(JSON.stringify(ri), 2000); } catch { detail = null; }
   }
   const reason = ri ? (str(ri.description) ?? str(ri.reason) ?? str(ri.explanation) ?? '') : '';
+  const rawCommand=ri?.command;
+  const command=typeof rawCommand==='string'?rawCommand:Array.isArray(rawCommand)&&rawCommand.every(x=>typeof x==='string')?rawCommand.map(x=>/\s/.test(x)?JSON.stringify(x):x).join(' '):null;
+  const paths:string[]=[];
+  if(toolCall&&Array.isArray(toolCall.locations))for(const location of toolCall.locations)if(isRecord(location)&&typeof location.path==='string')paths.push(location.path);
+  if(ri)for(const key of ['path','file_path','cwd'])if(typeof ri[key]==='string')paths.push(ri[key]);
+  if(ri&&Array.isArray(ri.paths))for(const value of ri.paths)if(typeof value==='string')paths.push(value);
+  const operationTool=command!==null?'shell':kind==='edit'||kind==='delete'?'edit':kind==='read'||kind==='search'?'read':'any';
 
   return {
     request: {
+      operation:{tool:operationTool,command:command?.slice(0,32000)??null,paths:[...new Set(paths)].slice(0,100).map(p=>p.slice(0,4096)),deletion:kind==='delete',
+        complete:operationTool!=='any'&&(operationTool==='shell'?command!==null&&command.length<=32000:paths.length>0)&&paths.length<=100&&paths.every(p=>p.length<=4096)},
       toolId: toolCallId ?? '',
       title: clip(title, 300),
       reason: clip(reason, 2000),

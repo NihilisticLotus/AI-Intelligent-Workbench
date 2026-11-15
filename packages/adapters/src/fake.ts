@@ -173,6 +173,7 @@ class FakeConnection implements AgentConnection {
     // 需审批：修改文件前也要问（design.md 9.1）。工作区内自动、全自动由 Gateway 的权限层直接放行
     if (this.permission === 'ask') {
       const editReq: PermissionRequest = {
+        operation:{tool:'edit',command:null,paths:[FILE_PLAYER],complete:true,deletion:false},
         toolId: newId('tool'),
         title: '演示 Agent 请求修改文件',
         reason: '把跳跃力度从 7.5 调到 8.2，并加上土狼时间',
@@ -213,6 +214,7 @@ class FakeConnection implements AgentConnection {
       decision = { allowed: true };
     } else {
       const req: PermissionRequest = {
+        operation:{tool:'shell',command:COMMAND,paths:[],complete:true,deletion:false},
         toolId,
         title: '演示 Agent 请求执行命令',
         reason: '运行 EditMode 测试，确认跳跃参数的修改没有破坏已有测试',

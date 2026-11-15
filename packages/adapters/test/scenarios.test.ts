@@ -42,12 +42,13 @@ const STD_OPTIONS = [
 ];
 
 describe('permission：审批桥接', () => {
-  it('隐藏“总是”类选项；回传原始 optionId；拒绝后 tool_end rejected', async () => {
+  it('保留原生选项给 Gateway 识别；回传一次允许；拒绝后 tool_end rejected', async () => {
     const sc = use(scenario({ turns: [permTurn(STD_OPTIONS), permTurn(STD_OPTIONS, 'c2')] }));
     const { host, conn } = await open(sc);
     await conn.prompt({ text: '跑测试' }, sig());
     const req = host.requests[0]!;
-    expect(req.options).toEqual([{ id: 'allow-once', label: '允许', kind: 'allow_once' }, { id: 'reject', label: '拒绝', kind: 'reject_once' }]);
+    expect(req.options.map(o=>o.kind)).toEqual(['allow_once','allow_always','reject_once']);
+    expect(req.operation).toMatchObject({tool:'shell',command:'npm test',complete:true});
     expect(req).toMatchObject({ title: '执行 npm test', detail: 'npm test', reason: '跑测试', cwd: sc.dir });
     expect(sc.log().find((l) => l.event === 'permission_response')!.response).toEqual({ outcome: { outcome: 'selected', optionId: 'allow-once' } });
     expect(host.of('tool_end')[0]).toMatchObject({ ok: true });
@@ -57,11 +58,12 @@ describe('permission：审批桥接', () => {
     expect(host.of('tool_end')[1]).toMatchObject({ ok: false, rejected: true });
   });
 
-  it('没有 allow_once 时保留 allow_always（例如退出计划模式）', async () => {
+  it('没有 allow_once 时也不向 Agent 写入原生总是允许', async () => {
     const sc = use(scenario({ turns: [permTurn([{ optionId: 'exit-plan-auto', kind: 'allow_always', name: 'Yes, auto' }, { optionId: 'reject', kind: 'reject_once', name: 'No' }])] }));
     const { host, conn } = await open(sc);
     await conn.prompt({ text: 'x' }, sig());
     expect(host.requests[0]!.options.map((o) => o.id)).toEqual(['exit-plan-auto', 'reject']);
+    expect(sc.log().find(l=>l.event==='permission_response')!.response).toEqual({outcome:{outcome:'cancelled'}});
   });
 
   it('用户取消（审批作废）时回 cancelled', async () => {
@@ -80,7 +82,7 @@ describe('nonstandard-kinds：CodeBuddy 式的 allow / reject', () => {
     const sc = use(scenario({ turns: [permTurn([{ optionId: 'allow_once', kind: 'allow', name: 'Allow' }, { optionId: 'allow_session', kind: 'allow', name: 'Allow for session' }, { optionId: 'deny', kind: 'reject', name: 'Deny' }])] }));
     const { host, conn } = await open(sc);
     await conn.prompt({ text: 'x' }, sig());
-    expect(host.requests[0]!.options).toEqual([{ id: 'allow_once', label: '允许', kind: 'allow_once' }, { id: 'deny', label: '拒绝', kind: 'reject_once' }]);
+    expect(host.requests[0]!.options.map(o=>o.kind)).toEqual(['allow_once','allow_always','reject_once']);
     expect(host.requests[0]!.title).toBe('执行 npm test');
   });
 

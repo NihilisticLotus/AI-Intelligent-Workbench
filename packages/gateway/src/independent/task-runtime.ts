@@ -201,7 +201,10 @@ export class IndependentTaskRuntime {
       this.details.set(id, detail);
       clock?.pause();
       try {
+        const rawCommand=detail.kind==='command'?[detail.spec.program,...detail.spec.args].map(v=>/\s/.test(v)?JSON.stringify(v):v).join(' '):null;
+        const commandText=rawCommand===null?null:redact(rawCommand,secrets);
         const result = await host.requestPermission({ toolId: id, title, reason: '独立 Agent 请求本次操作，请展开详情核对后决定。',
+          operation:{tool:detail.kind==='command'?'shell':'edit',command:commandText?.slice(0,32000)??null,paths:detail.kind==='file'?[detail.proposal.path]:[],deletion:false,complete:rawCommand===null||rawCommand.length<=32000&&commandText===rawCommand},
           detail: '原始内容仅通过任务的独立审批详情接口读取，不写入事件。', cwd: null,
           options: [{ id: 'allow', label: '允许一次', kind: 'allow_once' }, { id: 'reject', label: '拒绝', kind: 'reject_once' }] }, signal);
         return { approved: permission === 'ask' && !signal.aborted && result.outcome === 'selected' && result.optionId === 'allow',
@@ -235,6 +238,13 @@ export class IndependentTaskRuntime {
         try {
           if (!allowedTools.has(call.name)) return { role: 'tool', callId: call.id, name: call.name, outcome: 'error', text: '本次任务未声明这个工具，未执行' };
           if (call.name !== 'command') {
+            if(!['write_file','create_file','replace_text'].includes(call.name)) {
+              const args=call.arguments&&typeof call.arguments==='object'?call.arguments as Record<string,unknown>:{};
+              const relative=typeof args.path==='string'?args.path:typeof args.directory==='string'?args.directory:typeof args.target==='string'?args.target:'.';
+              const decision=await host.requestPermission({toolId,title:'读取项目文件',reason:'项目读取规则',detail:relative,cwd:workspace,
+                operation:{tool:'read',command:null,paths:[relative],complete:true,deletion:false},options:[{id:'allow',kind:'allow_once',label:'允许一次'},{id:'reject',kind:'reject_once',label:'拒绝'}]},signal);
+              if(signal.aborted||decision.outcome!=='selected'||decision.optionId!=='allow')return {role:'tool',callId:call.id,name:call.name,outcome:'rejected',text:decision.outcome==='selected'?decision.note??'项目规则拒绝读取':'读取已取消'};
+            }
             const result = await fileDriver.execute(call, identity, signal); ok = result.outcome === 'ok'; return result;
           }
           const spec = IndependentCommandSpec.safeParse(call.arguments);

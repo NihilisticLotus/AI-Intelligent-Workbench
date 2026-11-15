@@ -4,6 +4,8 @@ import { TaskWorkspace, WorkspaceGlobs } from './workspaces';
 // 规则见 docs/plan-phase1.md 第 2 节：只通过 /api/v1 的 REST + WebSocket 对接；类型只在这里定义一次。
 import { z } from 'zod';
 export * from './workspaces';
+export * from './permissions';
+import { AlwaysAllowConfirmation } from './permissions';
 
 export const PROTOCOL_VERSION = 1;
 export const API_BASE = '/api/v1';
@@ -257,6 +259,7 @@ export const Approval = z.object({
   status: z.enum(['pending', 'allowed', 'rejected', 'expired']),
   decidedBy: Id.nullable(), createdAt: Ts, expiresAt: Ts.nullable(),
   independentToolId: Id.optional(),
+  canAlwaysAllow: z.boolean().optional(),
   /** 1.1 新增：处理这条审批的设备名（显示“由 xxx 处理”用） */
   decidedByName: z.string().nullable().optional(),
 });
@@ -373,7 +376,7 @@ export const ClientOp = z.discriminatedUnion('op', [
   op('prompt', z.object({ taskId: Id, text: z.string().max(100_000), attachments: z.array(Id).max(10).optional() })
     .refine((v) => !!v.text.trim() || !!v.attachments?.length, '文字和附件至少提供一个')),
   op('cancel', z.object({ taskId: Id })),
-  op('approve', z.object({ approvalId: Id, optionId: z.string(), note: z.string().max(2000).optional() })),
+  op('approve', z.object({ approvalId: Id, optionId: z.string(), note: z.string().max(2000).optional(), alwaysAllow: AlwaysAllowConfirmation.optional() })),
   op('switch', z.object({
     taskId: Id, agent: AgentKind.optional(), model: z.string().optional(), effort: z.string().optional(),
     /** 1.2 新增：同一 Agent 换账号 */

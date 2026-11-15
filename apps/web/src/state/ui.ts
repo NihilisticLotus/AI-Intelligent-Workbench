@@ -16,6 +16,7 @@ export type Route =
   | { page: 'task'; taskId: string }
   | { page: 'agents'; agent?: string; profileId?: string }
   | { page: 'settings' }
+  | { page: 'project-settings'; projectId:string }
   | { page: 'feature'; key: string };
 
 export function parseHash(hash: string): Route {
@@ -35,6 +36,8 @@ export function parseHash(hash: string): Route {
     return profileId ? { page: 'agents', agent, profileId } : agent ? { page: 'agents', agent } : { page: 'agents' };
   }
   if (h === '/settings') return { page: 'settings' };
+  const projectSettings=/^\/projects\/([^/]+)\/settings$/.exec(h);
+  if(projectSettings)return {page:'project-settings',projectId:decodeURIComponent(projectSettings[1]!)};
   if (h.startsWith('/p/')) return { page: 'feature', key: decodeURIComponent(h.slice(3)) };
   return { page: 'home' };
 }
@@ -52,6 +55,7 @@ export function routeHash(r: Route): string {
     case 'task': return '#/t/' + encodeURIComponent(r.taskId);
     case 'agents': return '#/agents' + (r.agent ? '/' + encodeURIComponent(r.agent) + (r.profileId ? '/' + encodeURIComponent(r.profileId) : '') : '');
     case 'settings': return '#/settings';
+    case 'project-settings': return '#/projects/'+encodeURIComponent(r.projectId)+'/settings';
     case 'feature': return '#/p/' + encodeURIComponent(r.key);
     default: return '#/';
   }

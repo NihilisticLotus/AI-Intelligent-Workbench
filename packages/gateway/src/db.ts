@@ -260,6 +260,11 @@ const MIGRATIONS: string[] = [
   `,
   // v17：完成与回滚凭据独立保留，清理副本后仍能展示历史结果。
   `CREATE TABLE workspace_operations (task_id TEXT PRIMARY KEY, record_json TEXT NOT NULL);`,
+  // v18：项目权限规则及空规则集的修订号，整表替换须核对修订。
+  `CREATE TABLE permission_rule_sets (project_id TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE, revision INTEGER NOT NULL);
+   CREATE TABLE permission_rules (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+     ord INTEGER NOT NULL, action TEXT NOT NULL, tool TEXT NOT NULL, match TEXT, path TEXT, source TEXT NOT NULL, created_at INTEGER NOT NULL);
+   CREATE INDEX idx_permission_rules_project ON permission_rules(project_id,ord);`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

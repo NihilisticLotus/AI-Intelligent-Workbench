@@ -267,7 +267,9 @@ describe('真实形态的 Agent（假 ACP 进程）', () => {
 
     const req = await ws.waitEvent((e) => e.type === 'approval.requested' && e.taskId === task.id, 10_000);
     const approval = (req.data as { approval: Approval }).approval;
-    expect(approval.options.map((o) => o.id)).toEqual(['allow-once', 'reject']);
+    expect(approval.options.filter(o=>o.kind!=='allow_always').map(o=>o.id)).toEqual(['allow-once','reject']);
+    expect(approval.canAlwaysAllow).toBe(true);
+    expect(approval.options.find(o=>o.kind==='allow_always')?.id).not.toBe('allow-always');
     expect(approval.detail).toBe('npm test');
     await ws.waitEvent(statusIs(task.id, 'waiting'));
     expect((await ws.call({ op: 'approve', data: { approvalId: approval.id, optionId: 'allow-once' } })).ok).toBe(true);

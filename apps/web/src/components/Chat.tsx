@@ -6,13 +6,13 @@ import remarkGfm from 'remark-gfm';
 import type { ApiError, Approval, Task, AttachmentInfo, TurnUsage } from '@aic/protocol';
 import { groupTurns, type PlanEntry, type ResolvedInfo, type TimelineItem, type ToolItem, type TurnItem, type TurnStep, type ViewItem } from '../state/core';
 import { platform } from '../platform';
-import { approve, loadDevices, useApp } from '../state/app';
+import { api, approve, loadDevices, useApp } from '../state/app';
 import { usePref } from '../state/prefs';
 import { useStore } from '../state/store';
 import { clock, durationText, permInfo, toolVerb } from '../lib/format';
 import { modelSwitchKind, switchKindText, withDefaultActions } from '../lib/agents';
 import { effortLabel } from '../lib/picker';
-import { AgentBadge, ErrorNotice, actionNeedsIdle, toastErrorOf, useAgentName } from './ui';
+import { AgentBadge, ErrorNotice, actionNeedsIdle, toastErrorOf, useAgentName, confirmDialog } from './ui';
 import { Icon } from './Icon';
 import { useNow } from './hooks';
 import { focusApprovalStore } from './focus';
@@ -306,8 +306,7 @@ function ApprovalCard({ approval, resolvedInLog, task }: { approval: Approval; r
   const decidedBy = live?.decidedBy ?? resolvedInLog?.decidedBy ?? null;
   const decidedByName = live?.decidedByName ?? resolvedInLog?.decidedByName ?? null;
   const allowOnce = approval.options.find((o) => o.kind === 'allow_once');
-  // “总是允许 / 总是拒绝”要配合规则功能（预览将生成的规则、只作用于这一类）才有意义，规则在后续步骤提供：
-  // 1.1 不显示这两类按钮，免得用户以为已经放行了同类操作
+  const alwaysOption=approval.canAlwaysAllow?approval.options.find(o=>o.kind==='allow_always'):undefined;
   // 拒绝是安全的方向：Agent 只给了“总是拒绝”时也用它作为拒绝按钮（1.1 按拒绝一次处理）
   const rejectOnce = approval.options.find((o) => o.kind === 'reject_once') ?? approval.options.find((o) => o.kind === 'reject_always');
   const extraOptions = approval.options.filter((o) => o !== allowOnce && o !== rejectOnce && o.kind !== 'allow_always' && o.kind !== 'reject_always');
@@ -334,6 +333,14 @@ function ApprovalCard({ approval, resolvedInLog, task }: { approval: Approval; r
   };
   const openReject = () => { setRejecting(true); setTimeout(() => reasonRef.current?.focus(), 0); };
   const closeReject = () => { setRejecting(false); cardRef.current?.focus(); };
+  const always=async()=>{
+    if(busy||!alwaysOption||approval.independentToolId&&!independentReady)return;
+    setBusy(true);
+    try {
+      const preview=await api.approvalRule(approval.id);
+      if(await confirmDialog({title:'总是允许此类操作',ok:'保存规则并允许一次',body:<><p>{preview.label}</p><p>只作用于当前项目，可在项目设置中查看和删除。这条规则保存在工作台，不写入 Agent 自己的配置。</p></>}))await approve(approval.id,alwaysOption.id,undefined,{revision:preview.revision});
+    }catch(e){toastErrorOf(e);}finally{setBusy(false);}
+  };
 
   if (status !== 'pending') {
     const who = !decidedBy ? null : decidedBy === hello?.device.id ? '这台设备' : decidedByName ?? devices?.find((d) => d.id === decidedBy)?.name ?? '另一台设备';
@@ -369,6 +376,7 @@ function ApprovalCard({ approval, resolvedInLog, task }: { approval: Approval; r
       </dl>
       <div className="acts">
         {allowOnce ? <button type="button" className="btn attn" disabled={busy || !online || !!approval.independentToolId && !independentReady} onClick={() => void decide(allowOnce.id)}>{allowOnce.label || '允许'} <kbd>Enter</kbd></button> : null}
+        {alwaysOption?<button type="button" className="btn" disabled={busy||!online||!!approval.independentToolId&&!independentReady} onClick={()=>void always()}>总是允许…</button>:null}
         {extraOptions.map((o) => (
           <button key={o.id} type="button" className={'btn' + (o.kind.startsWith('reject') ? ' danger' : '')} disabled={busy || !online} onClick={() => void decide(o.id)}>{o.label}</button>
         ))}

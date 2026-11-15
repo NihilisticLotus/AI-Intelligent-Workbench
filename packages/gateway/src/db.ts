@@ -246,6 +246,13 @@ const MIGRATIONS: string[] = [
     branch TEXT, created_at INTEGER NOT NULL
   );
   `,
+  // v15：工作区登记独立于任务生命周期，准备失败也能安全清理；旧任务列不改含义。
+  `
+  ALTER TABLE tasks ADD COLUMN workspace_large_files TEXT;
+  CREATE TABLE workspace_records (
+    task_id TEXT PRIMARY KEY, record_json TEXT NOT NULL, updated_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;
@@ -253,7 +260,8 @@ export const SCHEMA_VERSION = MIGRATIONS.length;
 export function openDb(file: string): Db {
   if (file !== ':memory:') mkdirSync(dirname(file), { recursive: true });
   const raw = new DatabaseSync(file);
-  raw.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;');
+  try { raw.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 3000;'); }
+  catch (error) { raw.close(); throw error; }
 
   // 语句缓存：同一条 SQL 只 prepare 一次
   const cache = new Map<string, ReturnType<DatabaseSync['prepare']>>();
@@ -295,7 +303,8 @@ export function openDb(file: string): Db {
     },
     close() { cache.clear(); raw.close(); },
   };
-  migrate(db);
+  try { migrate(db); }
+  catch (error) { db.close(); throw error; }
   return db;
 }
 

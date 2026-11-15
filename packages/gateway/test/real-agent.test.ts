@@ -180,7 +180,7 @@ describe('真实形态的 Agent（假 ACP 进程）', () => {
       { update: { sessionUpdate: 'tool_call', toolCallId: 'long-b', title: '静默构建 B', kind: 'execute', status: 'in_progress' } },
       { sleep: 500 },
       { update: { sessionUpdate: 'tool_call_update', toolCallId: 'long-a', status: 'completed' } },
-      { sleep: 500 },
+      { waitFile: 'release-long-b' },
       { update: { sessionUpdate: 'tool_call_update', toolCallId: 'long-b', status: 'completed' } },
       { waitCancel: true },
     ] }] });
@@ -189,12 +189,15 @@ describe('真实形态的 Agent（假 ACP 进程）', () => {
     const second = await ws.waitEvent((e) => e.taskId === task.id && e.type === 'tool.start' && e.data.title === '静默构建 B', 5000);
     const first = ws.events().find((e) => e.taskId === task.id && e.type === 'tool.start' && e.data.title === '静默构建 A');
     if (first?.type !== 'tool.start' || second.type !== 'tool.start') throw new Error('缺少长工具启动事件');
-    await new Promise((resolve) => setTimeout(resolve, 750));
+    await ws.waitEvent((e) => e.taskId === task.id && e.type === 'tool.end' && e.data.toolId === first.data.toolId, 5000);
+    // A 已结束而 B 仍在运行；继续跨过普通无回应上限，不靠子进程 sleep 的调度先后。
+    await new Promise((resolve) => setTimeout(resolve, 350));
     expect(gw.gw.services.tasks.get(task.id).status).toBe('running');
     const during = ws.events().filter((e) => e.taskId === task.id);
     expect(during.some((e) => e.type === 'tool.end' && e.data.toolId === first.data.toolId)).toBe(true);
     expect(during.some((e) => e.type === 'error' || e.type === 'session.notice' && !!e.data.id)).toBe(false);
     expect(sc.log().some((entry) => entry.method === 'session/cancel')).toBe(false);
+    writeFileSync(path.join(sc.dir, 'release-long-b'), '继续');
     await ws.waitEvent((e) => e.taskId === task.id && e.type === 'tool.end' && e.data.toolId === second.data.toolId, 5000);
     await ws.waitEvent(statusIs(task.id, 'paused'), 5000);
     expect(ws.events().some((e) => e.taskId === task.id && e.type === 'error' && e.data.error.code === ErrorCode.AgentNoResponse)).toBe(true);

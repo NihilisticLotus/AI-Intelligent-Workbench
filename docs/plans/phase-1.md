@@ -1653,7 +1653,7 @@ ISSUE-0071 为部分用量合计补逐字段覆盖说明，ISSUE-0072 为无回�
     - 匹配顺序：始终禁止 → 项目规则从上到下 → 权限级别默认行为。
     - [总是允许] 在审批卡上预览将生成的规则（只作用于这一类命令 / 这个目录），确认后写入。只写我们自己的规则，同时不把 allow_always 转发给 Agent（Agent 自己记住的规则不受我们控制）。
     - 独立 Agent 的文件工具和命令工具同样走规则引擎。
-12. **开放“工作区内自动 / 全自动”**：只在任务运行于隔离工作副本（worktree 或影子快照）时可选；`inplace` 旧任务仍只有只读 / 需审批。全自动开启时二次确认，琥珀色提示。独立 Agent 的“工作区内自动”只自动放行工作副本内的文件修改，命令仍按规则或审批（命令不是系统沙箱）；“全自动”放行除始终禁止外的全部操作。
+12. **开放“工作区内自动 / 全自动”**：只在任务运行于隔离工作副本（worktree 或 copy）时可选；`inplace` 旧任务仍只有只读 / 需审批。全自动开启时二次确认，琥珀色提示。独立 Agent 的“工作区内自动”只自动放行工作副本内的文件修改，命令仍按规则或审批（命令不是系统沙箱）；“全自动”放行除始终禁止外的全部操作。
 13. **在 IDE 中打开**：本步改为 [在资源管理器中打开工作副本]（Gateway 启动 `explorer.exe <路径>`，只接受工作台登记的工作副本路径）。
 14. **看板**：按原型 6 列；只有“排队中”可拖动 / `Alt+↑/↓` 调序（只影响等待顺序，不改状态）；“等待审批”卡片可直接 [允许]（走同一个审批接口）；“已完成”列只列近 7 天。
 15. 遇到上面没覆盖、会改变用户可见行为、会写用户目录或数据含义的选择，先在验收记录写清选项和建议，停下来问用户。
@@ -1705,7 +1705,7 @@ ISSUE-0071 为部分用量合计补逐字段覆盖说明，ISSUE-0072 为无回�
 2. `packages/gateway/src/workspaces.ts`（WorkspaceManager）：
    - `createWorktree(task)`：校验项目是 git 仓库（`rev-parse --is-inside-work-tree`）、取当前分支和 HEAD 提交作为 base_ref、`worktree add -b aic/... <路径> <base>`、复制“带入工作副本的文件”；Git LFS 仓库记录检测结果（`.gitattributes` 含 `filter=lfs`），按需拉取不在本步验证，写进验收记录。
    - `removeWorktree(task)`：`worktree remove --force` + 删除任务分支；只接受工作台登记的路径和 `aic/` 前缀分支。
-   - `snapshot(project, label)`（非 git）：影子仓库 `--git-dir=<shadow> --work-tree=<项目目录>`，首次 `init`；按忽略规则（内置大目录 + 项目设置）和 50 MB 上限 `add -A` 后 `commit --allow-empty`，返回提交 id；大文件清单另存。
+   - `snapshot(workspace, label)`（非 git copy）：影子仓库 `--git-dir=<shadow> --work-tree=<任务副本>`，首次 `init`；按忽略规则（内置大目录 + 项目设置）和 50 MB 上限 `add -A` 后 `commit --allow-empty`，返回提交 id；大文件清单另存。
    - `diff(task)`：git 项目为“base_ref 到工作副本当前内容”（含未提交改动、新文件）；非 git 为“任务首个快照到最新快照”。返回文件列表（路径、状态 A/M/D/R、增删行数、是否二进制）和单文件 unified diff（有大小上限，超限返回“文件过大”）。
    - 所有路径用 realpath 校验必须在工作副本或项目目录内。
 3. 迁移：使用已有的 `workspace_*` 等列，不改含义；新增 `workspace_large_files`（JSON）列或单独小表记录大文件清单（迁移追加）。
@@ -1723,13 +1723,13 @@ ISSUE-0071 为部分用量合计补逐字段覆盖说明，ISSUE-0072 为无回�
 
 目标：新任务在隔离工作副本里运行，界面能看到运行位置。
 
-1. 协议（只增）：`Task` 加可选 `workspace: { kind: 'worktree' | 'shadow' | 'inplace'; path: string | null; branch: string | null; baseRef: string | null; baseBranch: string | null }`。
+1. 协议（只增）：`Task` 加可选 `workspace: { kind: 'worktree' | 'copy' | 'shadow' | 'inplace'; path: string | null; branch: string | null; baseRef: string | null; baseBranch: string | null }`。
 2. 派发：
-   - `TaskService.create`：git 项目建 worktree，非 git 项目记 `shadow`；失败时任务进入“失败”并给出可读原因（例如“没有安装 git”“项目目录不是有效的 git 仓库”），不退回到直接在项目目录运行。
-   - `ensureRuntime`：ACP Agent 的 cwd、独立 Agent 的文件根和命令 cwd 改为工作副本路径；shadow 和 inplace 仍是项目目录。
+   - `TaskService.create`：git 项目建 worktree，非 git 项目建 `copy` 副本；失败时任务进入“失败”并给出可读原因（例如“没有安装 git”“项目目录不是有效的 git 仓库”），不退回到直接在项目目录运行。
+   - `ensureRuntime`：ACP Agent 的 cwd、独立 Agent 的文件根和命令 cwd 改为工作副本路径；copy 使用副本目录，只有旧 shadow / inplace 仍是项目目录。
    - 非 git 项目：同一项目同一时间只运行一个任务（在现有 Agent 队列之外加项目级串行），排队时任务显示“等待同项目的任务结束”；每轮开始前、结束后调用 `snapshot`。
 3. 项目设置最小后端：`PATCH /projects/:id` 增加可选 `ignoreGlobs`、`carryGlobs`（带入工作副本的文件）；`Project` 返回这两项。界面在阶段 5 做。
-4. 网页：“详细 → 环境”显示运行位置（工作副本路径或“项目目录（快照）”）、分支、基于哪个分支；对话页头部显示分支名（ui 5.1）；起始页把“工作副本在之后的版本提供”改为如实说明（git 项目“会在独立的工作副本里修改”，非 git 项目“直接修改项目文件，每轮前后自动快照，可以回滚”）。
+4. 网页：“详细 → 环境”显示运行位置（工作副本路径或“独立副本（快照）”）、分支、基于哪个分支；对话页头部显示分支名（ui 5.1）；起始页把“工作副本在之后的版本提供”改为如实说明（git 项目“会在独立的工作副本里修改”，非 git 项目“会在独立副本中修改，确认应用结果后才更新项目文件”）。
 5. 去掉界面和提示里已经不成立的“工作副本在之后的版本提供”类文案，全仓 grep 核对。
 6. 测试：派发后工作副本存在且 cwd 正确（假 ACP 记录 `session/new` 的 cwd）；独立 Agent 文件工具不能写到工作副本外；非 git 项目串行与快照次数；git 不可用时的失败提示；旧 inplace 任务行为不变。
 
@@ -1832,7 +1832,7 @@ ISSUE-0071 为部分用量合计补逐字段覆盖说明，ISSUE-0072 为无回�
 
 ### 11.14 完成标准
 
-- 第 1 节 1.5 行的完成标准：在 git 项目和非 git 项目各完成一个改代码的任务，并分别合并（非 git 为保留结果）和回滚。
+- 第 1 节 1.5 行的完成标准：在 git 项目和非 git 项目各完成一个改代码的任务，并分别合并（非 git 为应用结果）和回滚。
 - 新任务默认在隔离工作副本中运行，用户项目文件只在明确合并 / 应用结果 / 回滚时被写入；git 允许 G1 必要仓库元数据例外；项目目录有未提交改动时合并被拦下，非 git 原目录偏离准备基线时应用被拦下。
 - “改动”面板文件列表、单文件 diff、还原文件、合并 / 丢弃 / 回滚、冲突处理可用；“详细 → 输出”显示实际改动。
 - 权限规则与“总是允许”可用，ISSUE-0006 关闭；“工作区内自动 / 全自动”在隔离任务中可用，始终禁止清单生效。

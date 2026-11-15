@@ -1,6 +1,7 @@
 // AI Console 共享协议：Gateway 与所有客户端（浏览器、以后的桌面软件和手机应用）共用的类型与校验。
 // 规则见 docs/plan-phase1.md 第 2 节：只通过 /api/v1 的 REST + WebSocket 对接；类型只在这里定义一次。
 import { z } from 'zod';
+export * from './workspaces';
 
 export const PROTOCOL_VERSION = 1;
 export const API_BASE = '/api/v1';

@@ -14,6 +14,7 @@ import type { Db } from './db';
 import type { EventStore } from './events';
 import type { GroupService, ProjectService } from './projects';
 import type { TaskService } from './tasks';
+import type { WorkspaceManager } from './workspaces';
 
 export interface Services {
   db: Db;
@@ -33,6 +34,7 @@ export interface Services {
   projects: ProjectService;
   groups: GroupService;
   tasks: TaskService;
+  workspaces: WorkspaceManager;
   /** 实际监听的端口 */
   port(): number;
   machine: { id: string; name: string; os: string };

@@ -27,6 +27,8 @@ import { IndependentDiscovery } from './independent/discovery';
 import { IndependentTaskRuntime } from './independent/task-runtime';
 import type { readMetadataJson } from './independent/metadata-http';
 import { TaskService } from './tasks';
+import { Git } from './git';
+import { WorkspaceManager } from './workspaces';
 import { newId } from './util';
 
 const delay = (ms: number) => new Promise<void>((r) => { const t = setTimeout(r, ms); t.unref?.(); });
@@ -186,6 +188,9 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
     instanceId,
   });
   const events = new EventStore(db, new EventBus());
+  const git = await Git.discover();
+  const workspaces = new WorkspaceManager(db, git, dataDir);
+  log(git.version ?? '未找到 git，新任务的隔离工作副本暂不可用。');
   const agentLog = agentLogger(dataDir, log);
   const processes = new ProcessRegistry(db, log);
   const agents = new AgentRegistry();
@@ -232,7 +237,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   const groups = new GroupService(db, tasks);
 
   const services: Services = {
-    db, attachments, independent, independentDiscovery, independentRuntime, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks,
+    db, attachments, independent, independentDiscovery, independentRuntime, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks, workspaces,
     port: () => port,
     machine: { id: machineId, name: hostname(), os: process.platform === 'win32' ? 'windows' : process.platform },
     version: VERSION,

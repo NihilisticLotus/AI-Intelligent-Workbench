@@ -2,7 +2,8 @@
 // 走和真实 Agent 一样的 AcpConnection（spawn、NDJSON、stderr、超时、进程树清理）。
 // 剧本经环境变量 AIC_FAKE_SCENARIO=<剧本 JSON 路径> 传入；收到的请求逐行记进 AIC_FAKE_LOG，供测试断言。
 import * as acp from '@agentclientprotocol/sdk/unstable';
-import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { Readable, Writable } from 'node:stream';
 
@@ -72,6 +73,13 @@ async function runSteps(sessionId, steps, client) {
     if (s.update) await update(sessionId, s.update);
     else if (s.notify) await client.notify(s.notify.method, s.notify.params);
     else if (s.sleep) await sleep(s.sleep);
+    else if (s.waitFile) {
+      // 离线夹具握手：等测试确认观察完状态后再推进，不依赖两个进程的定时器竞争。
+      if (path.basename(s.waitFile) !== s.waitFile) throw new Error('夹具信号必须是同目录文件名');
+      const signal = path.join(path.dirname(process.env.AIC_FAKE_SCENARIO), s.waitFile);
+      const deadline = Date.now() + 5000;
+      while (!existsSync(signal)) { if (Date.now() > deadline) throw new Error('夹具等待测试信号超时'); await sleep(10); }
+    }
     else if (s.crash !== undefined) { log({ event: 'crash' }); process.exit(s.crash); }
     else if (s.noise) process.stdout.write(`${s.noise}\n`);
     else if (s.stderr) process.stderr.write(`${s.stderr}\n`);

@@ -1,4 +1,4 @@
-import type { IndependentContextReport } from '@aic/protocol';
+import type { EventEnvelope, IndependentContextReport } from '@aic/protocol';
 import type { SessionCfg } from '../state/core';
 import { formatTokens } from './tokens';
 
@@ -16,4 +16,11 @@ export function contextValue(usage: SessionCfg['usage'], estimate?: IndependentC
 export function contextSummary(value: ReturnType<typeof contextValue>, agent: string, model: string | null) {
   const amount = value.percent !== null ? `${value.percent}%` : value.used !== null ? formatTokens(value.used) : '未报告';
   return `${amount}${value.estimated ? '（估算）' : ''} · ${agent}${model ? ' · ' + model : ''}`;
+}
+
+/** 某类事件最近一条的序号；从末尾往前找，不复制整段日志。 */
+export function lastSeq(log: readonly EventEnvelope[] | undefined, type: EventEnvelope['type']): number | undefined {
+  if (!log) return undefined;
+  for (let i = log.length - 1; i >= 0; i--) if (log[i]!.type === type) return log[i]!.seq;
+  return undefined;
 }

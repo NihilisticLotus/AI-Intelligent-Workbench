@@ -66,6 +66,8 @@ export interface TaskServiceOptions {
   idleTimeoutMs?: number;
   noResponseNoticeMs?: number;
   noResponseCancelMs?: number;
+  /** 有工具正在执行时的无回应上限（默认 60 分钟，不小于普通上限）；Agent 卡死在工具里也要能自动停下（ISSUE-0074）。 */
+  noResponseToolCancelMs?: number;
   log?: (msg: string) => void;
 }
 
@@ -99,6 +101,7 @@ export class TaskService {
   private activeTools = new Map<string, { sessionId: string; ids: Set<string> }>();
   private noResponseNoticeMs: number;
   private noResponseCancelMs: number;
+  private noResponseToolCancelMs: number;
   attachments: import('./attachments').AttachmentService | null = null;
   private readonly approvalTimeoutMs: number;
   private readonly idleTimeoutMs: number;
@@ -112,6 +115,7 @@ export class TaskService {
   constructor(private db: Db, private events: EventStore, private agents: AgentRegistry, opts: TaskServiceOptions = {}) {
     this.noResponseNoticeMs = opts.noResponseNoticeMs ?? 60_000;
     this.noResponseCancelMs = opts.noResponseCancelMs ?? 600_000;
+    this.noResponseToolCancelMs = Math.max(this.noResponseCancelMs, opts.noResponseToolCancelMs ?? 3_600_000);
     this.approvalTimeoutMs = opts.approvalTimeoutMs ?? 30 * 60_000;
     this.idleTimeoutMs = opts.idleTimeoutMs ?? 30 * 60_000;
     this.log = opts.log ?? ((m) => console.log(m));
@@ -659,14 +663,18 @@ export class TaskService {
       const noticeId = newId('idle');
       const timeout = new Promise<never>((_, reject) => {
         watchdog = setInterval(() => {
-          // 工具本身的时限和用户取消仍生效；不能把静默构建当成模型断联。
-          if (this.activeTools.get(taskId)?.ids.size || [...this.pending.values()].some((p) => p.approval.taskId === taskId)) { this.activity.set(taskId, now()); return; }
+          // 等待审批不计时。工具执行中不提醒、改用更长的上限：静默构建不算断联，
+          // 但工具结束事件永远不来（Agent 卡死）时仍要能停下，不能无限等（ISSUE-0074）。
+          if ([...this.pending.values()].some((p) => p.approval.taskId === taskId)) { this.activity.set(taskId, now()); return; }
+          const toolsOpen = !!this.activeTools.get(taskId)?.ids.size;
+          const limit = toolsOpen ? this.noResponseToolCancelMs : this.noResponseCancelMs;
           const idle = now() - (this.activity.get(taskId) ?? now());
-          if (idle >= this.noResponseCancelMs) {
+          if (idle >= limit) {
             noResponse = true;
-            reject(new AppError(504, { code: ErrorCode.AgentNoResponse, message: 'Agent 10 分钟没有回应，这一轮已停止', hint: '可以重新发送，或换个模型 / 账号', actions: [{ label: '重试', action: 'task.retry' }, { label: '换模型', action: 'task.switch_model' }] }));
+            const minutes = Math.max(1, Math.round(limit / 60_000));
+            reject(new AppError(504, { code: ErrorCode.AgentNoResponse, message: toolsOpen ? `工具执行 ${minutes} 分钟没有任何回应，这一轮已停止` : `Agent ${minutes} 分钟没有回应，这一轮已停止`, hint: '可以重新发送，或换个模型 / 账号', actions: [{ label: '重试', action: 'task.retry' }, { label: '换模型', action: 'task.switch_model' }] }));
             abort.abort();
-          } else if (idle >= this.noResponseNoticeMs && now() - lastNotice >= 120_000) {
+          } else if (!toolsOpen && idle >= this.noResponseNoticeMs && now() - lastNotice >= 120_000) {
             lastNotice = now();
             this.events.append({ type: 'session.notice', taskId, sessionId: rt!.sessionId, data: { id: noticeId, level: 'warn', text: 'Agent 已经 ' + Math.max(1, Math.floor(idle / 60_000)) + ' 分钟没有回应，可能在重试或网络不稳定。可以继续等，也可以停止这一轮。' } });
           }

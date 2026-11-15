@@ -1,6 +1,6 @@
 // 起始页规则只依赖已报告的数据，不调用模型做推荐，也不自动派发。
 import { visionOf, type AgentInfo, type AgentKind, type IndependentTaskOptions, type Task } from '@aic/protocol';
-import { isEnabled } from './agents';
+import { isEnabled, isRealAgent } from './agents';
 import { profileInfo } from './picker';
 
 export function greeting(hour: number): string {
@@ -11,7 +11,9 @@ export function recommendAgent(prompt: string, hasImage: boolean, projectId: str
   if (!prompt.trim()) return null;
   const enabled = agents.filter(isEnabled);
   if (hasImage) {
-    for (const entry of enabled) {
+    // 只推荐已就绪的 Agent，真实 Agent 优先；演示 Agent 不调用真实模型，只在没有其他候选时才推荐（ISSUE-0075）。
+    const candidates = enabled.filter((a) => a.status === 'ready').sort((a, b) => Number(isRealAgent(b.kind)) - Number(isRealAgent(a.kind)));
+    for (const entry of candidates) {
       const info = profileInfo(entry, null)!;
       const model = info.models.find((m) => visionOf(info, m.id) === true);
       if (model) return { agent: info.kind, model: model.id, label: `${info.displayName} · ${model.name}`, reason: '已添加图片，这个模型明确支持看图。' };

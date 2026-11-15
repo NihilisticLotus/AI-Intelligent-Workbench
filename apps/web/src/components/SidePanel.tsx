@@ -10,6 +10,7 @@ import { useStore } from '../state/store';
 import { detailFocus } from '../state/details';
 import { contextValue, contextSummary, type DetailSection } from '../lib/details';
 import { formatTokens } from '../lib/tokens';
+import { lastSeq } from '../lib/details';
 import { EnvironmentDetails } from './details/environment';
 import { PlanDetails } from './details/plan';
 import { ContextDetails } from './details/context';
@@ -48,9 +49,10 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
   const project = useApp((s) => s.projects.find((p) => p.id === task.projectId));
   const agent = useApp((s) => s.agents.find((a) => a.kind === task.agent));
   const conn = useApp((s) => s.conn);
-  const usageRevision = useApp((s) => s.logs[task.id]?.filter((e) => e.type === 'turn.usage').at(-1)?.seq);
-  const fileRevision = useApp((s) => s.logs[task.id]?.filter((e) => e.type === 'tool.end').at(-1)?.seq);
-  const independentRevision = useApp((s) => s.logs[task.id]?.filter((e) => e.type === 'independent.task_changed').at(-1)?.seq);
+  // 每次收到事件都会重算选择器；从末尾找，避免长任务里反复复制整段历史（ISSUE-0076）。
+  const usageRevision = useApp((s) => lastSeq(s.logs[task.id], 'turn.usage'));
+  const fileRevision = useApp((s) => lastSeq(s.logs[task.id], 'tool.end'));
+  const independentRevision = useApp((s) => lastSeq(s.logs[task.id], 'independent.task_changed'));
   const agentName = useAgentName(task.agent);
   const modelName = agent?.models.find((m) => m.id === config.model)?.name ?? config.models?.find((m) => m.id === config.model)?.name ?? config.model;
   const profileId = config.profileId ?? task.profileId ?? null;

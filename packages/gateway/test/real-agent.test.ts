@@ -200,6 +200,24 @@ describe('真实形态的 Agent（假 ACP 进程）', () => {
     expect(ws.events().some((e) => e.taskId === task.id && e.type === 'error' && e.data.error.code === ErrorCode.AgentNoResponse)).toBe(true);
     await vi.waitFor(() => expect(sc.log().some((entry) => entry.method === 'session/cancel')).toBe(true));
   });
+  it('Agent 卡在工具里一直不发结束事件时，按工具上限自动停止，不无限等待（ISSUE-0074）', async () => {
+    const sc = scenario({ config: CONFIG, turns: [{ steps: [
+      { update: { sessionUpdate: 'tool_call', toolCallId: 'stuck', title: '卡死的工具', kind: 'execute', status: 'in_progress' } },
+      { waitCancel: true },
+    ] }] });
+    const { projectId, gw, ws } = await setup(sc, { noResponseNoticeMs: 100, noResponseCancelMs: 300, noResponseToolCancelMs: 900 });
+    const task = await gw.gw.services.tasks.create({ projectId, agent: 'claude', prompt: '卡死工具回归', permission: 'ask' });
+    await ws.waitEvent((e) => e.taskId === task.id && e.type === 'tool.start', 5000);
+    // 超过普通上限但没到工具上限：仍在运行，也不提醒
+    await new Promise((resolve) => setTimeout(resolve, 500));
+    expect(gw.gw.services.tasks.get(task.id).status).toBe('running');
+    expect(ws.events().some((e) => e.taskId === task.id && (e.type === 'error' || e.type === 'session.notice' && !!e.data.id))).toBe(false);
+    await ws.waitEvent(statusIs(task.id, 'paused'), 5000);
+    const error = ws.events().find((e) => e.taskId === task.id && e.type === 'error');
+    expect(error?.data).toMatchObject({ error: { code: ErrorCode.AgentNoResponse } });
+    expect(error?.type === 'error' && error.data.error.message).toContain('工具执行');
+    await vi.waitFor(() => expect(sc.log().some((entry) => entry.method === 'session/cancel')).toBe(true));
+  });
   it('静默工具仍可手动停止，下一回合不会继承工具的计时豁免', async () => {
     const sc = scenario({ config: CONFIG, turns: [
       { steps: [{ update: { sessionUpdate: 'tool_call', toolCallId: 'stop-me', title: '等待停止的工具', kind: 'execute', status: 'in_progress' } }, { waitCancel: true }] },

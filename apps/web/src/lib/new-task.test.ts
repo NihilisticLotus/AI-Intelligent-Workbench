@@ -32,6 +32,12 @@ describe('起始页建议与模板', () => {
     expect(recommendAgent('处理图片', true, 'p', [agent({ enabled: false }), agent({ kind: 'claude', models: [{ id: 'unknown', name: '未知', contextWindow: null }] }), agent({ kind: 'codex' })], [task()])).toMatchObject({ agent: 'codex', model: 'image', reason: expect.stringContaining('图片') });
     expect(recommendAgent('图片', true, 'p', [agent({ models: [{ id: 'unknown', name: '未知', contextWindow: null }] })], [task()])).toBeNull();
   });
+  it('图片推荐不选未就绪的 Agent，真实 Agent 优先于排在前面的演示 Agent（ISSUE-0075）', () => {
+    const demo = agent(), real = agent({ kind: 'claude', displayName: 'Claude Code' });
+    expect(recommendAgent('看图', true, 'p', [demo, real], [])).toMatchObject({ agent: 'claude', model: 'image' });
+    expect(recommendAgent('看图', true, 'p', [demo, { ...real, status: 'needs_login' }], [])).toMatchObject({ agent: 'fake' });
+    expect(recommendAgent('看图', true, 'p', [{ ...demo, status: 'disabled' }, { ...real, status: 'needs_login' }], [])).toBeNull();
+  });
   it('图片推荐遵循默认账号模型，不把第三方原生配置替换为旧账号缓存', () => {
     const info = agent({ profiles: [{ id: 'default', name: '默认', kind: 'subscription', isDefault: true, loggedIn: true, models: [{ id: 'profile-image', name: '账号看图', contextWindow: null, vision: true }] }] });
     expect(recommendAgent('图片', true, 'p', [info], [])?.model).toBe('profile-image');

@@ -86,3 +86,6 @@
 | [ISSUE-0071](ISSUE-0071-partial-usage-coverage.md) | 部分用量合计缺少完整性提示 | fixed | bug | 2026-11-14 | 2026-11-14 |
 | [ISSUE-0072](ISSUE-0072-missing-reply-usage.md) | 无回复的失败或取消轮次漏掉用量 | fixed | bug | 2026-11-14 | 2026-11-14 |
 | [ISSUE-0073](ISSUE-0073-file-host-validation-timeout.md) | P2 收尾文件宿主中断与超时 | fixed | 验收未通过 | 2026-11-14 | 2026-11-14 |
+| [ISSUE-0074](ISSUE-0074-watchdog-stuck-tool.md) | Agent 卡在工具里不发结束事件时，无回应看门狗永远不会停下 | fixed | bug | 2026-11-15 | 2026-11-15 |
+| [ISSUE-0075](ISSUE-0075-image-recommend-demo.md) | 起始页带图片时推荐演示 Agent 或未就绪的 Agent | fixed | bug | 2026-11-15 | 2026-11-15 |
+| [ISSUE-0076](ISSUE-0076-sidepanel-log-scan.md) | 详细面板每收到一个事件都把整段任务事件复制三遍 | fixed | 技术债 | 2026-11-15 | 2026-11-15 |

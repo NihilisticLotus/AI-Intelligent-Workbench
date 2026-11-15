@@ -93,6 +93,7 @@ export interface GatewayOptions {
   idleTimeoutMs?: number;
   noResponseNoticeMs?: number;
   noResponseCancelMs?: number;
+  noResponseToolCancelMs?: number;
   /** ACP 各阶段超时（测试里改小） */
   agentTimeouts?: Partial<AcpTimeouts>;
   log?: (msg: string) => void;
@@ -211,6 +212,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
     ...(opts.idleTimeoutMs !== undefined ? { idleTimeoutMs: opts.idleTimeoutMs } : {}),
     ...(opts.noResponseNoticeMs !== undefined ? { noResponseNoticeMs: opts.noResponseNoticeMs } : {}),
     ...(opts.noResponseCancelMs !== undefined ? { noResponseCancelMs: opts.noResponseCancelMs } : {}),
+    ...(opts.noResponseToolCancelMs !== undefined ? { noResponseToolCancelMs: opts.noResponseToolCancelMs } : {}),
     log,
   });
   const attachments = new AttachmentService(db, dataDir);

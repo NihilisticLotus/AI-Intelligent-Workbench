@@ -47,22 +47,15 @@
 | [ISSUE-0041](ISSUE-0041-independent-config-event.md) | 独立任务换模型后输入框沿用旧会话配置 | fixed | bug | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0042](ISSUE-0042-bigmodel-responses-tool-failure.md) | 智谱 Responses 真实工具补验遇到空参数与协议失败 | fixed | 验收未通过 | 2026-11-08 | 2026-11-10 |
 | [ISSUE-0043](ISSUE-0043-terminal-fragment-progress.md) | 任务已失败但未确认片段仍显示正在处理 | fixed | bug | 2026-11-08 | 2026-11-08 |
-
 | [ISSUE-0044](ISSUE-0044-same-binding-continuation.md) | 同模型重新保存配置导致私有续传失效 | fixed | bug | 2026-11-08 | 2026-11-08 |
-
 | [ISSUE-0045](ISSUE-0045-gateway-down-notice-visibility.md) | 服务停止提示不明显且占位仍写重新连接 | fixed | bug | 2026-11-08 | 2026-11-08 |
 
 
 | [ISSUE-0046](ISSUE-0046-switch-model-failure-marker.md) | 会话内切换被拒绝后缺少失败模型标记 | fixed | bug | 2026-11-08 | 2026-11-08 |
-
 | [ISSUE-0047](ISSUE-0047-native-default-model-picker.md) | 新任务选择第三方时无法保留软件默认模型 | fixed | bug | 2026-11-08 | 2026-11-08 |
-
 | [ISSUE-0048](ISSUE-0048-codex-proxy-text-error.md) | Codex 代理模型拒绝正文在自动压缩后仍显示待验收 | fixed | bug | 2026-11-08 | 2026-11-08 |
-
 | [ISSUE-0049](ISSUE-0049-terminal-error-redaction.md) | Gateway 兜底终端错误输出绕过脱敏 | fixed | bug | 2026-11-08 | 2026-11-08 |
-
 | [ISSUE-0050](ISSUE-0050-discovery-parse-failure-diagnostics.md) | 目录解析失败缺少固定校验分类 | fixed | 技术债 | 2026-11-08 | 2026-11-08 |
-
 | [ISSUE-0051](ISSUE-0051-model-pagination-null-cursor.md) | Messages 模型分页的空游标被当作列表结束 | fixed | bug | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0052](ISSUE-0052-child-pipe-epipe-crash.md) | 子进程被外部结束时，写管道的 EPIPE 会让整个 Gateway 退出 | fixed | bug | 2026-11-09 | 2026-11-09 |
 | [ISSUE-0053](ISSUE-0053-fake-ip-proxy-blocks-metadata.md) | 本机代理把供应商域名解析到 198.18.x，元数据读取被网络规则拒绝 | fixed | 外部依赖 | 2026-11-09 | 2026-11-09 |
@@ -98,14 +91,13 @@
 | [ISSUE-0083](ISSUE-0083-copy-snapshot-original-bytes.md) | 影子快照换行规范化改变回滚原文 | fixed | bug | 2026-11-15 | 2026-11-15 |
 | [ISSUE-0084](ISSUE-0084-new-task-isolation-footer.md) | 新任务底部仍提示直接修改原项目 | fixed | bug | 2026-11-15 | 2026-11-15 |
 | [ISSUE-0085](ISSUE-0085-permission-canonical-path.md) | 权限判定混用 Windows 长短路径 | fixed | bug | 2026-11-15 | 2026-11-15 |
-
 | [ISSUE-0086](ISSUE-0086-permission-command-options.md) | 权限命令选项与复杂通配需要完整判定 | fixed | bug | 2026-11-15 | 2026-11-15 |
 | [ISSUE-0087](ISSUE-0087-rule-keyboard-focus.md) | 新权限规则调序后丢失键盘焦点 | fixed | bug | 2026-11-15 | 2026-11-15 |
-
 | [ISSUE-0088](ISSUE-0088-native-auto-permission-bypass.md) | 原生自动权限模式会跳过工作台规则入口 | deferred | 设计冲突 | 2026-11-15 | |
 | [ISSUE-0089](ISSUE-0089-windows-test-host-timeouts.md) | Windows 文件宿主全量回归出现超时 | fixed | 验收未通过 | 2026-11-15 | 2026-11-15 |
 | [ISSUE-0090](ISSUE-0090-board-pointer-drag.md) | 内嵌浏览器拖动看板卡片未更新队列 | fixed | 验收未通过 | 2026-11-15 | 2026-11-15 |
-| [ISSUE-0091](ISSUE-0091-codebuddy-workspace-real-quota.md) | CodeBuddy 自带模型无额度，核对自定义模型补验 | investigating | 外部依赖 | 2026-11-15 | |
+| [ISSUE-0091](ISSUE-0091-codebuddy-workspace-real-quota.md) | CodeBuddy 自带模型无额度，核对自定义模型补验 | deferred | 外部依赖 | 2026-11-15 | |
 | [ISSUE-0092](ISSUE-0092-board-independent-failure.md) | 看板遗漏独立 Agent 请求失败原因 | fixed | bug | 2026-11-15 | 2026-11-15 |
-
 | [ISSUE-0093](ISSUE-0093-explicit-model-fallback.md) | 显式模型失效后自动回退并发送消息 | fixed | bug | 2026-11-15 | 2026-11-15 |
+| [ISSUE-0094](ISSUE-0094-codebuddy-copy-acceptance-timeout.md) | CodeBuddy 非 git 补验等待审批超过观察上限 | deferred | 验收未通过 | 2026-11-15 | |
+| [ISSUE-0095](ISSUE-0095-independent-copy-output-limit.md) | 智谱非 git 补验写入成功但最终回复触及预算 | open | 验收未通过 | 2026-11-15 | |

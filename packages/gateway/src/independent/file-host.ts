@@ -12,18 +12,22 @@ export class IndependentFileError extends Error {
 }
 export class IndependentFileHost {
   readonly workspace: ReturnType<typeof independentWorkspace>;
-  constructor(workspace: string, private dataDir: string, private executor: IndependentCommandExecutor) { this.workspace = independentWorkspace(workspace); }
+  constructor(workspace: string, private dataDir: string, private executor: IndependentCommandExecutor, private managed = false) { this.workspace = independentWorkspace(workspace, managed ? dataDir : undefined); }
+  verifyWorkspace() {
+    const fresh = independentWorkspace(this.workspace.root, this.managed ? this.dataDir : undefined);
+    if (fresh.fingerprint !== this.workspace.fingerprint) throw new IndependentFileError('conflict');
+    return fresh;
+  }
   relative(input: string) {
     const relative = workspaceRelative(input); const target = path.resolve(this.workspace.root, relative).toLowerCase();
     const privateRoot = realpathSync.native(this.dataDir).toLowerCase();
-    if (target === privateRoot || target.startsWith(privateRoot + path.sep)) throw new IndependentFileError('forbidden');
+    if (!this.managed && (target === privateRoot || target.startsWith(privateRoot + path.sep))) throw new IndependentFileError('forbidden');
     return relative;
   }
 
   private async request(input: Record<string, unknown>, signal?: AbortSignal, onStarted?: (identity: { pid: number; startedAt: number }) => void) {
     if (signal?.aborted) throw new IndependentFileError('cancelled');
-    const fresh = independentWorkspace(this.workspace.root);
-    if (fresh.fingerprint !== this.workspace.fingerprint) throw new IndependentFileError('conflict');
+    this.verifyWorkspace();
     const root = path.resolve(this.dataDir, 'independent/file-requests'); mkdirSync(root, { recursive: true });
     const directory = mkdtempSync(path.join(root, 'run-')); const file = path.join(directory, 'request.json');
     const host = fileURLToPath(new URL('./file-host.ps1', import.meta.url));
@@ -31,7 +35,7 @@ export class IndependentFileHost {
     const source = fileURLToPath(new URL('./file-guard.cs', import.meta.url));
     const bootstrap = `& ([scriptblock]::Create([IO.File]::ReadAllText(${quote(host)},[Text.Encoding]::UTF8))) ${quote(file)} ${quote(source)}`;
     try {
-      writeFileSync(file, JSON.stringify({ ...input, root: this.workspace.root, protectedRoot: realpathSync.native(this.dataDir) }), { flag: 'wx', mode: 0o600 });
+      writeFileSync(file, JSON.stringify({ ...input, root: this.workspace.root, managed: this.managed, protectedRoot: realpathSync.native(this.dataDir) }), { flag: 'wx', mode: 0o600 });
       const systemRoot = process.env.SystemRoot ?? process.env.WINDIR;
       if (!systemRoot) throw new IndependentFileError('io_error');
       const result = await this.executor.run({ program: path.join(systemRoot, 'System32/WindowsPowerShell/v1.0/powershell.exe'),

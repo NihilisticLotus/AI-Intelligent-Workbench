@@ -180,7 +180,7 @@ export class IndependentTaskRuntime {
     if (!detail || record?.taskId !== taskId) throw Errors.notFound('这项审批已结束或不属于该任务');
     return detail;
   }
-  async open(taskId: string, sessionId: string, workspace: string, initialPermission: PermissionLevel, host: SessionHost): Promise<AgentConnection> {
+  async open(taskId: string, sessionId: string, workspace: string, initialPermission: PermissionLevel, host: SessionHost, managedWorkspace = false): Promise<AgentConnection> {
     await this.orphanCleanup; this.assertReady(taskId);
     const state = this.state(taskId), options = state.options;
     const { key } = await this.catalog.credentials(taskId); const secrets = key ? [key] : [];
@@ -192,7 +192,7 @@ export class IndependentTaskRuntime {
         if (!this.db.get('SELECT pid FROM agent_processes WHERE pid=? AND session_id=?', p.pid, sessionId)) throw Errors.internal('命令宿主登记失败');
       }, exited: (pid) => this.processes.exited(pid),
     });
-    const files = new IndependentFiles(new IndependentFileHost(workspace, this.dataDir, executor));
+    const files = new IndependentFiles(new IndependentFileHost(workspace, this.dataDir, executor, managedWorkspace));
     const fileTool = new IndependentFileTool(files, this.journal, new IndependentFileReceipts(this.db));
     const basis = JSON.stringify({ taskId, sessionId, revision: state.revision, workspace });
     let clock: IndependentApprovalClock | undefined;

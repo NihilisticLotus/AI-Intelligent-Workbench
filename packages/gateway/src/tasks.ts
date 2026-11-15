@@ -15,6 +15,10 @@ import { AppError, AbortError, Errors, newId, now } from './util';
 import type { IndependentTaskRuntime } from './independent/task-runtime';
 import type { IndependentTaskOptions } from '@aic/protocol';
 import { emptyUsage, recordTurnUsage } from './usage';
+import { WorkspaceManager, WorkspaceError } from './workspaces';
+import { GitError } from './git';
+import { validateProjectDir } from './fsbrowse';
+import type { TaskWorkspace } from '@aic/protocol';
 
 type TaskRow = {
   id: string; project_id: string; group_id: string | null; title: string; prompt: string;
@@ -22,6 +26,7 @@ type TaskRow = {
   auto_allow_low_risk: number; auto_merge_on_pass: number;
   last_activity_at: number; created_at: number; updated_at: number;
   profile_id: string | null;
+  workspace_kind: TaskWorkspace['kind'] | null; workspace_path: string | null; branch: string | null; base_ref: string | null;
 };
 
 const toTask = (r: TaskRow): Task => ({
@@ -110,6 +115,8 @@ export class TaskService {
   /** 由 Gateway 组装时注入（1.2）；为空时退回 1.1 的行为 */
   agentSvc: AgentService | null = null;
   independentRuntime: IndependentTaskRuntime | null = null;
+  workspaces: WorkspaceManager | null = null;
+  private projectTails = new Map<string, Promise<void>>();
   private configuring = new Set<string>();
 
   constructor(private db: Db, private events: EventStore, private agents: AgentRegistry, opts: TaskServiceOptions = {}) {
@@ -149,8 +156,99 @@ export class TaskService {
     return r;
   }
   get(id: string): Task {
-    const task = toTask(this.getRow(id));
+    const row = this.getRow(id);
+    const task = toTask(row);
+    const record = this.workspaces?.get(id);
+    const prep = this.db.get<{state: 'preparing' | 'confirmation_required' | 'failed'; bytes: number | null; error: string | null}>('SELECT * FROM workspace_preparations WHERE task_id=?', id);
+    task.workspace = { kind: row.workspace_kind ?? 'inplace', path: record?.path ?? row.workspace_path,
+      branch: record?.branch ?? row.branch, baseRef: record?.baseRef ?? row.base_ref, baseBranch: record?.baseBranch ?? null,
+      ...(prep ? { state: prep.state, ...(prep.bytes !== null ? { copyBytes: prep.bytes } : {}), ...(prep.error ? { error: prep.error } : {}) } : record ? { state: record.state === 'ready' ? 'ready' : 'failed' } : {}),
+      ...(record ? { largeFiles: record.largeFiles.map(f => f.path) } : {}),
+    };
     return task.agent === 'independent' && this.independentRuntime ? { ...task, independent: this.independentRuntime.reference(id) } : task;
+  }
+
+  private syncWorkspace(id: string) {
+    const record = this.workspaces?.get(id);
+    if (record) this.db.run('UPDATE tasks SET workspace_path=?,branch=?,base_ref=?,snapshot_before=?,snapshot_after=?,workspace_large_files=? WHERE id=?', record.path, record.branch, record.baseRef, record.snapshotBefore, record.snapshotAfter, JSON.stringify(record.largeFiles), id);
+    this.emitUpdated(id);
+  }
+
+  /** 准备失败保留任务与原因，不降级到项目原目录；大复制只在明确确认后继续。 */
+  private async prepareNewWorkspace(id: string, deferPrompt: boolean, confirmed = false): Promise<boolean> {
+    if (!this.workspaces) return true;
+    this.configuring.add(id);
+    try {
+      const row = this.getRow(id);
+      const project = this.db.get<{path: string; is_git: number; ignore_globs: string | null; carry_globs: string | null}>('SELECT * FROM projects WHERE id=?', row.project_id)!;
+      // 先标记新任务，检查目录失败时也不能被误认为旧 inplace。
+      const kind = row.workspace_kind ?? (project.is_git ? 'worktree' : 'copy');
+      this.db.run('UPDATE tasks SET workspace_kind=? WHERE id=?', kind, id);
+      this.db.run("INSERT INTO workspace_preparations(task_id,state,defer_prompt) VALUES (?,'preparing',?) ON CONFLICT(task_id) DO UPDATE SET state='preparing',error=NULL", id, deferPrompt ? 1 : 0);
+      const actual = validateProjectDir(project.path);
+      const selected = actual.isGit ? 'worktree' : 'copy';
+      // 已有 git 项目丢失 .git 时必须报错，不能悄悄当非 git 处理。
+      if (project.is_git && !actual.isGit) throw new WorkspaceError('workspace.git', '项目目录不是有效的 git 仓库。');
+      this.db.run('UPDATE tasks SET workspace_kind=? WHERE id=?', selected, id);
+      const request = { taskId: id, projectId: row.project_id, title: row.title, projectPath: project.path,
+        ignoreGlobs: JSON.parse(project.ignore_globs ?? '[]') as string[], carryGlobs: JSON.parse(project.carry_globs ?? '[]') as string[], confirmLargeCopy: confirmed };
+      if (selected === 'worktree') await this.workspaces.createWorktree(request);
+      else await this.workspaces.createCopy(request);
+      this.db.run('DELETE FROM workspace_preparations WHERE task_id=?', id);
+      this.syncWorkspace(id);
+      return true;
+    } catch (error) {
+      const confirmation = error instanceof WorkspaceError && error.code === 'workspace.copy_confirmation';
+      const message = error instanceof WorkspaceError || error instanceof GitError ? error.message : error instanceof AppError ? error.body.message : '工作副本准备失败，请检查项目文件夹和磁盘空间。';
+      this.db.run('UPDATE workspace_preparations SET state=?,bytes=?,error=? WHERE task_id=?', confirmation ? 'confirmation_required' : 'failed', confirmation ? error.bytes ?? null : null, message, id);
+      this.setStatus(id, confirmation ? 'draft' : 'failed');
+      if (!confirmation) this.emitError(id, null, { code: ErrorCode.AgentFailed, message, actions: [] });
+      return false;
+    } finally { this.configuring.delete(id); }
+  }
+
+  async confirmWorkspace(id: string): Promise<Task> {
+    const prep = this.db.get<{state: string; defer_prompt: number}>('SELECT * FROM workspace_preparations WHERE task_id=?', id);
+    if (!prep || prep.state !== 'confirmation_required' || this.isBusy(id)) throw Errors.invalidState('这个任务没有等待复制确认');
+    if (await this.prepareNewWorkspace(id, !!prep.defer_prompt, true)) {
+      if (prep.defer_prompt) this.setStatus(id, 'draft');
+      else this.startTurn(id, this.getRow(id).prompt);
+    }
+    return this.get(id);
+  }
+
+  private async runtimePath(id: string): Promise<string> {
+    const row = this.getRow(id);
+    if (row.workspace_kind === 'worktree' || row.workspace_kind === 'copy') {
+      if (!this.workspaces) throw Errors.invalidState('工作副本管理器不可用');
+      return this.workspaces.runtimePath(id);
+    }
+    const project = this.db.get<{path: string}>('SELECT path FROM projects WHERE id=?', row.project_id);
+    if (!project) throw Errors.notFound('找不到任务的项目');
+    return project.path;
+  }
+
+  private async acquireProject(id: string, signal: AbortSignal): Promise<() => void> {
+    const row = this.getRow(id);
+    if (row.workspace_kind !== 'copy' && row.workspace_kind !== 'shadow') return () => {};
+    const previous = this.projectTails.get(row.project_id);
+    let release!: () => void;
+    const current = new Promise<void>(resolve => { release = resolve; });
+    const tail = (previous ?? Promise.resolve()).then(() => current);
+    this.projectTails.set(row.project_id, tail);
+    const done = () => { release(); if (this.projectTails.get(row.project_id) === tail) void tail.then(() => { if (this.projectTails.get(row.project_id) === tail) this.projectTails.delete(row.project_id); }); };
+    if (previous) {
+      this.setStatus(id, 'queued');
+      this.events.append({ type: 'session.notice', taskId: id, sessionId: null, data: { level: 'info', text: '等待同项目的任务结束' } });
+      let cancelled!: () => void;
+      const aborted = new Promise<never>((_, reject) => { cancelled = () => reject(new AbortError()); signal.addEventListener('abort', cancelled, { once: true }); if (signal.aborted) cancelled(); });
+      try { await Promise.race([previous, aborted]); }
+      catch (error) { done(); throw error; }
+      finally { signal.removeEventListener('abort', cancelled); }
+    }
+    if (signal.aborted) { done(); throw new AbortError(); }
+    this.setStatus(id, 'running');
+    return done;
   }
 
   /** 按最近活动倒序；游标分页 */
@@ -273,7 +371,7 @@ export class TaskService {
   /** 真实 Agent 第 1.2 步只开放“只读”和“需审批”（phase-1.md 6.3.4） */
   private checkPermission(a: AgentAdapter, level: PermissionLevel) {
     if (a.permissionLevels && !a.permissionLevels.includes(level)) {
-      throw Errors.levelUnavailable(`${a.displayName} 暂时不能使用这个权限级别`, '“工作区内自动”和“全自动”会在有了独立工作副本后开放；现在可以选“只读”或“需审批”');
+      throw Errors.levelUnavailable(`${a.displayName} 暂时不能使用这个权限级别`, '“工作区内自动”和“全自动”将在权限规则接入后开放；现在可以选“只读”或“需审批”');
     }
   }
 
@@ -293,6 +391,7 @@ export class TaskService {
         this.independentRuntime!.configure(id, body.independent!);
         this.events.append({ type: 'task.created', taskId: id, sessionId: null, data: { task: this.get(id) } });
       });
+      if (!await this.prepareNewWorkspace(id, !!body.deferPrompt)) return this.get(id);
       if (!body.deferPrompt) { this.independentRuntime.assertReady(id); this.startTurn(id, body.prompt); }
       return this.get(id);
     }
@@ -316,6 +415,7 @@ export class TaskService {
     );
     const task = this.get(id);
     this.events.append({ type: 'task.created', taskId: id, sessionId: null, data: { task } });
+    if (!await this.prepareNewWorkspace(id, !!body.deferPrompt)) return this.get(id);
     if (body.deferPrompt) this.setStatus(id, 'draft');
     else this.startTurn(id, body.prompt);
     return this.get(id);
@@ -502,6 +602,7 @@ export class TaskService {
   }
 
   private async ensureRuntime(taskId: string, signal?: AbortSignal): Promise<Runtime> {
+    await this.runtimePath(taskId);
     const existing = this.runtimes.get(taskId);
     if (existing && !existing.conn.isClosed?.()) return existing;
     if (existing) {
@@ -526,7 +627,7 @@ export class TaskService {
       const previous = this.db.get<{ id: string }>('SELECT id FROM sessions WHERE task_id=? AND agent_id=? ORDER BY started_at DESC LIMIT 1', taskId, row.agent);
       const sessionId = previous?.id ?? newId('s');
       if (!previous) this.db.run("INSERT INTO sessions(id,task_id,agent_id,model,agent_session_id,status,started_at) VALUES (?,?,'independent',?,?,'active',?)", sessionId, taskId, row.model, sessionId, now());
-      const conn = await this.independentRuntime.open(taskId, sessionId, project.path, row.permission_level, this.host(taskId, sessionId));
+      const conn = await this.independentRuntime.open(taskId, sessionId, await this.runtimePath(taskId), row.permission_level, this.host(taskId, sessionId), row.workspace_kind === 'worktree' || row.workspace_kind === 'copy');
       if (signal?.aborted) { await conn.close(); throw new AbortError(); }
       this.db.run("UPDATE sessions SET status='active',ended_at=NULL,model=? WHERE id=?", row.model, sessionId);
       this.events.append({ type: 'session.started', taskId, sessionId, data: { agent: row.agent, model: row.model, resumed: !!previous } });
@@ -568,7 +669,7 @@ export class TaskService {
       const sessionId = newId('s');
       const redactor = new StreamRedactor(secrets);
       const conn = await a.spawn({
-        cwd: project?.path ?? process.cwd(), model: row.model, effort: row.effort, permission: row.permission_level,
+        cwd: await this.runtimePath(taskId), model: row.model, effort: row.effort, permission: row.permission_level,
         host: this.host(taskId, sessionId, secrets, redactor), sessionLabel: sessionId,
         ...(spawnEnv ? { env: spawnEnv.env, redact: spawnEnv.redact, profile: spawnEnv.account } : {}),
         ...(resume ? { resume } : {}), ...(signal ? { signal } : {}), ...(launchModel ? { launchModel: true } : {}),
@@ -652,8 +753,22 @@ export class TaskService {
     let usage = emptyUsage(source);
     let watchdog: NodeJS.Timeout | undefined;
     let noResponse = false;
+    let releaseProject: (() => void) | undefined;
+    let snapshotStarted = false;
+    let snapshotFailed = false;
+    const finishSnapshot = async () => {
+      if (watchdog) clearInterval(watchdog);
+      if (!snapshotStarted || !this.workspaces) return;
+      snapshotStarted = false;
+      try { await this.workspaces.snapshot(taskId, '回合结束后'); this.syncWorkspace(taskId); }
+      catch { snapshotFailed = true; throw Errors.internal('回合结束后的快照失败，请检查工作副本；本轮改动尚未完整记录。'); }
+    };
     this.approvalTimedOut.delete(taskId);
     try {
+      releaseProject = await this.acquireProject(taskId, abort.signal);
+      if (this.getRow(taskId).workspace_kind === 'copy' && this.workspaces) {
+        await this.workspaces.snapshot(taskId, '回合开始前'); this.syncWorkspace(taskId); snapshotStarted = true;
+      }
       rt = await this.ensureRuntime(taskId, abort.signal);
       if (abort.signal.aborted) throw new AbortError();
       rt.lastActive = now();
@@ -696,11 +811,16 @@ export class TaskService {
       if (timedOut && r.stopReason !== 'error') {
         this.events.append({ type: 'session.notice', taskId, sessionId: rt.sessionId, data: { level: 'warn', text: '有审批超时没有处理，没有放行；任务已暂停，可以继续发消息' } });
       }
+      await finishSnapshot();
       this.setStatus(taskId, r.stopReason === 'cancelled' || timedOut ? 'paused' : r.stopReason === 'error' ? 'failed' : 'review');
     } catch (e) {
+      try { await finishSnapshot(); } catch (error) { e = error; }
       if (rt?.redactor.active) this.flushRedactor(taskId, rt.sessionId, rt.redactor);
       // 用户点了 [停止]：不管启动阶段抛的是什么（取消、或进程被结束导致的错误），都按暂停处理
-      if (noResponse) {
+      if (snapshotFailed) {
+        this.emitError(taskId, rt?.sessionId ?? null, (e as AppError).body);
+        this.setStatus(taskId, 'failed');
+      } else if (noResponse) {
         this.emitError(taskId, rt?.sessionId ?? null, (e as AppError).body);
         this.setStatus(taskId, 'paused');
       } else if (e instanceof AbortError || abort.signal.aborted) {
@@ -722,6 +842,7 @@ export class TaskService {
       }
     } finally {
       if (watchdog) clearInterval(watchdog);
+      releaseProject?.();
       recordTurnUsage(this.db, this.events, taskId, rt?.sessionId ?? null, messageId, usage);
       this.activity.delete(taskId);
       this.activeTools.delete(taskId);
@@ -758,6 +879,7 @@ export class TaskService {
   async prompt(taskId: string, text: string, attachmentIds: string[] = []): Promise<{ taskId: string; messageId: string }> {
     const row = this.getRow(taskId);
     if (FINAL.includes(row.status)) throw Errors.invalidState('任务已经结束，不能继续发送消息');
+    if (this.db.get('SELECT task_id FROM workspace_preparations WHERE task_id=?', taskId)) throw Errors.invalidState('工作副本尚未准备好，请先处理准备提示');
     if (this.isBusy(taskId)) throw Errors.invalidState('任务正在执行', '请等这一轮结束，或先点 [停止]', [{ label: '停止', action: 'task.cancel', args: { taskId } }]);
     if (row.agent === 'independent') this.independentRuntime?.assertReady(taskId);
     const a = this.attachments?.resolve(taskId, attachmentIds) ?? { infos: [], inputs: [] };

@@ -6,7 +6,7 @@ $guard = $null
 try {
     Add-Type -TypeDefinition ([IO.File]::ReadAllText($args[1], [Text.Encoding]::UTF8))
     $request = [IO.File]::ReadAllText($args[0], [Text.Encoding]::UTF8) | ConvertFrom-Json
-    $guard = New-Object AicFileGuard([string]$request.root, [string]$request.protectedRoot)
+    $guard = New-Object AicFileGuard([string]$request.root, [string]$request.protectedRoot, [bool]$request.managed)
     switch ($request.operation) {
         'read' {
             $blob = $guard.ReadFile([string]$request.path)

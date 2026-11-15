@@ -15,9 +15,11 @@ export function workspaceRelative(input: string) {
   if (relative.split('/').some(protectedFilePart)) throw Errors.forbidden('此路径属于凭据、私有状态或受保护目录，不能由独立文件工具访问');
   return relative;
 }
-export function independentWorkspace(input: string) {
+export function independentWorkspace(input: string, managedDataDir?: string) {
   if (!path.isAbsolute(input) || lstatSync(input).isSymbolicLink()) throw Errors.forbidden('工作区必须是已确认的普通本机目录');
   const root = realpathSync.native(input); const stat = lstatSync(root, { bigint: true });
-  if (!stat.isDirectory() || root === path.parse(root).root || root.split(/[\\/]/).some(protectedFilePart)) throw Errors.forbidden('不能把此目录用作独立文件工具的工作区');
+  const managed = managedDataDir ? path.relative(realpathSync.native(managedDataDir), root) : null;
+  if (managed !== null && !/^worktrees[\\/][a-zA-Z0-9_-]{1,64}[\\/][a-zA-Z0-9_-]{1,64}$/.test(managed)) throw Errors.forbidden('登记的任务副本路径不合法');
+  if (!stat.isDirectory() || root === path.parse(root).root || (managed === null && root.split(/[\\/]/).some(protectedFilePart))) throw Errors.forbidden('不能把此目录用作独立文件工具的工作区');
   return { root, fingerprint: createHash('sha256').update(JSON.stringify([root.toLowerCase(), String(stat.dev), String(stat.ino)])).digest('hex') };
 }

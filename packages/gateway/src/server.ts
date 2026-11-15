@@ -80,6 +80,8 @@ export interface GatewayOptions {
   approvalTimeoutMs?: number;
   /** 演示 Agent 的节奏倍率，测试里设为 0 */
   fakeSpeed?: number;
+  /** 离线测试注入隔离全局配置的 git；正式启动自行从 PATH 定位。 */
+  git?: Git;
   /**
    * 1.2：是否注册真实 Agent（Claude Code、Codex、CodeBuddy）。默认注册；设 AIC_NO_REAL_AGENTS=1 或传 false 时只有演示 Agent。
    * 测试里默认不注册，不启动任何真实 Agent（phase-1.md 6.8）。
@@ -188,7 +190,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
     instanceId,
   });
   const events = new EventStore(db, new EventBus());
-  const git = await Git.discover();
+  const git = opts.git ?? await Git.discover();
   const workspaces = new WorkspaceManager(db, git, dataDir);
   log(git.version ?? '未找到 git，新任务的隔离工作副本暂不可用。');
   const agentLog = agentLogger(dataDir, log);
@@ -234,6 +236,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   independentRuntime.recoverOnStartup();
   tasks.independentRuntime = independentRuntime;
   const projects = new ProjectService(db);
+  tasks.workspaces = workspaces;
   const groups = new GroupService(db, tasks);
 
   const services: Services = {

@@ -3,6 +3,14 @@ import { z } from 'zod';
 // 工作区协议只新增；旧 shadow 与 inplace 的含义保持不变。
 export const WorkspaceKind = z.enum(['worktree', 'copy', 'shadow', 'inplace']);
 export type WorkspaceKind = z.infer<typeof WorkspaceKind>;
+export const WorkspaceGlobs = z.array(z.string().trim().min(1).max(500).refine(v => !v.includes('\\') && !v.startsWith('/') && !v.includes(':') && !v.split('/').includes('..') && !v.includes('\0'), '请输入项目内的相对通配符')).max(100);
+export const TaskWorkspace = z.object({
+  kind: WorkspaceKind, path: z.string().nullable(), branch: z.string().nullable(), baseRef: z.string().nullable(), baseBranch: z.string().nullable(),
+  state: z.enum(['preparing', 'ready', 'confirmation_required', 'failed']).optional(),
+  copyBytes: z.number().nonnegative().optional(), largeFiles: z.array(z.string()).optional(), error: z.string().optional(),
+});
+export type TaskWorkspace = z.infer<typeof TaskWorkspace>;
+export const PrepareWorkspaceBody = z.object({ confirmLargeCopy: z.literal(true) }).strict();
 export const WorkspaceFile = z.object({
   path: z.string(), size: z.number().nonnegative(), mtimeMs: z.number(), hash: z.string(),
 });

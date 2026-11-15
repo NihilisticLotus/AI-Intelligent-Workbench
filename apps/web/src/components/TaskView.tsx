@@ -45,16 +45,17 @@ export function TaskView({ taskId, active = true }: { taskId: string; active?: b
         <header className="main-head">
           <h1 title={task.title}>{task.title}</h1>
           <StatusMark shape={shape} text={stText} />
+          {task.workspace?.branch ? <span className="mono task-branch" title={task.workspace.branch}><Icon name="branch" /> {task.workspace.branch}</span> : null}
           <span className="grow" />
           <button type="button" className="btn ghost icon" aria-label={sideOpen ? '收起右侧面板' : '显示右侧面板'} aria-expanded={sideOpen}
             title="右侧面板 Ctrl+J" onClick={() => setPref('sideOpen', !sideOpen)}><Icon name="panel" /></button>
         </header>
-        {isRealAgent(task.agent) ? (
+        {isRealAgent(task.agent) && (!task.workspace || ['inplace', 'shadow'].includes(task.workspace.kind)) ? (
           <div className="direct-edit-note" role="note">
             <Icon name={task.permission === 'readonly' ? 'eye' : 'warn'} />
             <span>{task.permission === 'readonly'
               ? '这个任务直接在项目目录里运行。当前是“只读”，Agent 不会修改文件；改成其他权限后会直接修改项目文件，建议用“需审批”。'
-              : `会直接修改项目文件。建议权限保持“需审批”${task.permission === 'ask' ? '（当前就是）' : ''}；工作副本在之后的版本提供。`}</span>
+              : `会直接修改项目文件。建议权限保持“需审批”${task.permission === 'ask' ? '（当前就是）' : ''}；这是沿用原目录运行的旧任务。`}</span>
           </div>
         ) : null}
         <div className="main-body">

@@ -207,7 +207,7 @@ describe('改动与路径安全', () => {
     const file=path.join(data,'test.db');
     db.run("INSERT INTO tasks(id,project_id,title,prompt,status,permission_level,agent,workspace_kind,workspace_path,branch,base_ref,snapshot_before,snapshot_after,last_activity_at,created_at,updated_at) VALUES('old','p','旧任务','旧内容','review','ask','fake','inplace','旧路径','旧分支','旧基准','旧快照前','旧快照后',1,1,1)");
     db.close(); const previous=new DatabaseSync(file);
-    previous.exec('DROP TABLE workspace_records; ALTER TABLE tasks DROP COLUMN workspace_large_files; PRAGMA user_version=14;'); previous.close();
+    previous.exec('DROP TABLE workspace_preparations; ALTER TABLE projects DROP COLUMN carry_globs; DROP TABLE workspace_records; ALTER TABLE tasks DROP COLUMN workspace_large_files; PRAGMA user_version=14;'); previous.close();
     for(let i=0;i<2;i++) {
       db=openDb(file);
       expect(db.get('SELECT workspace_kind,workspace_path,branch,base_ref,snapshot_before,snapshot_after,workspace_large_files FROM tasks WHERE id=?','old')).toEqual({workspace_kind:'inplace',workspace_path:'旧路径',branch:'旧分支',base_ref:'旧基准',snapshot_before:'旧快照前',snapshot_after:'旧快照后',workspace_large_files:null});

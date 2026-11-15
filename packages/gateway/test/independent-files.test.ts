@@ -44,6 +44,23 @@ afterEach(async () => {
 });
 
 describe('独立项目文本工具', () => {
+  it('登记副本可在数据目录内运行，其他私有路径、越界、联接和硬链接仍被拒绝', async () => {
+    const f = setup(), data = path.join(f.directory, '.aic-data'), root = path.join(data, 'worktrees', 'project_one', 'task_one');
+    mkdirSync(root, { recursive: true }); writeFileSync(path.join(root, 'file.txt'), '副本正文');
+    const host = new IndependentFileHost(root, data, f.executor, true);
+    expect((await host.read('file.txt')).bytes.toString()).toBe('副本正文');
+    await host.write('created.txt', Buffer.from('副本新文'), {expectedHash:null,createParents:false});
+    expect(readFileSync(path.join(root,'created.txt'),'utf8')).toBe('副本新文');
+    const managedTool = new IndependentFileTool(new IndependentFiles(host),f.journal,f.receipts);
+    const proposal = await managedTool.prepare(identity,create,'ask'); f.journal.approve(proposal.record.id);
+    expect((await managedTool.execute(proposal.record.id,create,'ask')).status).toBe('written');
+    expect(readFileSync(path.join(root,'new','nested.txt'),'utf8')).toBe('新内容');
+    for (const relative of ['../../../state.db','.git/config','.codex/auth.json','D:/outside']) await expect(host.read(relative)).rejects.toThrow();
+    symlinkSync(f.root,path.join(root,'junction'),'junction'); linkSync(path.join(root,'file.txt'),path.join(root,'hard.txt'));
+    for (const relative of ['junction/file.txt','hard.txt']) await expect(host.read(relative)).rejects.toMatchObject({reason:'forbidden'});
+    expect(()=>new IndependentFileHost(data,data,f.executor,true)).toThrow();
+    expect(()=>new IndependentFileHost(root,data,f.executor)).toThrow();
+  },30_000);
   it('修改计划一次宿主读取规则和原文，审批后重新读取再写入，总共三次启动', async () => {
     const f = setup(); f.put('AGENTS.md', '先审批再写入'); f.put('file.txt', '原文');
     const run = vi.spyOn(f.executor, 'run'), spec = replace('原文');
@@ -210,7 +227,7 @@ describe('独立项目文本工具', () => {
   }, 90_000);
   it('v9 迁移保留旧命令意图、草稿与会话，重开保持兼容', () => {
     const f = setup(); const file = path.join(f.data,'migration.db'); let db = openDb(file); seed(db); const journal = new IndependentToolJournal(db); const p=journal.create(intent); journal.approve(p.id); journal.start(p.id); journal.finish(p.id,success); db.run("INSERT INTO task_drafts(task_id,text,annotations_json,updated_at) VALUES ('task','原草稿','[]',1)"); db.close();
-    const old = new DatabaseSync(file); old.exec('DROP TABLE workspace_records; ALTER TABLE tasks DROP COLUMN workspace_large_files; DROP TABLE saved_environments; DROP TABLE turn_usage; DROP TABLE independent_task_settings; DROP TABLE independent_request_attempts; DROP TABLE independent_request_budgets; DROP TABLE independent_file_receipts; ALTER TABLE independent_tool_calls DROP COLUMN file_outcome_json; PRAGMA user_version=9;'); old.close();
-    for (let i=0;i<2;i++) { db=openDb(file); try { expect(db.get('PRAGMA user_version')).toEqual({ user_version: 15 }); expect(new IndependentToolJournal(db).get(p.id)).toMatchObject({ state:'succeeded',outcome:success }); expect(new IndependentToolJournal(db).get(p.id)).not.toHaveProperty('fileOutcome'); expect(db.get('SELECT text FROM task_drafts')).toEqual({ text:'原草稿' }); expect(db.get('SELECT id FROM sessions')).toEqual({ id:'session' }); expect(db.all('SELECT * FROM independent_file_receipts')).toEqual([]); } finally { db.close(); } }
+    const old = new DatabaseSync(file); old.exec('DROP TABLE workspace_preparations; ALTER TABLE projects DROP COLUMN carry_globs; DROP TABLE workspace_records; ALTER TABLE tasks DROP COLUMN workspace_large_files; DROP TABLE saved_environments; DROP TABLE turn_usage; DROP TABLE independent_task_settings; DROP TABLE independent_request_attempts; DROP TABLE independent_request_budgets; DROP TABLE independent_file_receipts; ALTER TABLE independent_tool_calls DROP COLUMN file_outcome_json; PRAGMA user_version=9;'); old.close();
+    for (let i=0;i<2;i++) { db=openDb(file); try { expect(db.get('PRAGMA user_version')).toEqual({ user_version: 16 }); expect(new IndependentToolJournal(db).get(p.id)).toMatchObject({ state:'succeeded',outcome:success }); expect(new IndependentToolJournal(db).get(p.id)).not.toHaveProperty('fileOutcome'); expect(db.get('SELECT text FROM task_drafts')).toEqual({ text:'原草稿' }); expect(db.get('SELECT id FROM sessions')).toEqual({ id:'session' }); expect(db.all('SELECT * FROM independent_file_receipts')).toEqual([]); } finally { db.close(); } }
   });
 });

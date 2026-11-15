@@ -28,7 +28,8 @@ async function setup(respond: (n: number, body: any) => unknown = () => done('�
     else if (output !== undefined) { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(output)); }
   })().catch(() => res.destroy()); });
   await new Promise<void>((resolve) => server!.listen(0, '127.0.0.1', resolve));
-  gateway = await startGw({ secretStore: new MemorySecretStore() }); const token = await gateway.pair(), s = gateway.gw.services;
+  // 与开发预览相同的敏感目录名，覆盖登记副本在审批规划和执行时的完整路径。
+  gateway = await startGw({ secretStore: new MemorySecretStore() }, path.join(temporary(), '.aic-data')); const token = await gateway.pair(), s = gateway.gw.services;
   const workspace = temporary(); writeFileSync(path.join(workspace, 'AGENTS.md'), '请用中文回答。');
   const project = await gateway.api('POST', '/projects', { token, body: { name: '独立任务夹具', path: workspace } });
   const service = await s.independent.createService({ name: '本机离线夹具', baseUrl: `http://127.0.0.1:${(server.address() as { port: number }).port}/v1`,
@@ -39,7 +40,7 @@ async function setup(respond: (n: number, body: any) => unknown = () => done('�
     context: { mode: 'local' }, limits: { maxModelCalls: 3, maxToolCalls: 3, maxOutputTokens: 1000, maxContextBytes: 1024 * 1024, timeoutMs: 60_000 }, requestBudget: { maxRequests: 10, money: null } };
   const created = await gateway.api('POST', '/tasks', { token, body: { projectId: project.json.id, prompt: '完成测试', agent: 'independent', permission: 'ask', deferPrompt: true, independent: options } });
   expect(created.status).toBe(201);
-  return { token, s, options, task: created.json, workspace, bodies, count: () => count,
+  return { token, s, options, task: created.json, workspace: created.json.workspace.path as string, originalWorkspace: workspace, bodies, count: () => count,
     state: () => s.independentRuntime.state(created.json.id),
     wait: async () => { await expect.poll(() => s.tasks.get(created.json.id).status, { timeout: 30_000 }).not.toMatch(/^(running|waiting|queued)$/); } };
 }
@@ -279,9 +280,9 @@ describe('正式独立任务的离线接口与闭环', () => {
     const f = await setup(); f.s.independentRuntime.ledger.reserve(f.state().binding, { kind: 'model', requestHash: 'c'.repeat(64) });
     // 用 SQLite 的备份语句生成独立副本，避免读取实际用户数据。
     const file = path.join(temporary(), 'old.sqlite'); f.s.db.run('VACUUM INTO ?', file);
-    const old = new DatabaseSync(file); old.exec('DROP TABLE workspace_records; ALTER TABLE tasks DROP COLUMN workspace_large_files; DROP TABLE saved_environments; DROP TABLE turn_usage; DROP TABLE independent_task_settings; ALTER TABLE independent_request_attempts DROP COLUMN binding_json; ALTER TABLE independent_request_attempts DROP COLUMN currency; ALTER TABLE independent_request_budgets DROP COLUMN revision; PRAGMA user_version=11;'); old.close();
+    const old = new DatabaseSync(file); old.exec('DROP TABLE workspace_preparations; ALTER TABLE projects DROP COLUMN carry_globs; DROP TABLE workspace_records; ALTER TABLE tasks DROP COLUMN workspace_large_files; DROP TABLE saved_environments; DROP TABLE turn_usage; DROP TABLE independent_task_settings; ALTER TABLE independent_request_attempts DROP COLUMN binding_json; ALTER TABLE independent_request_attempts DROP COLUMN currency; ALTER TABLE independent_request_budgets DROP COLUMN revision; PRAGMA user_version=11;'); old.close();
     for (let i = 0; i < 2; i++) { const migrated = openDb(file); try {
-      expect(migrated.get('PRAGMA user_version')).toEqual({ user_version: 15 });
+      expect(migrated.get('PRAGMA user_version')).toEqual({ user_version: 16 });
       const row = migrated.get('SELECT binding_json,currency FROM independent_request_attempts')!;
       expect(JSON.parse(String(row.binding_json))).toEqual(f.state().binding); expect(row.currency).toBe(null);
     } finally { migrated.close(); } }

@@ -55,6 +55,16 @@ async function setup(sc: Sc, extra: Parameters<typeof startGw>[0] = {}) {
 
 const statusIs = (taskId: string, s: string) => (e: EventEnvelope) => e.type === 'task.updated' && e.taskId === taskId && (e.data as { task: Task }).task.status === s;
 
+it('新任务把登记的副本目录传给假 ACP 的 session/new', async () => {
+  const sc = scenario({ config: CONFIG, turns: [{ steps: [{ update: { sessionUpdate: 'agent_message_chunk', content: text('完成') } }] }] });
+  const f = await setup(sc);
+  const response = await f.gw.api('POST','/tasks',{token:f.token,body:{projectId:f.projectId,agent:'claude',permission:'ask',prompt:'只验证目录'}});
+  expect(response.status).toBe(201); await f.gw.gw.services.tasks.idle();
+  const task = f.gw.gw.services.tasks.get(response.json.id);
+  expect(task.status).toBe('review'); expect(task.workspace?.kind).toBe('copy');
+  expect(sc.log().find(item=>item.method==='session/new')?.params.cwd).toBe(task.workspace?.path);
+});
+
 const PERM = (id: string) => ({
   steps: [
     { update: { sessionUpdate: 'agent_thought_chunk', content: text('想一想') } },

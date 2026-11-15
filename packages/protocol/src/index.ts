@@ -1,3 +1,4 @@
+import { TaskWorkspace, WorkspaceGlobs } from './workspaces';
 // AI Console 共享协议：Gateway 与所有客户端（浏览器、以后的桌面软件和手机应用）共用的类型与校验。
 // 规则见 docs/plan-phase1.md 第 2 节：只通过 /api/v1 的 REST + WebSocket 对接；类型只在这里定义一次。
 import { z } from 'zod';
@@ -123,6 +124,7 @@ export const Project = z.object({
   id: Id, name: z.string(), path: z.string(), isGit: z.boolean(),
   defaultAgent: AgentKind.nullable(), createdAt: Ts,
   branch: z.string().nullable().optional(),
+  ignoreGlobs: WorkspaceGlobs.optional(), carryGlobs: WorkspaceGlobs.optional(),
 });
 export type Project = z.infer<typeof Project>;
 
@@ -143,6 +145,7 @@ export const Task = z.object({
   /** 1.2 新增：任务使用的账号；空 = 该 Agent 的默认账号 */
   profileId: Id.nullable().optional(),
   independent: z.lazy(() => IndependentTaskReference).optional(),
+  workspace: TaskWorkspace.optional(),
 });
 export type Task = z.infer<typeof Task>;
 
@@ -502,6 +505,7 @@ export type PairingCompleteResult = z.infer<typeof PairingCompleteResult>;
 export const PatchProjectBody = z.object({
   name: z.string().min(1).max(200).optional(),
   defaultAgent: AgentKind.nullable().optional(),
+  ignoreGlobs: WorkspaceGlobs.optional(), carryGlobs: WorkspaceGlobs.optional(),
 });
 export type PatchProjectBody = z.infer<typeof PatchProjectBody>;
 

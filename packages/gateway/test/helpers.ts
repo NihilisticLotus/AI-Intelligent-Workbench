@@ -6,11 +6,13 @@ import path from 'node:path';
 import WebSocket from 'ws';
 import type { Approval, ClientOp, EventEnvelope, ServerFrame } from '@aic/protocol';
 import { createGateway, type Gateway, type GatewayOptions } from '../src/server';
+import { Git } from '../src/git';
 
 export interface TestGw {
   gw: Gateway;
   port: number;
   dataDir: string;
+  projectDirs: string[];
   /** 最近一次生成的配对码 */
   code(): string;
   /** 完成一次配对，返回令牌 */
@@ -56,6 +58,7 @@ export async function startGw(extra: Partial<GatewayOptions> = {}, dataDir?: str
   const dir = dataDir ?? mkdtempSync(path.join(tmpdir(), 'aic-test-'));
   let last = '';
   const gw = await createGateway({
+    git: await Git.discover({ ...process.env, GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: '离线测试', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: '离线测试', GIT_COMMITTER_EMAIL: 'test@example.invalid' }),
     // 默认测试不注册真实 Agent，不启动任何真实 Agent 进程（phase-1.md 6.8）
     dataDir: dir, port: 0, openBrowser: false, fakeSpeed: 0, log: () => {}, realAgents: false,
     webDist: path.join(dir, 'no-web'),
@@ -68,7 +71,7 @@ export async function startGw(extra: Partial<GatewayOptions> = {}, dataDir?: str
   });
   // createGateway 在 onPairingCode 设置之前不会生成码，这里确保拿到启动时的码
   const t: TestGw = {
-    gw, port: gw.port, dataDir: dir,
+    gw, port: gw.port, dataDir: dir, projectDirs: [],
     code: () => last,
     api: (m, p, o) => rawRequest(gw.port, m, `/api/v1${p}`, o),
     async pair(name = '测试设备') {
@@ -87,6 +90,10 @@ export async function startGw(extra: Partial<GatewayOptions> = {}, dataDir?: str
     },
     async stop() {
       await gw.close();
+      for (const projectDir of t.projectDirs) {
+        if (path.dirname(projectDir) !== tmpdir() || !path.basename(projectDir).startsWith('aic-project-')) throw new Error('测试项目清理路径不匹配');
+        rmSync(projectDir, { recursive: true, force: true });
+      }
       if (!dataDir) rmSync(dir, { recursive: true, force: true });
     },
   };
@@ -161,7 +168,7 @@ export class WsClient {
 
 /** 建一个项目（用临时目录） */
 export async function makeProject(t: TestGw, token: string, name = '示例项目') {
-  const dir = mkdtempSync(path.join(t.dataDir, 'proj-'));
+  const dir = mkdtempSync(path.join(tmpdir(), 'aic-project-')); t.projectDirs.push(dir);
   const r = await t.api('POST', '/projects', { token, body: { name, path: dir } });
   if (r.status !== 201) throw new Error(`建项目失败 ${r.status} ${r.text}`);
   return r.json as { id: string; path: string };

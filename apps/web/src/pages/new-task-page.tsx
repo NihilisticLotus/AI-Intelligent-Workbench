@@ -14,6 +14,7 @@ import { IndependentTaskConfig } from '../components/independent-task-config';
 import { NewTaskMenu } from '../components/new-task-menu';
 import { Icon } from '../components/Icon';
 import { ErrorNotice, asApiError } from '../components/ui';
+import { confirmWorkspaceCopy } from '../components/workspace-confirmation';
 import { openAddProject } from '../components/dialogs';
 
 export function NewTaskPage({ preset = {} }: { preset?: NewTaskPreset }) {
@@ -67,8 +68,15 @@ export function NewTaskPage({ preset = {} }: { preset?: NewTaskPreset }) {
     if (warning.text && (warning.vision === false || !force)) { toast(warning.text, 'attn'); textarea.current?.closest('.nt-page')?.querySelector<HTMLElement>('.attachment-warning button')?.focus(); return; }
     submitting.current = true; setBusy(true); setError(null);
     try {
-      const task = created ? { id: created } : await createTask(newTaskBody({ projectId, groupId, prompt, agent, model, effort, permission, profileId, independent, hasAttachments: !!attachments.items.length }));
-      if (attachments.items.length || created) { setCreated(task.id); const ids = await attachments.uploadFor(task.id); await sendPrompt(task.id, prompt.trim(), ids); }
+      let task = created ? await api.task(created) : await createTask({ ...newTaskBody({ projectId, groupId, prompt, agent, model, effort, permission, profileId, independent, hasAttachments: !!attachments.items.length }), deferPrompt: true });
+      setCreated(task.id);
+      if (task.workspace?.state === 'confirmation_required') {
+        const ready = await confirmWorkspaceCopy(task);
+        if (!ready) { setBusy(false); return; }
+        task = ready;
+      }
+      if (task.workspace?.state === 'failed') throw new Error(task.workspace.error ?? '工作副本准备失败');
+      const ids = await attachments.uploadFor(task.id); await sendPrompt(task.id, prompt.trim(), ids);
       toast('已派发新任务，可在左侧任务列表查看');
       if (alive.current) returnFromNewTask();
     } catch (e) { if (alive.current) { setError(asApiError(e)); setBusy(false); } }
@@ -90,7 +98,7 @@ export function NewTaskPage({ preset = {} }: { preset?: NewTaskPreset }) {
             <NewTaskMenu label={groups.find((g) => g.id === groupId)?.name ?? '不分组'} icon="layers" disabled={locked} options={[{ id: '', label: '不分组（未分类）', selected: !groupId, onSelect: () => setGroupId('') }, ...groups.map((g) => ({ id: g.id, label: g.name, selected: g.id === groupId, onSelect: () => setGroupId(g.id) }))]} />
             <NewTaskMenu label={environmentLoading ? '常用环境读取中…' : environments.find((e) => e.id === environmentId)?.name ?? '常用环境'} icon="drive" disabled={locked || environmentLoading || !!environmentError} options={environments.map((environment) => ({ id: environment.id, label: `${environment.name}${environment.branch ? ' · 记录分支 ' + environment.branch : ''}`, selected: environment.id === environmentId, disabled: !projects.some((p) => p.id === environment.projectId), onSelect: () => { setProjectId(environment.projectId); setEnvironmentId(environment.id); toast('已选择常用环境的项目，分支保持当前状态'); } }))} />
           </div>
-          <p className="nt-worktree">工作副本在之后的版本提供；常用环境不会切换分支。</p>
+          <p className="nt-worktree">{project?.isGit ? '会在独立的工作副本里修改，确认合并后才更新项目文件。' : '会在独立副本中修改，确认应用结果后才更新项目文件。'}常用环境不会切换分支。</p>
           {environmentError ? <ErrorNotice error={environmentError} /> : null}
           <Attachments state={attachments} taskId={created} info={info} model={model || null} onModel={setModel} onBlocked={() => void submit(true)} />
           <label className="sr-only" htmlFor="nt-description">要做什么</label>

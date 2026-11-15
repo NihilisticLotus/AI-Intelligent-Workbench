@@ -54,7 +54,7 @@ function joinReason(base: string, message: string | null): string {
 // ---------------------------------------------------------------------
 // 权限：真实 Agent 第 1.2 步只开放“只读”和“需审批”（phase-1.md 6.3.4）
 // ---------------------------------------------------------------------
-export const PERM_LOCKED_REASON = '有了独立工作副本后开放';
+export const PERM_LOCKED_REASON = '权限规则接入后开放';
 /**
  * 这个权限级别现在能不能选。以 Gateway 给的 AgentInfo.permissionLevels 为准（Gateway 按它校验）；
  * 老 Gateway 没有这个字段时退回默认规则：真实 Agent 只开放“只读”和“需审批”
@@ -63,7 +63,7 @@ export function permAvailable(kind: AgentKind | string, p: PermissionLevel, info
   if (info?.permissionLevels) return info.permissionLevels.includes(p);
   return !isRealAgent(kind) || p === 'readonly' || p === 'ask';
 }
-export const DIRECT_EDIT_WARNING = '会直接修改项目文件：这个任务直接在项目目录里运行；有了独立工作副本后会在副本里修改，建议权限保持“需审批”。';
+export const DIRECT_EDIT_WARNING = '会直接修改项目文件：这个任务直接在项目目录里运行；新任务会在独立副本里运行，建议权限保持“需审批”。';
 
 /**
  * 工作区里的 Agent 设置文件（hooks、自动允许规则）会不会生效（审查第 1 条）。

@@ -55,7 +55,7 @@ function AddProject({ close, then }: { close: () => void; then?: (id: string) =>
         <div className="alert info" style={{ margin: 0 }}>
           <Icon name="info" />
           <div className="body"><strong>检测结果</strong>
-            <p>{picked.isGit ? '是 git 仓库。' : '不是 git 仓库。'}引擎类型和工作副本方式在有了独立工作副本后提供。</p>
+            <p>{picked.isGit ? '是 git 仓库。' : '不是 git 仓库。'}新任务会在独立副本中运行，确认合并或应用后才更新项目文件。</p>
           </div>
         </div>
       ) : null}

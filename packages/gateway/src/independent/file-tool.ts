@@ -6,13 +6,13 @@ import { IndependentFiles } from './files';
 import { IndependentFileError } from './file-host';
 import { IndependentFileReceipts } from './file-receipts';
 import { IndependentToolJournal } from './tool-journal';
-import { independentWorkspace, workspaceRelative } from './workspace';
+import { workspaceRelative } from './workspace';
 
 export class IndependentFileTool {
   constructor(private files: IndependentFiles, private journal: IndependentToolJournal, private receipts: IndependentFileReceipts) {}
   private async plan(input: IndependentFileWriteSpec, approvalBasis: string, signal?: AbortSignal) {
     const spec = IndependentFileWriteSpec.parse(input); workspaceRelative(spec.path);
-    const workspace = independentWorkspace(this.files.host.workspace.root);
+    const workspace = this.files.host.verifyWorkspace();
     if (workspace.fingerprint !== this.files.host.workspace.fingerprint) throw Errors.conflict('工作区身份已变化，请重新核对');
     const { rules, original: snapshot } = await this.files.writeSnapshot(spec.path, signal);
     if (!rules.complete) throw Errors.invalidState('项目规则未完整读取，暂不能修改文件');

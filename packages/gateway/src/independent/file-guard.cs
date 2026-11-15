@@ -14,6 +14,7 @@ public sealed class AicFileGuard : IDisposable {
     const int Limit = 512 * 1024;
     readonly string root;
     readonly string protectedRoot;
+    readonly bool managed;
     readonly List<SafeFileHandle> roots = new List<SafeFileHandle>();
     static readonly UTF8Encoding Utf8 = new UTF8Encoding(false, true);
     [StructLayout(LayoutKind.Sequential)] struct Info {
@@ -70,24 +71,27 @@ public sealed class AicFileGuard : IDisposable {
             return handle;
         } catch { handle.Dispose(); throw; }
     }
-    public AicFileGuard(string workspace, string privateRoot) {
+    public AicFileGuard(string workspace, string privateRoot) : this(workspace, privateRoot, false) {}
+    public AicFileGuard(string workspace, string privateRoot, bool managedWorkspace) {
         try {
             if (!Regex.IsMatch(workspace, "^[a-zA-Z]:\\\\") || workspace.IndexOf('/') >= 0) throw Error("forbidden");
             root = Path.GetFullPath(workspace).TrimEnd('\\');
             protectedRoot = Path.GetFullPath(privateRoot).TrimEnd('\\');
-            if (String.Equals(root, protectedRoot, StringComparison.OrdinalIgnoreCase) || root.StartsWith(protectedRoot + "\\", StringComparison.OrdinalIgnoreCase)) throw Error("forbidden");
+            managed = managedWorkspace;
+            if (managed && (!root.StartsWith(protectedRoot + "\\", StringComparison.OrdinalIgnoreCase) || !Regex.IsMatch(root.Substring(protectedRoot.Length + 1), @"^worktrees\\[a-zA-Z0-9_-]{1,64}\\[a-zA-Z0-9_-]{1,64}$"))) throw Error("forbidden");
+            if (!managed && (String.Equals(root, protectedRoot, StringComparison.OrdinalIgnoreCase) || root.StartsWith(protectedRoot + "\\", StringComparison.OrdinalIgnoreCase))) throw Error("forbidden");
             string drive = Path.GetPathRoot(root); uint kind = GetDriveTypeW(drive);
             if (root.Length <= 3 || (kind != 2 && kind != 3)) throw Error("forbidden");
             string current = drive;
             roots.Add(Open(current, true, false, false));
-            foreach (string part in root.Substring(drive.Length).Split('\\')) { Component(part); current = Path.Combine(current, part); roots.Add(Open(current, true, false, false)); }
+            foreach (string part in root.Substring(drive.Length).Split('\\')) { if (!managed) Component(part); current = Path.Combine(current, part); roots.Add(Open(current, true, false, false)); }
         } catch { Dispose(); throw; }
     }
     string Target(string relative) {
         if (relative == null || relative.Length > 1000 || relative.IndexOf('\\') >= 0) throw Error("forbidden");
         foreach (string part in relative.Split('/')) Component(part);
         string full = Path.GetFullPath(Path.Combine(root, relative.Replace('/', '\\')));
-        if (!full.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase) || String.Equals(full, protectedRoot, StringComparison.OrdinalIgnoreCase) || full.StartsWith(protectedRoot + "\\", StringComparison.OrdinalIgnoreCase)) throw Error("forbidden");
+        if (!full.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase) || (!managed && (String.Equals(full, protectedRoot, StringComparison.OrdinalIgnoreCase) || full.StartsWith(protectedRoot + "\\", StringComparison.OrdinalIgnoreCase)))) throw Error("forbidden");
         return full;
     }
     List<SafeFileHandle> Parents(string target, bool create) {

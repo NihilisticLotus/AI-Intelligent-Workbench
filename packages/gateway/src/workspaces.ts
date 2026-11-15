@@ -128,6 +128,11 @@ export class WorkspaceManager {
     }
     return record;
   }
+  async runtimePath(taskId: string): Promise<string> {
+    const record = await this.checkedRecord(taskId);
+    if (record.state !== 'ready') return fail('workspace.state', '工作副本尚未准备好，不能启动任务。');
+    return record.path;
+  }
   private options(record: WorkspaceRecord) {
     const gitDir = record.gitDir ?? record.worktreeGitDir;
     return { cwd: record.path, gitDir, workTree: gitDir ? record.path : undefined };

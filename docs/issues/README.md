@@ -92,3 +92,5 @@
 | [ISSUE-0077](ISSUE-0077-workspace-protection-contract.md) | 1.5 工作区默认方案与项目写入保护边界冲突 | fixed | 设计约束冲突 | 2026-11-15 | 2026-11-15 |
 | [ISSUE-0078](ISSUE-0078-watchdog-test-timing.md) | 并行长工具测试依赖固定延时造成时序误判 | fixed | 测试稳定性 | 2026-11-15 | 2026-11-15 |
 | [ISSUE-0079](ISSUE-0079-db-migration-handle.md) | 数据库迁移抛错时没有关闭连接 | fixed | bug | 2026-11-15 | 2026-11-15 |
+
+| [ISSUE-0080](ISSUE-0080-managed-workspace-file-guard.md) | 独立文件宿主误拦数据目录内的登记副本 | fixed | 接入兼容 | 2026-11-15 | 2026-11-15 |

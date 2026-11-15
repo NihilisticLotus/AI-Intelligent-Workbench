@@ -253,6 +253,11 @@ const MIGRATIONS: string[] = [
     task_id TEXT PRIMARY KEY, record_json TEXT NOT NULL, updated_at INTEGER NOT NULL
   );
   `,
+  // v16：项目复制规则与可恢复的复制确认；旧任务保持原目录语义。
+  `
+  ALTER TABLE projects ADD COLUMN carry_globs TEXT;
+  CREATE TABLE workspace_preparations (task_id TEXT PRIMARY KEY, state TEXT NOT NULL, bytes INTEGER, error TEXT, defer_prompt INTEGER NOT NULL DEFAULT 0);
+  `,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

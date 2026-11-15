@@ -238,6 +238,7 @@ export class HttpClient {
     profileId?: string | null; deferPrompt?: boolean; attachments?: string[];
     independent?: IndependentTaskOptions;
   }) { return this.request('POST', '/tasks', { body, parse: oneOf(Task) }); }
+  prepareWorkspace(id: string) { return this.request('POST', `/tasks/${encodeURIComponent(id)}/workspace/prepare`, { body: { confirmLargeCopy: true }, parse: oneOf(Task) }); }
   patchTask(id: string, body: { title?: string; groupId?: string | null; permission?: string; profileId?: string | null }) {
     return this.request('PATCH', `/tasks/${encodeURIComponent(id)}`, { body, parse: oneOf(Task) });
   }

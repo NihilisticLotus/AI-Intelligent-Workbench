@@ -6,10 +6,11 @@ import type { TaskService } from './tasks';
 import { Errors, newId, now } from './util';
 import { projectBranch } from './project-branch';
 
-type ProjectRow = { id: string; name: string; path: string; is_git: number; default_agent: string | null; created_at: number };
+type ProjectRow = { id: string; name: string; path: string; is_git: number; default_agent: string | null; created_at: number; ignore_globs: string | null; carry_globs: string | null };
 type GroupRow = { id: string; name: string; ord: number; created_at: number };
 
 const toProject = (r: ProjectRow): Project => ({
+  ignoreGlobs: JSON.parse(r.ignore_globs ?? '[]'), carryGlobs: JSON.parse(r.carry_globs ?? '[]'),
   id: r.id, name: r.name, path: r.path, isGit: !!r.is_git, branch: projectBranch(r.path), defaultAgent: r.default_agent as AgentKind | null, createdAt: r.created_at,
 });
 const toGroup = (r: GroupRow): Group => ({ id: r.id, name: r.name, ord: r.ord, createdAt: r.created_at });
@@ -40,6 +41,8 @@ export class ProjectService {
     this.get(id);
     if (body.name !== undefined) this.db.run('UPDATE projects SET name = ? WHERE id = ?', body.name.trim(), id);
     if (body.defaultAgent !== undefined) this.db.run('UPDATE projects SET default_agent = ? WHERE id = ?', body.defaultAgent, id);
+    if (body.ignoreGlobs !== undefined) this.db.run('UPDATE projects SET ignore_globs=? WHERE id=?', JSON.stringify(body.ignoreGlobs), id);
+    if (body.carryGlobs !== undefined) this.db.run('UPDATE projects SET carry_globs=? WHERE id=?', JSON.stringify(body.carryGlobs), id);
     return this.get(id);
   }
 

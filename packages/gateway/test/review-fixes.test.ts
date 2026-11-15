@@ -235,6 +235,7 @@ describe('第 12、18 条：换账号', () => {
     await ws.waitEvent(statusIs(a.id, 'review'), 10_000);
     const b = (await t!.api('POST', '/tasks', { token, body: { projectId, prompt: 'b', agent: 'claude' } })).json as Task;
     await ws.waitEvent(statusIs(b.id, 'queued'), 5000);
+    const switchSeq = t!.gw.services.events.lastSeq();
     const t0 = Date.now();
     const r = await t!.api('PATCH', `/tasks/${a.id}`, { token, body: { profileId: p2.id } });
     expect(r.status).toBe(200);
@@ -243,7 +244,8 @@ describe('第 12、18 条：换账号', () => {
     expect((r.json as Task).status).toBe('review');
     await ws.waitEvent(statusIs(b.id, 'review'), 10_000);
     expect(ws.events().some((e) => e.type === 'session.notice' && e.taskId === a.id && /并发名额已满/.test((e.data as { text: string }).text))).toBe(true);
-    expect(statuses(ws, a.id)).not.toContain('queued');
+    // 新任务准备副本时可以排队；换账号本身不能把已完成回合重新排队。
+    expect(ws.events().filter(e => e.seq > switchSeq && e.taskId === a.id && e.type === 'task.updated').map(e => (e.data as {task:Task}).task.status)).not.toContain('queued');
   });
 
   it('没有进程时换账号：下一条消息时仍尝试恢复原来的会话（不悄悄新建）', async () => {

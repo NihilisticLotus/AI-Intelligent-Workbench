@@ -26,8 +26,8 @@ export interface PermInfo { label: string; desc: string; icon: string; level: st
 export const permInfo: Record<PermissionLevel, PermInfo> = {
   readonly: { label: '只读', desc: '只能读文件和搜索，任何修改和命令都拒绝', icon: 'eye', level: 'ro' },
   ask: { label: '需审批', desc: '读操作自动允许；修改文件、执行命令都要你确认', icon: 'shield', level: 'ask' },
-  workspace: { label: '工作区内自动', desc: '工作区内的修改和常见命令自动允许，只有越界操作才问你', icon: 'shieldcheck', level: 'ws' },
-  full: { label: '全自动', desc: '除“始终禁止”清单外全部放行，建议只用在可以随时丢弃的任务上', icon: 'unlock', level: 'full' },
+  workspace: { label: '工作区内自动', desc: '副本内修改自动允许，命令仍按项目规则或询问；项目禁止规则优先', icon: 'shieldcheck', level: 'ws' },
+  full: { label: '全自动', desc: '固定禁止和项目规则优先，其余完整操作自动允许；建议只用于可丢弃任务', icon: 'unlock', level: 'full' },
 };
 export const permOrder: PermissionLevel[] = ['readonly', 'ask', 'workspace', 'full'];
 

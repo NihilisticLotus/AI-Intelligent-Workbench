@@ -3,11 +3,11 @@
 import {
   ErrorActionKey, ErrorCode, isAllowedBaseUrl,
   type AgentCaps, type AgentInfo, type AgentKind, type AgentProfile, type AgentTestResult, type ApiError,
-  type AuthMethod, type ModelInfo, type PermissionLevel, type ProfileKind, type ProfileSummary,
+  type AuthMethod, type ModelInfo, type PermissionLevel, type ProfileKind, type ProfileSummary, type Task,
 } from '@aic/protocol';
 import type { StatusShape } from './format';
 
-/** 演示 Agent 以外都是真实 Agent：第 1.2 步直接在项目目录里运行 */
+/** 演示 Agent 以外都可能执行真实操作，运行位置另看任务工作副本。 */
 export const isRealAgent = (kind: AgentKind | string): boolean => kind !== 'fake';
 
 // ---------------------------------------------------------------------
@@ -52,9 +52,10 @@ function joinReason(base: string, message: string | null): string {
 }
 
 // ---------------------------------------------------------------------
-// 权限：真实 Agent 第 1.2 步只开放“只读”和“需审批”（phase-1.md 6.3.4）
+// 权限：任务级列表优先；第三方本步只开放只读 / 需审批（phase-1.md 11.11）。
 // ---------------------------------------------------------------------
-export const PERM_LOCKED_REASON = '权限规则接入后开放';
+export const PERM_LOCKED_REASON = '第三方 Agent 本步仅支持只读 / 需审批';
+export const INPLACE_PERM_LOCKED_REASON = '直接在项目目录运行的旧任务不能使用';
 /**
  * 这个权限级别现在能不能选。以 Gateway 给的 AgentInfo.permissionLevels 为准（Gateway 按它校验）；
  * 老 Gateway 没有这个字段时退回默认规则：真实 Agent 只开放“只读”和“需审批”
@@ -62,6 +63,11 @@ export const PERM_LOCKED_REASON = '权限规则接入后开放';
 export function permAvailable(kind: AgentKind | string, p: PermissionLevel, info?: Pick<AgentInfo, 'permissionLevels'> | null): boolean {
   if (info?.permissionLevels) return info.permissionLevels.includes(p);
   return !isRealAgent(kind) || p === 'readonly' || p === 'ask';
+}
+export function taskPermAvailable(task:Pick<Task,'agent'|'workspace'|'permissionLevels'>,p:PermissionLevel,info?:Pick<AgentInfo,'permissionLevels'>) {
+  if(task.permissionLevels)return task.permissionLevels.includes(p);
+  if(p==='workspace'||p==='full')return false;
+  return permAvailable(task.agent,p,info);
 }
 export const DIRECT_EDIT_WARNING = '会直接修改项目文件：这个任务直接在项目目录里运行；新任务会在独立副本里运行，建议权限保持“需审批”。';
 

@@ -83,7 +83,7 @@ export function evaluatePermission(operation:PermissionOperation,context:Permiss
     return finish(rule.action,`项目规则 ${rule.ord+1}：${rule.match??rule.path??'此类工具'}`,safe,rule.id);
   }
   if(operation.tool==='read'&&operation.complete&&!outside)return finish('allow','只读操作',safe);
-  if(context.level==='full'&&safe)return finish('allow','全自动权限',safe);
+  if(context.level==='full'&&operation.complete)return finish('allow','全自动权限',safe);
   if(context.level==='workspace'&&operation.tool==='edit'&&safe&&!deletion)return finish('allow','工作副本内文件修改',safe);
   return finish('ask','按当前权限需要审批',safe);
 }

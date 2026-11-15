@@ -4,7 +4,7 @@ import { ErrorActionKey, ErrorCode, type AgentInfo, type ApiError } from '@aic/p
 import { parseEventPage } from '../api/http';
 import { alertError, errorAlertStore, showError, toastStore } from '../state/ui';
 import {
-  loginAnnounceText, permAvailable, profileSwitchKind, profileSwitchText, switchNeedsTurnEnd, taskDefaults, withDefaultActions, workspaceConfigNote,
+  loginAnnounceText, permAvailable, taskPermAvailable, profileSwitchKind, profileSwitchText, switchNeedsTurnEnd, taskDefaults, withDefaultActions, workspaceConfigNote,
 } from './agents';
 
 const agent = (o: Partial<AgentInfo>): AgentInfo => ({
@@ -12,6 +12,12 @@ const agent = (o: Partial<AgentInfo>): AgentInfo => ({
 });
 
 describe('第 13 条：权限级别以 Gateway 给的 permissionLevels 为准', () => {
+  it('任务级列表优先，旧任务缺少列表时不能借 Agent 能力开放自动档',()=>{
+    const info=agent({kind:'fake',permissionLevels:['readonly','ask','workspace','full']});
+    expect(taskPermAvailable({agent:'fake',permissionLevels:['readonly','ask']},'full',info)).toBe(false);
+    expect(taskPermAvailable({agent:'fake'},'full',info)).toBe(false);
+    expect(taskPermAvailable({agent:'independent',permissionLevels:['readonly','ask','workspace','full']},'workspace',info)).toBe(true);
+  });
   it('有字段时按字段；没有字段时退回默认规则', () => {
     const open = agent({ permissionLevels: ['readonly', 'ask', 'workspace'] });
     expect(permAvailable('claude', 'workspace', open)).toBe(true);

@@ -280,7 +280,7 @@ export class AgentService {
       ...(d?.checkedAt ? { checkedAt: d.checkedAt } : {}),
       ...(caps ? { caps } : {}),
       // 可选的权限级别、默认模型、工作区设置文件是否生效：客户端按这些字段显示，不自己写死
-      permissionLevels: a.permissionLevels ?? ['readonly', 'ask', 'workspace', 'full'],
+      permissionLevels: a.id==='fake'?(a.permissionLevels??['readonly','ask','workspace','full']):(a.permissionLevels??['readonly','ask']).filter(p=>p==='readonly'||p==='ask'),
       defaultModel: this.settings(a.id).defaultModel ?? null,
       defaultEffort: this.settings(a.id).defaultEffort ?? null,
       ...(a.workspaceConfig ? { workspaceConfig: a.workspaceConfig } : {}),
@@ -309,7 +309,7 @@ export class AgentService {
       runningSessions: this.running.get(a.id) ?? 0,
       concurrencyLimit: this.concurrencyLimit(a.id),
       ...(d?.checkedAt ? { checkedAt: d.checkedAt } : {}),
-      permissionLevels: a.permissionLevels ?? ['readonly', 'ask', 'workspace', 'full'],
+      permissionLevels: a.id==='fake'?(a.permissionLevels??['readonly','ask','workspace','full']):(a.permissionLevels??['readonly','ask']).filter(p=>p==='readonly'||p==='ask'),
       enabled: false,
       ...(a.usesNativeConfig ? { usesNativeConfig: true } : {}),
     };

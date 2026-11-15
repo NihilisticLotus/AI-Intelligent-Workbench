@@ -301,3 +301,4 @@
 .project-settings .field{display:flex;flex-direction:column;gap:6px;margin:16px 0;max-width:760px}
 .project-settings input,.project-settings select,.project-settings textarea{padding:8px;border:1px solid var(--line);border-radius:6px;background:var(--bg-2);color:inherit;font:inherit}
 .permission-table-wrap{overflow-x:auto;margin:16px 0}.permission-table{width:100%;border-collapse:collapse;min-width:760px}.permission-table th,.permission-table td{padding:8px;text-align:left;border-bottom:1px solid var(--line)}.permission-table input{width:100%;min-width:130px}.permission-table tr:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.nt-page .attn-note { color: var(--attn); padding: 10px; border: 1px solid var(--attn); border-radius: 6px; background: var(--attn-weak); }

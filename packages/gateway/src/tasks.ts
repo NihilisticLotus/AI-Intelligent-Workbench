@@ -165,6 +165,7 @@ export class TaskService {
     const row = this.getRow(id);
     const task = toTask(row);
     const record = this.workspaces?.get(id);
+    task.permissionLevels=(task.agent==='fake'||task.agent==='independent')&&!!record&&['worktree','copy'].includes(row.workspace_kind??'')?['readonly','ask','workspace','full']:['readonly','ask'];
     const operation=this.workspaces?.operation(id);
     if(operation && ['merged','applied','rolled_back','discarded'].includes(operation.state))task.status=operation.state==='discarded'?'discarded':'merged';
     const prep = this.db.get<{state: 'preparing' | 'confirmation_required' | 'failed'; bytes: number | null; error: string | null}>('SELECT * FROM workspace_preparations WHERE task_id=?', id);
@@ -456,10 +457,16 @@ export class TaskService {
     return { model: m, effort: e };
   }
 
-  /** 真实 Agent 第 1.2 步只开放“只读”和“需审批”（phase-1.md 6.3.4） */
-  private checkPermission(a: AgentAdapter, level: PermissionLevel) {
+  /** 用户选择 A：自动档只开放给由工作台逐项审批的隔离任务。 */
+  private checkTaskPermission(kind:AgentKind,level:PermissionLevel,isolated:boolean) {
+    if(level==='readonly'||level==='ask')return;
+    if(kind!=='fake'&&kind!=='independent')throw Errors.levelUnavailable('第三方 Agent 本步仅支持只读或需审批','原生自动模式可能绕过工作台规则，暂未开放');
+    if(!isolated)throw Errors.levelUnavailable('直接在项目目录运行的旧任务不能使用自动权限档','请新建隔离工作副本任务');
+  }
+  private checkPermission(a: AgentAdapter, level: PermissionLevel,isolated:boolean) {
+    this.checkTaskPermission(a.id,level,isolated);
     if (a.permissionLevels && !a.permissionLevels.includes(level)) {
-      throw Errors.levelUnavailable(`${a.displayName} 暂时不能使用这个权限级别`, '“工作区内自动”和“全自动”将在权限规则接入后开放；现在可以选“只读”或“需审批”');
+      throw Errors.levelUnavailable(`${a.displayName} 暂时不能使用这个权限级别`, '请选择当前任务提供的权限级别');
     }
   }
 
@@ -469,7 +476,7 @@ export class TaskService {
     if (body.agent === 'independent') {
       if (!this.independentRuntime || !body.independent) throw Errors.badRequest('请先填写独立 Agent 的模型、上下文与预算配置');
       if (body.profileId || body.model || body.effort) throw Errors.badRequest('独立 Agent 使用自己的任务配置，不接受第三方账号或模型字段');
-      if (!['readonly', 'ask'].includes(body.permission)) throw Errors.levelUnavailable('独立 Agent 当前仅支持只读或需审批');
+      this.checkTaskPermission('independent',body.permission,!!this.workspaces);
       if (body.attachments?.length) throw Errors.badRequest('请先创建任务，再上传附件');
       const id = newId('t'), t = now();
       this.db.tx(() => {
@@ -485,7 +492,7 @@ export class TaskService {
     }
     if (body.independent) throw Errors.badRequest('独立配置只能用于独立 Agent');
     const a = await this.adapterFor(body.agent, body.profileId);
-    this.checkPermission(a, body.permission);
+    this.checkPermission(a, body.permission,!!this.workspaces);
     const profileId = body.profileId ?? null;
     if (profileId) {
       if (!a.real || !this.agentSvc) throw Errors.badRequest(`${a.displayName} 不需要账号`);
@@ -511,11 +518,12 @@ export class TaskService {
 
   async patch(id: string, body: z.infer<typeof PatchTaskBody>): Promise<Task> {
     const row = this.getRow(id);
-    if (row.agent === 'independent' && body.permission && !['readonly','ask'].includes(body.permission)) throw Errors.levelUnavailable('独立 Agent 当前仅支持只读或需审批');
+    const isolated=!!this.workspaces?.get(id)&&['worktree','copy'].includes(row.workspace_kind??'');
+    if(body.permission)this.checkTaskPermission(row.agent,body.permission,isolated);
     if (this.configuring.has(id)) throw Errors.invalidState('任务配置正在更新');
     if (body.groupId && !this.db.get('SELECT id FROM task_groups WHERE id = ?', body.groupId)) throw Errors.badRequest('找不到这个分组');
     const a = this.agents.get(row.agent);
-    if (body.permission !== undefined && a) this.checkPermission(a, body.permission);
+    if (body.permission !== undefined && a) this.checkPermission(a, body.permission,isolated);
     if (body.profileId !== undefined && body.profileId !== row.profile_id) {
       await this.switchProfile(id, body.profileId);
     }
@@ -691,6 +699,8 @@ export class TaskService {
   }
 
   private async ensureRuntime(taskId: string, signal?: AbortSignal): Promise<Runtime> {
+    const permissionTask=this.get(taskId);
+    this.checkTaskPermission(permissionTask.agent,permissionTask.permission,!!this.workspaces?.get(taskId)&&['worktree','copy'].includes(permissionTask.workspace?.kind??''));
     await this.runtimePath(taskId);
     const existing = this.runtimes.get(taskId);
     if (existing && !existing.conn.isClosed?.()) return existing;
@@ -1158,7 +1168,9 @@ export class TaskService {
     const row = this.getRow(taskId);
     const pick = (kinds: string[]) => req.options.find((o) => kinds.includes(o.kind));
     const operation=req.operation??{tool:'any' as const,command:null,paths:[],complete:false,deletion:false};
-    const context=await this.permissionContext(taskId),decision=await this.permissions.decide(operation,context);
+    const context=await this.permissionContext(taskId);
+    this.checkTaskPermission(row.agent,row.permission_level,context.isolated);
+    const decision=await this.permissions.decide(operation,context);
     if(signal.aborted)throw new AbortError();
     if(decision.action==='deny') {
       this.events.append({type:'session.notice',taskId,sessionId,data:{level:'warn',text:'已拒绝操作：'+decision.reason}});

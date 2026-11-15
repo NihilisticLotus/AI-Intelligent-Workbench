@@ -1,5 +1,5 @@
 // 起始页规则只依赖已报告的数据，不调用模型做推荐，也不自动派发。
-import { visionOf, type AgentInfo, type AgentKind, type IndependentTaskOptions, type Task } from '@aic/protocol';
+import { visionOf, type AgentInfo, type AgentKind, type IndependentTaskOptions, type Task, type PermissionLevel } from '@aic/protocol';
 import { isEnabled, isRealAgent } from './agents';
 import { profileInfo } from './picker';
 
@@ -40,7 +40,7 @@ export function templateDraft(template: typeof quickTemplates[number]) {
 
 export function newTaskBody(draft: {
   projectId: string; groupId: string; prompt: string; agent: AgentKind; model: string; effort: string;
-  permission: 'readonly' | 'ask'; profileId: string; independent: IndependentTaskOptions | null; hasAttachments: boolean;
+  permission: PermissionLevel; profileId: string; independent: IndependentTaskOptions | null; hasAttachments: boolean;
 }) {
   return {
     projectId: draft.projectId, groupId: draft.groupId || null, prompt: draft.prompt.trim(), agent: draft.agent,

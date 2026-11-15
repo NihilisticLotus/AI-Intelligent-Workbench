@@ -1,9 +1,9 @@
 // 新任务起始页：沿用任务 API、附件和选择器，所有真实调用都由明确的派发触发。
 import { useEffect, useMemo, useRef, useState } from 'react';
-import type { AgentKind, ApiError, IndependentTaskOptions, SavedEnvironment } from '@aic/protocol';
+import type { AgentKind, ApiError, IndependentTaskOptions, SavedEnvironment, PermissionLevel } from '@aic/protocol';
 import { api, createTask, sendPrompt, useApp } from '../state/app';
 import { navigate, returnFromNewTask, toast, type NewTaskPreset } from '../state/ui';
-import { agentReadiness, isEnabled, isRealAgent, permAvailable, taskDefaults, workspaceConfigNote } from '../lib/agents';
+import { agentReadiness, isEnabled, isRealAgent, permAvailable, PERM_LOCKED_REASON, taskDefaults, workspaceConfigNote } from '../lib/agents';
 import { permInfo, permOrder } from '../lib/format';
 import { profileDefaults, profileInfo } from '../lib/picker';
 import { visionWarning } from '../lib/attachments';
@@ -13,7 +13,7 @@ import { AgentPicker } from '../components/AgentPicker';
 import { IndependentTaskConfig } from '../components/independent-task-config';
 import { NewTaskMenu } from '../components/new-task-menu';
 import { Icon } from '../components/Icon';
-import { ErrorNotice, asApiError } from '../components/ui';
+import { ErrorNotice, asApiError, confirmDialog } from '../components/ui';
 import { confirmWorkspaceCopy } from '../components/workspace-confirmation';
 import { openAddProject } from '../components/dialogs';
 
@@ -28,7 +28,7 @@ export function NewTaskPage({ preset = {} }: { preset?: NewTaskPreset }) {
   const [profileId, setProfileId] = useState('');
   const baseInfo = agents.find((a) => a.kind === agent), info = profileInfo(baseInfo, profileId || null);
   const [model, setModel] = useState(preset.model ?? taskDefaults(info).model), [effort, setEffort] = useState(taskDefaults(info).effort);
-  const [permission, setPermission] = useState<'readonly' | 'ask'>('ask');
+  const [permission, setPermission] = useState<PermissionLevel>('ask');
   const [independent, setIndependent] = useState<IndependentTaskOptions | null>(null);
   const [created, setCreated] = useState<string | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState<ApiError | null>(null);
   const [environments, setEnvironments] = useState<SavedEnvironment[]>([]), [environmentId, setEnvironmentId] = useState('');
@@ -55,6 +55,7 @@ export function NewTaskPage({ preset = {} }: { preset?: NewTaskPreset }) {
     document.addEventListener('keydown', key); return () => document.removeEventListener('keydown', key);
   }, []);
   const changeAgent = (kind: AgentKind) => {
+    if(!permAvailable(kind,permission,agents.find(a=>a.kind===kind)))setPermission('ask');
     const defaults = taskDefaults(agents.find((a) => a.kind === kind));
     if (kind !== agent) setIndependent(null);
     setAgent(kind); setProfileId(''); setModel(defaults.model); setEffort(defaults.effort); setError(null); setAdopted('');
@@ -106,7 +107,7 @@ export function NewTaskPage({ preset = {} }: { preset?: NewTaskPreset }) {
           <input ref={input.input} type="file" multiple hidden onChange={(e) => { attachments.add(Array.from(e.target.files ?? [])); e.target.value = ''; }} />
           <div className="nt-bar">
             <button type="button" className="btn ghost icon" aria-label="添加附件" title="添加附件，也可以粘贴或拖入" onClick={() => input.input.current?.click()}><Icon name="plus" /></button>
-            <NewTaskMenu label={permInfo[permission].label} icon={permInfo[permission].icon} disabled={locked} options={permOrder.map((p) => ({ id: p, label: `${permInfo[p].label}${p === 'workspace' || p === 'full' ? ' · 之后的版本提供' : ''}`, selected: p === permission, disabled: p !== 'readonly' && p !== 'ask' || !agent || !permAvailable(agent, p, info), onSelect: () => { if (p === 'readonly' || p === 'ask') setPermission(p); } }))} />
+            <NewTaskMenu label={permInfo[permission].label} icon={permInfo[permission].icon} disabled={locked} options={permOrder.map((p) => ({ id: p, label: `${permInfo[p].label}${agent&&permAvailable(agent,p,info)?'：'+permInfo[p].desc:' · '+PERM_LOCKED_REASON}`, selected: p === permission, disabled: !agent || !permAvailable(agent, p, info), onSelect: () => { void (async()=>{if(p==='full'&&permission!=='full'&&!await confirmDialog({title:'开启全自动？',ok:'开启全自动',danger:true,body:<><p>固定禁止和项目规则仍然优先。其他操作自动允许，命令没有系统沙箱。</p><p>建议只在可以随时丢弃的任务上使用。</p></>}))return;setPermission(p);})(); } }))} />
             <span className="grow" />
             <AgentPicker agents={agents} agent={agent || 'fake'} config={{ model: model || null, effort: effort || null }} profileId={profileId || info?.profiles?.find((p) => p.isDefault)?.id || null} mode="new" disabled={locked} onPick={(pick) => {
               if (pick.agent !== agent) changeAgent(pick.agent);
@@ -117,6 +118,7 @@ export function NewTaskPage({ preset = {} }: { preset?: NewTaskPreset }) {
             }} />
             <button type="button" className="btn primary nt-send" disabled={sendDisabled} aria-label="派发新任务" title="派发 Ctrl+Enter" aria-busy={busy} onClick={() => void submit()}><Icon name="up" /></button>
           </div>
+          {permission==='full'?<p className="attn-note" role="status">全自动：按固定禁止和项目规则检查，其余操作不再逐次确认；命令没有系统沙箱。</p>:null}
         </fieldset>
         {recommendation ? <div className="nt-rec"><div><strong>推荐：{recommendation.label}</strong><p>{recommendation.reason}</p></div><button type="button" className="btn sm" disabled={locked || adoptedCurrent} onClick={() => { changeAgent(recommendation.agent); setModel(recommendation.model); setAdopted(recommendationKey); }}>{adoptedCurrent ? '已采用推荐' : '采用推荐'}</button></div> : null}
         {agent === 'independent' ? <IndependentTaskConfig initialModelId={model} onChange={(value) => { setIndependent(value); if (value) setModel(value.selection.modelId); }} disabled={locked} /> : null}

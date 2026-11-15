@@ -142,6 +142,7 @@ export type Group = z.infer<typeof Group>;
 export const Task = z.object({
   id: Id, projectId: Id, groupId: Id.nullable(), title: z.string(), prompt: z.string(),
   status: TaskStatus, permission: PermissionLevel,
+  permissionLevels: z.array(PermissionLevel).optional(),
   agent: AgentKind, model: z.string().nullable(), effort: z.string().nullable(),
   autoAllowLowRisk: z.boolean(), autoMergeOnPass: z.boolean(),
   lastActivityAt: Ts, createdAt: Ts, updatedAt: Ts,

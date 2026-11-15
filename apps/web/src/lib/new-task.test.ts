@@ -12,6 +12,9 @@ const independent: IndependentTaskOptions = { selection: { serviceId: 'service',
 const draft = { projectId: 'p', groupId: '', prompt: '  说明工作\n  ', agent: 'fake' as const, model: '', effort: '', permission: 'readonly' as const, profileId: '', independent: null, hasAttachments: false };
 
 describe('起始页路由', () => {
+  it('起始页明确选择的自动档保留在派发请求中',()=>{
+    for(const permission of ['workspace','full'] as const)expect(CreateTaskBody.parse(newTaskBody({...draft,permission})).permission).toBe(permission);
+  });
   it('五项预设完整往返，保留明确的不分组及包含换行、井号、问号的描述', () => {
     const route: Route = { page: 'new', preset: { projectId: 'p/中文', groupId: null, agent: 'independent', model: 'a+b&c', prompt: '修复 #?\n下一行 %' } };
     expect(parseHash(routeHash(route))).toEqual(route);

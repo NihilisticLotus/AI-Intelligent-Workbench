@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { IndependentCommandSpec, type IndependentAssistantMessage, type IndependentModelDriver, type IndependentToolDriver, type IndependentToolMessage } from '@aic/protocol';
+import { IndependentCommandSpec, type IndependentAssistantMessage, type IndependentCommandResult, type IndependentModelDriver, type IndependentToolDriver, type IndependentToolMessage } from '@aic/protocol';
 import { openDb, type Db } from '../src/db';
 import { IndependentConversationStore } from '../src/independent/conversation';
 import { IndependentTurnEngine } from '../src/independent/turn-engine';
@@ -363,42 +363,46 @@ describe('原始记录、压缩和跨进程恢复', () => {
 });
 
 describe('循环整合真实 Windows 命令与审批', () => {
+  // 此组验证审批和取消，给 Windows 冷启动留空间；独立的超时专项仍保留原时限断言。
   it.each([false, true])('用户允许为 %s：拒绝零副作用，允许后命令落盘只执行一次', async (allowed) => {
     const directory = temporary(); const effect = path.join(directory, 'effect.txt');
     const context = setup([toolReply, finalReply]); const journal = new IndependentToolJournal(context.db);
     const executor = new IndependentCommandExecutor(directory); executors.push(executor); const command = new IndependentCommandTool(journal, executor);
-    const spec = IndependentCommandSpec.parse({ program: process.execPath, args: ['-e', `require('fs').writeFileSync(${JSON.stringify(effect)},'命令实操成功');process.stdout.write('已验证')`], timeoutMs: 10_000, maxOutputBytes: 4096 });
+    const spec = IndependentCommandSpec.parse({ program: process.execPath, args: ['-e', `require('fs').writeFileSync(${JSON.stringify(effect)},'命令实操成功');process.stdout.write('已验证')`], timeoutMs: 30_000, maxOutputBytes: 4096 });
+    let commandResult: IndependentCommandResult | undefined;
     context.tools.execute.mockImplementation(async (input, identity, signal) => {
       const intent = command.prepare({ ...identity, callId: input.id }, spec, directory, '用户逐次审批');
       if (!allowed) { journal.reject(intent.id); return { role: 'tool', callId: input.id, name: input.name, text: '用户拒绝执行命令', outcome: 'rejected' }; }
-      journal.approve(intent.id); const result = await command.execute(intent.id, spec, { cwd: directory, approvalBasis: '用户逐次审批', signal });
+      journal.approve(intent.id); const result = commandResult = await command.execute(intent.id, spec, { cwd: directory, approvalBasis: '用户逐次审批', signal });
       return { role: 'tool', callId: input.id, name: input.name, text: result.stdout, outcome: result.reason === 'completed' && result.exitCode === 0 ? 'ok' : 'error' };
     });
-    const turn = context.create(); expect((await context.engine.run(turn.id)).status).toBe('completed');
+    const turn = context.create({ timeoutMs: 60_000 }); const result = await context.engine.run(turn.id);
+    if (allowed) expect(commandResult).toMatchObject({ reason: 'completed', exitCode: 0 });
+    expect(result.status).toBe('completed');
     expect(existsSync(effect)).toBe(allowed); if (allowed) expect(readFileSync(effect, 'utf8')).toBe('命令实操成功');
     expect(context.store.entries('session')[2]!.message).toMatchObject({ outcome: allowed ? 'ok' : 'rejected' });
     expect(context.db.all('SELECT state FROM independent_tool_calls')).toEqual([{ state: allowed ? 'succeeded' : 'rejected' }]);
     expect(JSON.stringify(context.db.all('SELECT * FROM independent_tool_calls'))).not.toContain('命令实操成功');
-  });
+  }, 90_000);
   it('命令执行期间取消，循环等宿主退出后才保存取消终态', async () => {
     const directory = temporary(); const marker = path.join(directory, 'pid.txt'); const context = setup([toolReply]);
     const journal = new IndependentToolJournal(context.db); const executor = new IndependentCommandExecutor(directory); executors.push(executor);
     const command = new IndependentCommandTool(journal, executor);
     const spec = IndependentCommandSpec.parse({ program: process.execPath,
-      args: ['-e', `require('fs').writeFileSync(${JSON.stringify(marker)},String(process.pid));setInterval(()=>{},1000)`], timeoutMs: 10_000, maxOutputBytes: 4096 });
+      args: ['-e', `require('fs').writeFileSync(${JSON.stringify(marker)},String(process.pid));setInterval(()=>{},1000)`], timeoutMs: 60_000, maxOutputBytes: 4096 });
     let cleaned = false;
     context.tools.execute.mockImplementation(async (input, identity, signal) => {
       const record = command.prepare({ ...identity, callId: input.id }, spec, directory, '逐次审批'); journal.approve(record.id);
       const result = await command.execute(record.id, spec, { cwd: directory, approvalBasis: '逐次审批', signal }); cleaned = true;
       return { role: 'tool', callId: input.id, name: input.name, text: result.stdout, outcome: 'cancelled' };
     });
-    const turn = context.create(); const abort = new AbortController(); const pending = context.engine.run(turn.id, abort.signal);
-    await vi.waitFor(() => expect(existsSync(marker)).toBe(true), { timeout: 10_000 });
+    const turn = context.create({ timeoutMs: 60_000 }); const abort = new AbortController(); const pending = context.engine.run(turn.id, abort.signal);
+    await vi.waitFor(() => expect(existsSync(marker)).toBe(true), { timeout: 30_000 });
     const pid = Number(readFileSync(marker, 'utf8')); abort.abort(); expect((await pending).status).toBe('cancelled'); expect(cleaned).toBe(true);
     expect(() => process.kill(pid, 0)).toThrow();
     expect(context.db.all('SELECT state FROM independent_tool_calls')).toEqual([{ state: 'cancelled' }]);
     expect(context.store.pending(turn.id)).toEqual([]); expect(context.model.complete).toHaveBeenCalledTimes(1);
-  });
+  }, 90_000);
 });
 
 // 2026-11-10：等待用户审批的时间不计入回合时限（真实补验中一次未处理的审批让回合超时失败）

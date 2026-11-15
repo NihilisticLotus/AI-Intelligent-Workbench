@@ -170,8 +170,8 @@ class FakeConnection implements AgentConnection {
       await this.say(`当前任务是只读权限，我不能修改文件，也不能执行命令。建议的改动是：把 ${FILE_PLAYER} 第 41 行的 jumpForce 从 7.5 调到 8.2，并在 ${FILE_CONFIG} 里同步。需要我动手的话，请把权限改成“需审批”或更高。`, signal);
       return;
     }
-    // 需审批：修改文件前也要问（design.md 9.1）。工作区内自动、全自动由 Gateway 的权限层直接放行
-    if (this.permission === 'ask') {
+    // 所有修改都经过 Gateway，自动档也必须先检查固定禁止与项目规则。
+    {
       const editReq: PermissionRequest = {
         operation:{tool:'edit',command:null,paths:[FILE_PLAYER],complete:true,deletion:false},
         toolId: newId('tool'),
@@ -206,13 +206,11 @@ class FakeConnection implements AgentConnection {
     ] });
     await this.say('参数改好了，接下来运行 EditMode 测试确认没有影响手感测试。', signal);
 
-    // 5. 执行命令：需审批时等用户决定；全自动 / 工作区内自动由 Gateway 的权限层直接放行
+    // 5. 执行命令：由 Gateway 统一决定，工作区内自动的规则外命令仍需审批。
     const toolId = newId('tool');
     this.host.update({ kind: 'tool_start', toolId, toolKind: 'execute', title: '执行命令', target: COMMAND });
     let decision: { allowed: boolean; note?: string };
-    if (this.permission === 'full') {
-      decision = { allowed: true };
-    } else {
+    {
       const req: PermissionRequest = {
         operation:{tool:'shell',command:COMMAND,paths:[],complete:true,deletion:false},
         toolId,
@@ -221,7 +219,7 @@ class FakeConnection implements AgentConnection {
         detail: COMMAND,
         cwd: null,
         options: [
-          // “总是允许”要配合规则功能（后续步骤）才有意义，1.1 不提供这个选项
+          // “总是允许”由 Gateway 根据可预览的项目规则追加。
           { id: 'allow', label: '允许一次', kind: 'allow_once' },
           { id: 'reject', label: '拒绝', kind: 'reject_once' },
         ],

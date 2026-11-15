@@ -7,7 +7,7 @@ import { createStore, useStore } from '../state/store';
 import type { SessionCfg } from '../state/core';
 import { permInfo, permOrder } from '../lib/format';
 import {
-  PERM_LOCKED_REASON, agentReadiness, isEnabled, emptyModelsText, modelSwitchKind, permAvailable, pickEfforts, pickModels,
+  PERM_LOCKED_REASON, INPLACE_PERM_LOCKED_REASON, agentReadiness, isEnabled, emptyModelsText, modelSwitchKind, taskPermAvailable, pickEfforts, pickModels,
   profileKindText, profileSwitchKind, profileSwitchText, switchKindText, switchNeedsTurnEnd, withDefaultActions,
 } from '../lib/agents';
 import { AgentBadge, ErrorNotice, asApiError, choiceDialog, confirmDialog, openMenu, toastErrorOf, useAgentName } from './ui';
@@ -249,7 +249,7 @@ function PermChip({ task, online }: { task: Task; online: boolean }) {
     if (p === 'full') {
       const ok = await confirmDialog({
         title: '开启全自动？', ok: '开启全自动', danger: true,
-        body: <><p>除了“始终禁止”清单里的操作（例如删除工作区外的文件），Agent 的所有操作都不再询问你。</p><p style={{ margin: 0 }}>建议只在可以随时丢弃的任务上使用。</p></>,
+        body: <><p>固定禁止和项目规则仍然优先。其他操作自动允许，命令没有系统沙箱。</p><p style={{ margin: 0 }}>建议只在可以随时丢弃的任务上使用。</p></>,
       });
       if (!ok) return;
     }
@@ -262,9 +262,9 @@ function PermChip({ task, online }: { task: Task; online: boolean }) {
     <button type="button" className="perm-chip" data-level={info.level} aria-haspopup="menu" disabled={!online}
       aria-label={`权限级别：${info.label}，点击修改`} title={`权限级别：${info.label}（点击修改）`}
       onClick={(e) => openMenu(e.currentTarget, permOrder.map((p) => {
-        const ok = permAvailable(task.agent, p, agentInfo);
+        const ok = taskPermAvailable(task,p,agentInfo);
         return {
-          label: `${p === task.permission ? '✓ ' : ''}${permInfo[p].label}${p === 'full' && ok ? '…' : ''}：${ok ? permInfo[p].desc : PERM_LOCKED_REASON}`,
+          label: `${p === task.permission ? '✓ ' : ''}${permInfo[p].label}${p === 'full' && ok ? '…' : ''}：${ok ? permInfo[p].desc : !task.workspace||task.workspace.kind==='inplace'?INPLACE_PERM_LOCKED_REASON:PERM_LOCKED_REASON}`,
           danger: p === 'full' && ok,
           disabled: !ok,
           onSelect: () => void set(p),

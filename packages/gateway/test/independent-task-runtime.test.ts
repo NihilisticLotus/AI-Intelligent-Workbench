@@ -46,6 +46,34 @@ async function setup(respond: (n: number, body: any) => unknown = () => done('�
 }
 
 describe('正式独立任务的离线接口与闭环', () => {
+  it.each(['readonly','ask','workspace','full'] as const)('独立文件工具在 %s 档经统一规则决定',async permission=>{
+    const f=await setup(n=>n===1?{choices:[{index:0,message:{role:'assistant',content:'',tool_calls:[{id:'auto-file',type:'function',function:{name:'create_file',arguments:JSON.stringify({path:'auto.txt',content:'自动权限测试',createParents:false})}}]},finish_reason:'tool_calls'}],usage:{prompt_tokens:5,completion_tokens:5}}:done('完成'),'separate_v2');
+    await f.s.tasks.patch(f.task.id,{permission});await f.s.tasks.prompt(f.task.id,'验证文件权限');
+    if(permission==='ask'){
+      await expect.poll(()=>({status:f.s.tasks.get(f.task.id).status,pending:f.s.tasks.listApprovals('pending').length,errors:f.s.events.read({after:0,taskId:f.task.id,limit:1000}).filter(e=>e.type==='error'||e.type==='session.notice')}),{timeout:30000}).toMatchObject({pending:1});await f.s.tasks.approve(f.s.tasks.listApprovals('pending')[0]!.id,'reject',undefined,'test');
+    }
+    await f.wait();expect(existsSync(path.join(f.workspace,'auto.txt'))).toBe(permission==='workspace'||permission==='full');
+    expect(existsSync(path.join(f.originalWorkspace,'auto.txt'))).toBe(false);
+    const approvals=f.s.events.read({after:0,taskId:f.task.id,limit:1000}).filter(e=>e.type==='approval.requested');expect(approvals).toHaveLength(permission==='ask'?1:0);
+  },60000);
+  it.each(['workspace','full','forbidden'] as const)('独立命令 %s：规则外审批、全自动执行、固定禁止拒绝',async mode=>{
+    // 禁止文本只放在输出字符串中；即使保护回归，也不会实际启动 git 或访问网络。
+    const f=await setup(n=>n===1?{choices:[{index:0,message:{role:'assistant',content:'',tool_calls:[{id:'auto-command',type:'function',function:{name:'command',arguments:JSON.stringify({program:process.execPath,args:mode==='forbidden'?['-e','process.stdout.write("git push")']:['-e','process.stdout.write("离线自动命令")'],timeoutMs:10000,maxOutputBytes:4096})}}]},finish_reason:'tool_calls'}],usage:{prompt_tokens:5,completion_tokens:5}}:done('完成'));
+    await f.s.tasks.patch(f.task.id,{permission:mode==='workspace'?'workspace':'full'});await f.s.tasks.prompt(f.task.id,'验证命令权限');
+    if(mode==='workspace'){
+      await expect.poll(()=>f.s.tasks.listApprovals('pending').length,{timeout:30000}).toBe(1);await f.s.tasks.approve(f.s.tasks.listApprovals('pending')[0]!.id,'reject',undefined,'test');
+    }
+    await f.wait();expect(f.state().tools[0]?.state).toBe(mode==='full'?'succeeded':'rejected');
+    const result=f.s.independentRuntime.history(f.task.id,0,100).items.find(e=>e.message.role==='tool')?.message;
+    expect(result).toMatchObject({outcome:mode==='full'?'ok':'rejected'});expect(f.s.processes.livePids()).toEqual([]);
+    if(mode==='forbidden')expect(JSON.stringify(result)).toContain('始终禁止');
+  },60000);
+  it('独立旧任务拒绝自动档，不能直接绕过任务服务开启',async()=>{
+    const f=await setup();f.s.db.run('UPDATE tasks SET workspace_kind=NULL WHERE id=?',f.task.id);
+    await expect(f.s.tasks.patch(f.task.id,{permission:'full'})).rejects.toThrow('旧任务');
+    const host={update:()=>{},requestPermission:async()=>({outcome:'cancelled' as const})};
+    await expect(f.s.independentRuntime.open(f.task.id,'unused',f.originalWorkspace,'full',host,false)).rejects.toThrow('旧任务');
+  });
   it.each(['allow','deny'] as const)('文件写入遵循项目 %s 规则且不弹审批',async action=>{
     const f=await setup(n=>n===1?{choices:[{index:0,message:{role:'assistant',content:'',tool_calls:[{id:'rule-write',type:'function',function:{name:'create_file',arguments:JSON.stringify({path:'rule.txt',content:'规则测试',createParents:false})}}]},finish_reason:'tool_calls'}],usage:{prompt_tokens:10,completion_tokens:5}}:done('完成'),'separate_v2');
     f.s.tasks.permissions.put(f.task.projectId,{revision:0,items:[{action,tool:'edit',match:null,path:'rule.txt'}]});
@@ -281,7 +309,7 @@ describe('正式独立任务的离线接口与闭环', () => {
     await expect(f.s.tasks.updateIndependent(f.task.id, 'recover', { expectedRevision: 1 })).rejects.toThrow('空闲');
     await f.wait(); expect(f.state().tools[0]!.state).toBe('rejected'); expect(existsSync(path.join(f.workspace, 'readonly.txt'))).toBe(false);
     expect(f.s.tasks.listApprovals('pending')).toEqual([]); expect(f.bodies[1].messages.some((m: any) => m.role === 'tool' && String(m.content).includes('只读'))).toBe(true);
-    await expect(f.s.tasks.patch(f.task.id, { permission: 'full' })).rejects.toThrow('只读或需审批');
+    expect((await f.s.tasks.patch(f.task.id, { permission: 'full' })).permission).toBe('full');
   }, 90_000);
   it('人工总结保留原记录，历史按页读取且只在完整回合边界压缩', async () => {
     const f = await setup(); await f.s.tasks.prompt(f.task.id, '第一轮原文'); await f.wait();

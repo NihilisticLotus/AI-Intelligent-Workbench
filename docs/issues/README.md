@@ -102,4 +102,5 @@
 | [ISSUE-0086](ISSUE-0086-permission-command-options.md) | 权限命令选项与复杂通配需要完整判定 | fixed | bug | 2026-11-15 | 2026-11-15 |
 | [ISSUE-0087](ISSUE-0087-rule-keyboard-focus.md) | 新权限规则调序后丢失键盘焦点 | fixed | bug | 2026-11-15 | 2026-11-15 |
 
-| [ISSUE-0088](ISSUE-0088-native-auto-permission-bypass.md) | 原生自动权限模式会跳过工作台规则入口 | investigating | 设计冲突 | 2026-11-15 | |
+| [ISSUE-0088](ISSUE-0088-native-auto-permission-bypass.md) | 原生自动权限模式会跳过工作台规则入口 | deferred | 设计冲突 | 2026-11-15 | |
+| [ISSUE-0089](ISSUE-0089-windows-test-host-timeouts.md) | Windows 文件宿主全量回归出现超时 | fixed | 验收未通过 | 2026-11-15 | 2026-11-15 |

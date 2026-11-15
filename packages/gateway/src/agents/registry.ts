@@ -28,6 +28,7 @@ export class AgentRegistry {
       models: await a.listModels(),
       efforts: await a.listEfforts(),
       message: d.message,
+      permissionLevels:a.id==='fake'?(a.permissionLevels??['readonly','ask','workspace','full']):(a.permissionLevels??['readonly','ask']).filter(p=>p==='readonly'||p==='ask'),
     };
   }
 

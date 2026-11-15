@@ -72,7 +72,7 @@ export class IndependentTaskRuntime {
       }));
     return { kind: 'independent', displayName: 'AI Console 独立 Agent', status: models.length ? 'ready' : 'disabled',
       version: '0.1.0', verified: false, models, efforts: null, message: models.length ? '使用工作台自有 API 与模型配置' : '请先在 Agent 管理中添加 API 和模型',
-      usesNativeConfig: false, permissionLevels: ['readonly', 'ask'], workspaceConfig: 'ignored' };
+      usesNativeConfig: false, permissionLevels: ['readonly', 'ask', 'workspace', 'full'], workspaceConfig: 'ignored' };
   }
   configure(taskId: string, input: IndependentTaskOptions, expectedRevision?: number) {
     const options = IndependentTaskOptions.parse(input);
@@ -181,10 +181,12 @@ export class IndependentTaskRuntime {
     return detail;
   }
   async open(taskId: string, sessionId: string, workspace: string, initialPermission: PermissionLevel, host: SessionHost, managedWorkspace = false): Promise<AgentConnection> {
+    if(!managedWorkspace&&!['readonly','ask'].includes(initialPermission))throw Errors.levelUnavailable('直接在项目目录运行的旧任务不能使用自动权限档');
     await this.orphanCleanup; this.assertReady(taskId);
     const state = this.state(taskId), options = state.options;
     const { key } = await this.catalog.credentials(taskId); const secrets = key ? [key] : [];
     let permission = initialPermission, closed = false, messageId = newId('m'), streamedText = false;
+    const writable=()=>permission!=='readonly';
     const executor = new IndependentCommandExecutor(this.dataDir, {
       started: (p) => {
         // 这里要求登记实际成功，不能吞掉落库故障后仍派发命令。
@@ -197,7 +199,7 @@ export class IndependentTaskRuntime {
     const basis = JSON.stringify({ taskId, sessionId, revision: state.revision, workspace });
     let clock: IndependentApprovalClock | undefined;
     const approve = async (id: string, title: string, detail: IndependentApprovalDetail, signal: AbortSignal) => {
-      if (permission !== 'ask' || signal.aborted) return { approved: false, reason: signal.aborted ? '操作已停止' : '只读权限不允许修改或命令' };
+      if (permission === 'readonly' || signal.aborted) return { approved: false, reason: signal.aborted ? '操作已停止' : '只读权限不允许修改或命令' };
       this.details.set(id, detail);
       clock?.pause();
       try {
@@ -207,7 +209,7 @@ export class IndependentTaskRuntime {
           operation:{tool:detail.kind==='command'?'shell':'edit',command:commandText?.slice(0,32000)??null,paths:detail.kind==='file'?[detail.proposal.path]:[],deletion:false,complete:rawCommand===null||rawCommand.length<=32000&&commandText===rawCommand},
           detail: '原始内容仅通过任务的独立审批详情接口读取，不写入事件。', cwd: null,
           options: [{ id: 'allow', label: '允许一次', kind: 'allow_once' }, { id: 'reject', label: '拒绝', kind: 'reject_once' }] }, signal);
-        return { approved: permission === 'ask' && !signal.aborted && result.outcome === 'selected' && result.optionId === 'allow',
+        return { approved: writable() && !signal.aborted && result.outcome === 'selected' && result.optionId === 'allow',
           reason: result.outcome === 'selected' ? redact(result.note || '用户未批准本次操作', secrets) : '审批已取消或超时' };
       } finally { clock?.resume(); this.details.delete(id); }
     };
@@ -279,7 +281,7 @@ export class IndependentTaskRuntime {
     return {
       agentSessionId: sessionId, resumed: this.store.entries(sessionId).length > 0, isClosed: () => closed,
       setConfig: async () => { throw Errors.badRequest('请在独立任务配置中明确应用服务、模型与预算'); },
-      setPermission: async (level) => { if (level !== 'readonly' && level !== 'ask') throw Errors.levelUnavailable('独立 Agent 当前仅支持只读或需审批'); permission = level; },
+      setPermission: async (level) => { if (!managedWorkspace&&!['readonly','ask'].includes(level)) throw Errors.levelUnavailable('直接在项目目录运行的旧任务不能使用自动权限档'); permission = level; },
       prompt: async (input, signal) => {
         this.assertReady(taskId);
         const rules = await files.rules(null, signal);

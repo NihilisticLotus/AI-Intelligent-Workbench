@@ -3,7 +3,7 @@ import { useMemo, useState } from 'react';
 import { useApp } from '../state/app';
 import { navigate } from '../state/ui';
 import { setPref, prefsStore } from '../state/prefs';
-import { taskStatusText } from '../lib/format';
+import { taskStatusLabel } from '../lib/format';
 import { Dialog, openDialog } from './ui';
 import { openNewTask } from './dialogs';
 
@@ -27,7 +27,7 @@ function Palette({ close }: { close: () => void }) {
       .slice(0, 30)
       .map((t) => ({
         key: 't:' + t.id, label: t.title,
-        meta: `${taskStatusText[t.status][0]} · ${projects.find((p) => p.id === t.projectId)?.name ?? ''}`,
+        meta: `${taskStatusLabel(t)[0]} · ${projects.find((p) => p.id === t.projectId)?.name ?? ''}`,
         run: () => navigate({ page: 'task', taskId: t.id }),
       }));
     const ops: Entry[] = [

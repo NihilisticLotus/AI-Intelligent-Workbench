@@ -18,7 +18,7 @@ import { emptyUsage, recordTurnUsage } from './usage';
 import { WorkspaceManager, WorkspaceError } from './workspaces';
 import { GitError } from './git';
 import { validateProjectDir } from './fsbrowse';
-import type { TaskWorkspace } from '@aic/protocol';
+import type { TaskWorkspace, MergeWorkspaceBody, WorkspaceOperationResult } from '@aic/protocol';
 
 type TaskRow = {
   id: string; project_id: string; group_id: string | null; title: string; prompt: string;
@@ -160,11 +160,15 @@ export class TaskService {
     const row = this.getRow(id);
     const task = toTask(row);
     const record = this.workspaces?.get(id);
+    const operation=this.workspaces?.operation(id);
+    if(operation && ['merged','applied','rolled_back','discarded'].includes(operation.state))task.status=operation.state==='discarded'?'discarded':'merged';
     const prep = this.db.get<{state: 'preparing' | 'confirmation_required' | 'failed'; bytes: number | null; error: string | null}>('SELECT * FROM workspace_preparations WHERE task_id=?', id);
     task.workspace = { kind: row.workspace_kind ?? 'inplace', path: record?.path ?? row.workspace_path,
       branch: record?.branch ?? row.branch, baseRef: record?.baseRef ?? row.base_ref, baseBranch: record?.baseBranch ?? null,
       ...(prep ? { state: prep.state, ...(prep.bytes !== null ? { copyBytes: prep.bytes } : {}), ...(prep.error ? { error: prep.error } : {}) } : record ? { state: record.state === 'ready' ? 'ready' : 'failed' } : {}),
       ...(record ? { largeFiles: record.largeFiles.map(f => f.path) } : {}),
+      ...(operation ? {operation:(({appliedFiles: _files,...visible})=>visible)(operation)} : {}),
+      ...(operation?.state==='pending'?{state:'failed' as const,error:'上次项目操作尚未确认完成，请重启工作台核对记录；不要重复合并。'}:{}),
     };
     return task.agent === 'independent' && this.independentRuntime ? { ...task, independent: this.independentRuntime.reference(id) } : task;
   }
@@ -195,6 +199,56 @@ export class TaskService {
   async restoreWorkspaceFile(id: string, relative: string) {
     const result = await this.workspaceOperation(id, manager => manager.restoreFile(id, relative), true);
     this.syncWorkspace(id); await this.refreshChanges(id); return result;
+  }
+
+  async finishWorkspace(id: string, action: 'merge'|'discard'|'rollback'|'open', body?: MergeWorkspaceBody): Promise<WorkspaceOperationResult|{ok:true}> {
+    const task=this.get(id);
+    if(this.isBusy(id)||['running','waiting','queued'].includes(task.status))throw Errors.invalidState('请等任务空闲后再操作工作副本。');
+    if(FINAL.includes(task.status)&&action!=='rollback'&&action!=='open')throw Errors.invalidState('任务已经结束。');
+    this.configuring.add(id);
+    try {
+      return await this.workspaceOperation(id,async manager=>{
+        await this.dropRuntime(id,'workspace_operation');
+        if(action==='open'){await manager.open(id);return {ok:true} as const;}
+        let result:WorkspaceOperationResult;
+        if(action==='discard')result=await manager.discard(id);
+        else if(action==='rollback')result=task.workspace?.kind==='copy'?await manager.rollbackCopy(id):await manager.rollbackGit(id);
+        else result=task.workspace?.kind==='copy'?await manager.applyCopy(id):await manager.mergeGit(id,body!);
+        const final=manager.operation(id);
+        if(final && ['merged','applied','rolled_back','discarded'].includes(final.state))this.db.run('UPDATE tasks SET status=?,finished_at=?,updated_at=? WHERE id=?',final.state==='discarded'?'discarded':'merged',final.finishedAt,now(),id);
+        this.syncWorkspace(id);await this.refreshChanges(id);return result;
+      });
+    } finally {this.configuring.delete(id);}
+  }
+
+  async cleanupWorkspaces() {
+    if(!this.workspaces)return {removed:[],failed:[]};
+    return this.workspaces.cleanup(async id=>{
+      if(this.isBusy(id))return false;
+      await this.dropRuntime(id,'workspace_cleanup');return true;
+    });
+  }
+
+  async deleteTask(id:string) {
+    const task=this.get(id);if(this.isBusy(id)||['running','waiting','queued'].includes(task.status))throw Errors.invalidState('请等任务空闲后再删除。');
+    if(task.workspace?.operation?.state==='pending')throw Errors.invalidState('上次工作区操作尚未核对，暂不能删除恢复记录。');
+    this.configuring.add(id);
+    try {
+      await this.dropRuntime(id,'task_deleted');
+      if(this.workspaces?.get(id))await this.workspaces.remove(id);
+      this.attachments?.deleteTask(id);
+      this.db.tx(()=>{
+        this.db.run('DELETE FROM tasks WHERE id=?',id);
+        this.db.run('DELETE FROM sessions WHERE task_id=?',id);
+        this.db.run('DELETE FROM approvals WHERE task_id=?',id);
+        this.db.run('DELETE FROM workspace_preparations WHERE task_id=?',id);
+        this.db.run('DELETE FROM workspace_operations WHERE task_id=?',id);
+        this.events.append({type:'task.deleted',taskId:null,sessionId:null,data:{id}});
+      });
+      const timer=this.emitTimers.get(id);if(timer)clearTimeout(timer);this.emitTimers.delete(id);this.lastEmit.delete(id);
+      return {ok:true};
+    }catch(e){if(e instanceof WorkspaceError)throw new AppError(409,{code:e.code,message:e.message,actions:[]});if(e instanceof GitError)throw Errors.invalidState(e.message);throw e;}
+    finally{this.configuring.delete(id);}
   }
 
   private syncWorkspace(id: string) {
@@ -909,7 +963,8 @@ export class TaskService {
 
   async prompt(taskId: string, text: string, attachmentIds: string[] = []): Promise<{ taskId: string; messageId: string }> {
     const row = this.getRow(taskId);
-    if (FINAL.includes(row.status)) throw Errors.invalidState('任务已经结束，不能继续发送消息');
+    if (FINAL.includes(this.get(taskId).status)) throw Errors.invalidState('任务已经结束，不能继续发送消息');
+    if(this.workspaces?.operation(taskId)?.state==='pending')throw Errors.invalidState('上次项目操作尚未确认完成，暂不能继续任务。');
     if (this.db.get('SELECT task_id FROM workspace_preparations WHERE task_id=?', taskId)) throw Errors.invalidState('工作副本尚未准备好，请先处理准备提示');
     if (this.isBusy(taskId)) throw Errors.invalidState('任务正在执行', '请等这一轮结束，或先点 [停止]', [{ label: '停止', action: 'task.cancel', args: { taskId } }]);
     if (row.agent === 'independent') this.independentRuntime?.assertReady(taskId);

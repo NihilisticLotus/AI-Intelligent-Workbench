@@ -40,6 +40,8 @@ export interface Platform {
   /** 在 IDE 中打开 */
   readonly canOpenInIde: boolean;
   openInIde(target: { projectId: string; taskId?: string }): Promise<void>;
+  /** 通过 Gateway 打开登记副本，只传任务 ID。 */
+  openWorkspace(taskId:string):Promise<void>;
   /**
    * 用系统浏览器打开外部链接（登录授权页等）。浏览器版开新标签页；桌面版交给系统浏览器。
    * 返回 false 表示没能打开（例如被拦截），界面提示用户复制链接

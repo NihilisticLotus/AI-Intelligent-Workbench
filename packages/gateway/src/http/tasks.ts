@@ -1,5 +1,5 @@
 // 任务、事件、Agent、审批
-import { PrepareWorkspaceBody, RestoreWorkspaceFileBody } from '@aic/protocol';
+import { MergeWorkspaceBody, PrepareWorkspaceBody, RestoreWorkspaceFileBody } from '@aic/protocol';
 import { Hono } from 'hono';
 import { ApprovalsQuery, CreateTaskBody, EventsQuery, PatchTaskBody, PutTaskDraftBody, TasksQuery, type TaskDraft } from '@aic/protocol';
 import { PutIndependentTaskBody, IndependentRecoveryBody, IndependentHistoryQuery, IndependentCheckpointBody } from '@aic/protocol';
@@ -15,6 +15,11 @@ export function taskRoutes(s: Services) {
   r.get('/tasks', (c) => c.json(s.tasks.list(parseQuery(c, TasksQuery))));
   r.post('/tasks', async (c) => c.json(await s.tasks.create(await readBody(c, CreateTaskBody)), 201));
   r.get('/tasks/:id', (c) => c.json(s.tasks.get(c.req.param('id'))));
+  r.delete('/tasks/:id',async c=>c.json(await s.tasks.deleteTask(c.req.param('id'))));
+  r.post('/tasks/:id/merge',async c=>c.json(await s.tasks.finishWorkspace(c.req.param('id'),'merge',await readBody(c,MergeWorkspaceBody))));
+  r.post('/tasks/:id/discard',async c=>c.json(await s.tasks.finishWorkspace(c.req.param('id'),'discard')));
+  r.post('/tasks/:id/rollback',async c=>c.json(await s.tasks.finishWorkspace(c.req.param('id'),'rollback')));
+  r.post('/tasks/:id/workspace/open',async c=>c.json(await s.tasks.finishWorkspace(c.req.param('id'),'open')));
   r.post('/tasks/:id/workspace/prepare', async (c) => { await readBody(c, PrepareWorkspaceBody); return c.json(await s.tasks.confirmWorkspace(c.req.param('id'))); });
   r.get('/tasks/:id/changes', async c => { const id = c.req.param('id'); return c.json(await s.tasks.workspaceOperation(id, manager => manager.diff(id))); });
   r.get('/tasks/:id/changes/file', async c => { const id = c.req.param('id'); return c.json(await s.tasks.workspaceOperation(id, manager => manager.fileDiff(id, c.req.query('path') ?? ''))); });

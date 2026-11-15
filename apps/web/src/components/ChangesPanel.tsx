@@ -5,6 +5,7 @@ import { useStore } from '../state/store';
 import { changeFocus } from '../state/details';
 import { asApiError, confirmDialog } from './ui';
 import { changeLabels, parseWorkspaceDiff } from '../lib/workspace-diff';
+import { WorkspaceActions } from './workspace-actions';
 
 export function ChangesPanel({ task, changes, error, refresh }: { task: Task; changes: WorkspaceChanges | null; error: string | null; refresh: () => void }) {
   const [selected, setSelected] = useState<string | null>(null), [diff, setDiff] = useState<WorkspaceFileDiff | null>(null);
@@ -31,7 +32,7 @@ export function ChangesPanel({ task, changes, error, refresh }: { task: Task; ch
     return () => { live = false; };
   }, [task.id, selected, changes, ready, isolated]);
   if (!isolated) return <div className="empty"><h3>旧任务没有独立副本</h3><p>请在“详细 → 输出”查看工具记录。</p></div>;
-  if (!ready) return <div className="empty"><h3>工作副本尚未准备好</h3><p>请在“详细 → 环境”查看原因或完成复制确认。</p></div>;
+  if (!ready) return <div className="empty"><h3>{task.workspace?.operation?.removedAt?'工作副本已清理':'工作副本尚未准备好'}</h3><p>{task.workspace?.operation?.removedAt?'任务记录仍保留。':'请在“详细 → 环境”查看原因或完成复制确认。'}</p></div>;
   async function restore() {
     if (!selected || !await confirmDialog({ title: '还原文件', ok: '还原文件', danger: true, body: <><p>将 {selected} 还原到任务开始时的内容；新增文件会从副本中删除。</p><p>该文件在副本中的改动将丢失。原项目文件不受影响。</p></> })) return;
     setRestoring(true);
@@ -54,6 +55,6 @@ export function ChangesPanel({ task, changes, error, refresh }: { task: Task; ch
         {diffError ? <p className="changes-note" role="alert">{diffError}</p> : !diff ? <p className="changes-note" role="status">正在读取文件差异…</p> : diff.patch === null ? <p className="changes-note">{diff.file.tooLarge ? '文件过大，不显示文本差异' : '二进制文件'} · {diff.file.beforeSize.toLocaleString()} → {diff.file.afterSize.toLocaleString()} 字节</p> : <div className="diff-scroll" tabIndex={0} aria-label="差异内容"><table className="diff-table"><thead><tr><th>原行</th><th>新行</th><th>内容</th></tr></thead><tbody>{parseWorkspaceDiff(diff.patch).map((line, index) => <tr key={index} className={'diff-' + line.kind}><td>{line.oldLine}</td><td>{line.newLine}</td><td><code><span aria-hidden="true">{line.kind === 'add' ? '+' : line.kind === 'remove' ? '−' : ' '}</span>{line.text}</code></td></tr>)}</tbody></table></div>}
       </section> : null}
     </>}
-    <div className="changes-actions"><span className="d-note">合并、应用结果与回滚将在后续阶段接入。</span></div>
+    <WorkspaceActions task={task} changes={changes} refresh={refresh}/>
   </div>;
 }

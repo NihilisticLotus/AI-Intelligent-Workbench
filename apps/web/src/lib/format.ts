@@ -1,5 +1,5 @@
 // 文案与格式化：状态、权限级别、工具动词、时间。界面上的中文说法集中在这里，保持一致。
-import type { AgentKind, PermissionLevel, TaskStatus } from '@aic/protocol';
+import type { AgentKind, PermissionLevel, TaskStatus, Task } from '@aic/protocol';
 
 /** 状态形状：run 脉冲圆点、wait 菱形、ok 圆点、err 方块、idle 空心圈（状态不只靠颜色） */
 export type StatusShape = 'run' | 'wait' | 'ok' | 'err' | 'idle';
@@ -16,6 +16,11 @@ export const taskStatusText: Record<TaskStatus, [string, StatusShape]> = {
   failed: ['失败', 'err'],
   interrupted: ['已中断', 'err'],
 };
+export function taskStatusLabel(task:Task):[string,StatusShape] {
+  if(task.workspace?.operation?.state==='rolled_back')return ['已撤销','idle'];
+  if(task.status==='merged'&&task.workspace?.kind==='copy')return ['已应用','ok'];
+  return taskStatusText[task.status];
+}
 
 export interface PermInfo { label: string; desc: string; icon: string; level: string }
 export const permInfo: Record<PermissionLevel, PermInfo> = {

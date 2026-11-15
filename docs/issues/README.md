@@ -94,3 +94,6 @@
 | [ISSUE-0079](ISSUE-0079-db-migration-handle.md) | 数据库迁移抛错时没有关闭连接 | fixed | bug | 2026-11-15 | 2026-11-15 |
 | [ISSUE-0080](ISSUE-0080-managed-workspace-file-guard.md) | 独立文件宿主误拦数据目录内的登记副本 | fixed | 接入兼容 | 2026-11-15 | 2026-11-15 |
 | [ISSUE-0081](ISSUE-0081-diff-content-revision.md) | 统计相同时单文件差异可能停留在旧内容 | fixed | bug | 2026-11-15 | 2026-11-15 |
+| [ISSUE-0082](ISSUE-0082-git-config-callbacks.md) | 继承 git 配置可能触发钩子与外部程序 | fixed | bug | 2026-11-15 | 2026-11-15 |
+| [ISSUE-0083](ISSUE-0083-copy-snapshot-original-bytes.md) | 影子快照换行规范化改变回滚原文 | fixed | bug | 2026-11-15 | 2026-11-15 |
+| [ISSUE-0084](ISSUE-0084-new-task-isolation-footer.md) | 新任务底部仍提示直接修改原项目 | fixed | bug | 2026-11-15 | 2026-11-15 |

@@ -41,6 +41,15 @@ describe('insertBySeq', () => {
 });
 
 describe('applyEvent', () => {
+  it('删除任务清理列表与审批，迟到的旧事件和 REST 不复活任务',()=>{
+    let s=applyEvent(emptyCore(),E.updated(1,task()));
+    s=applyEvent(s,{seq:2,ts:2,taskId:'t1',sessionId:'s1',type:'approval.requested',data:{approval:approval()}});
+    s=applyEvent(s,{seq:10,ts:10,taskId:null,sessionId:null,type:'task.deleted',data:{id:'t1'}});
+    expect(s.tasks.t1).toBeUndefined();expect(s.approvals.a1).toBeUndefined();expect(s.logs.t1).toBeUndefined();
+    s=applyEvent(s,E.updated(9,task()));s=mergeRestTask(s,task());s=applyTaskSnapshot(s,[task()],9);
+    s=applyEvent(s,{seq:8,ts:8,taskId:'t1',sessionId:'s1',type:'approval.requested',data:{approval:approval({id:'late'})}});
+    expect(s.tasks.t1).toBeUndefined();expect(s.approvals.late).toBeUndefined();
+  });
   it('同一 seq 不重复应用', () => {
     let s = emptyCore();
     s = applyEvent(s, E.delta(1, '你'));

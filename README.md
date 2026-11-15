@@ -26,6 +26,8 @@
 | 内容 | 位置 |
 |---|---|
 | 文档总目录 | [docs/README.md](docs/README.md) |
+| 1.5 任务与工作区进度 | [验收与当前进度](docs/acceptance/step-1.5.md) |
+| 问题总表 | [docs/issues/README.md](docs/issues/README.md) |
 | 架构设计 | [docs/design/design.md](docs/design/design.md) |
 | 界面设计 | [docs/design/ui-design.md](docs/design/ui-design.md) |
 | 协作规则（人和 AI Agent 都要遵守） | [AGENTS.md](AGENTS.md) |

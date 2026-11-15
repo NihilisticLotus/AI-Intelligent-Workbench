@@ -14,7 +14,13 @@ function setup(mode: string) {
   mkdirSync(root); mkdirSync(data); const executor=new IndependentCommandExecutor(data); fixtures.push({directory,executor});
   const target=path.join(root,'file.txt'),outside=path.join(base,'outside.txt'),ready=path.join(base,'ready'),resume=path.join(base,'resume'); writeFileSync(target,'原始内容');
   let source=readFileSync(fileURLToPath(new URL('../src/independent/file-guard.cs',import.meta.url)),'utf8');
-  const inject=(needle:string,extra:string) => { expect(source.split(needle)).toHaveLength(2); source=source.replace(needle,needle+extra); };
+  // 只在既有文本写入方法注入竞态；工作区批量传输复用同一底层屏障，不能误注入第二处调用。
+  const inject=(needle:string,extra:string) => {
+    const start=source.indexOf('public string WriteFile('),end=source.indexOf('public void TransferFile(',start);
+    expect(start).toBeGreaterThan(0);expect(end).toBeGreaterThan(start);
+    const body=source.slice(start,end);expect(body.split(needle)).toHaveLength(2);
+    source=source.slice(0,start)+body.replace(needle,needle+extra)+source.slice(end);
+  };
   inject('stage = CreateStage(staging, security, attributes);',' AicFileRace.Before(stage, staging);');
   inject('ProtectStage(stage);',' AicFileRace.Protected(stage, staging);');
   inject('newStream = new FileStream(stage, FileAccess.ReadWrite);', ' if (AicFileRace.Mode == "kill") { newStream.Write(bytes, 0, 1); newStream.Flush(true); AicFileRace.Pause("partial", staging); }');

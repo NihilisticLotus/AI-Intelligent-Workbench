@@ -292,3 +292,9 @@
 .diff-add { background: var(--diff-add); } .diff-remove { background: var(--diff-del); }
 .diff-header, .diff-note { opacity: .7; }
 .changes-actions { margin-top: auto; padding: 16px; border-top: 1px solid var(--line); }
+.workspace-actions { margin-top: auto; }
+.workspace-actions > p, .workspace-actions > div[role="alert"] { margin: 12px 16px; overflow-wrap: anywhere; }
+.workspace-actions .changes-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.workspace-conflict { margin: 12px 16px; padding: 12px; border: 1px solid var(--line); border-radius: 8px; overflow-wrap: anywhere; }
+.workspace-file-summary { max-height: 220px; overflow: auto; overflow-wrap: anywhere; }
+#workspace-days { width: 88px; }

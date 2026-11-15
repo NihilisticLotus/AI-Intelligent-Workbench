@@ -65,12 +65,13 @@ describe('任务工作副本接入', () => {
   });
   it('非 git 同项目串行，取消排队者不会释放正在运行的任务', async () => {
     const releases: (() => void)[] = [];
-    const f = await setup(async (_o, signal) => new Promise<void>(resolve => { releases.push(resolve); signal.addEventListener('abort',()=>resolve(),{once:true}); }));
-    const first = await f.create(); await expect.poll(()=>f.starts.length).toBe(1);
+    const starts=Array.from({length:2},()=>{let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done;});return {promise,resolve};});
+    const f = await setup(async (_o, signal) => new Promise<void>(resolve => { releases.push(resolve);starts[releases.length-1]?.resolve();signal.addEventListener('abort',()=>resolve(),{once:true}); }));
+    const first = await f.create(); await starts[0]!.promise;expect(f.starts).toHaveLength(1);
     const second = await f.create(); await expect.poll(()=>f.services.tasks.get(second.id).status).toBe('queued');
     await f.services.tasks.cancel(second.id); await expect.poll(()=>f.services.tasks.get(second.id).status).toBe('paused');
     const third = await f.create(); await expect.poll(()=>f.services.tasks.get(third.id).status).toBe('queued');
-    expect(f.starts).toHaveLength(1); releases[0]!(); await expect.poll(()=>f.starts.length).toBe(2);
+    expect(f.starts).toHaveLength(1); releases[0]!(); await starts[1]!.promise;expect(f.starts).toHaveLength(2);
     expect(f.services.tasks.get(first.id).status).toBe('review');
     releases[1]!(); await f.services.tasks.idle(); expect(f.services.tasks.get(third.id).status).toBe('review');
     expect(f.services.events.read({after:0,limit:2000,taskId:third.id})).toContainEqual(expect.objectContaining({type:'session.notice',data:expect.objectContaining({text:'等待同项目的任务结束'})}));

@@ -1,6 +1,6 @@
 // 握手、配对、设备
 import { Hono } from 'hono';
-import { FeatureKey, PairingCompleteBody, PROTOCOL_VERSION, type Hello, type PairingCompleteResult } from '@aic/protocol';
+import { WorkspaceRetention, FeatureKey, PairingCompleteBody, PROTOCOL_VERSION, type Hello, type PairingCompleteResult } from '@aic/protocol';
 import { TOKEN_IDLE_TTL_MS } from '../auth';
 import type { Services } from '../services';
 import type { Env } from './app';
@@ -8,6 +8,8 @@ import { credsOf, readBody } from './app';
 
 export function systemRoutes(s: Services) {
   const r = new Hono<Env>();
+  r.get('/settings/workspaces',c=>c.json(s.workspaces.retention()));
+  r.put('/settings/workspaces',async c=>c.json(s.workspaces.setRetention(await readBody(c,WorkspaceRetention))));
 
   r.get('/hello', (c) => {
     const d = c.get('device');

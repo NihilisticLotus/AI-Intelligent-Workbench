@@ -8,6 +8,7 @@ import { ErrorNotice, asApiError, confirmDialog, toastErrorOf } from '../compone
 import { Icon } from '../components/Icon';
 import { toast } from '../state/ui';
 import { NetworkSettingsSection } from './network-settings';
+import { WorkspaceSettingsSection } from './workspace-settings';
 
 export function SettingsPage() {
   const theme = usePref('theme');
@@ -76,6 +77,7 @@ export function SettingsPage() {
           </section>
 
           <NetworkSettingsSection />
+          <WorkspaceSettingsSection />
 
           {hello ? (
             <section className="set-sec" aria-labelledby="s-about">

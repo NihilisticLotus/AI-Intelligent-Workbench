@@ -4,7 +4,7 @@ import { blockingError, buildTimeline, latestPlan, sessionConfig, type SessionCf
 import { isRealAgent } from '../lib/agents';
 import { loadHistory, useApp } from '../state/app';
 import { setPref, usePref } from '../state/prefs';
-import { taskStatusText } from '../lib/format';
+import { taskStatusLabel } from '../lib/format';
 import type { EventEnvelope } from '@aic/protocol';
 import { Stream } from './Chat';
 import { Composer } from './Composer';
@@ -38,7 +38,7 @@ export function TaskView({ taskId, active = true }: { taskId: string; active?: b
       </div></div></main>
     );
   }
-  const [stText, shape] = taskStatusText[task.status];
+  const [stText, shape] = taskStatusLabel(task);
   return (
     <>
       <main className="main">

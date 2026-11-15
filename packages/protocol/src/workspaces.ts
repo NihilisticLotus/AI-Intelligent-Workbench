@@ -8,6 +8,7 @@ export const TaskWorkspace = z.object({
   kind: WorkspaceKind, path: z.string().nullable(), branch: z.string().nullable(), baseRef: z.string().nullable(), baseBranch: z.string().nullable(),
   state: z.enum(['preparing', 'ready', 'confirmation_required', 'failed']).optional(),
   copyBytes: z.number().nonnegative().optional(), largeFiles: z.array(z.string()).optional(), error: z.string().optional(),
+  operation: z.lazy(() => WorkspaceOperationRecord.omit({ appliedFiles: true })).optional(),
 });
 export type TaskWorkspace = z.infer<typeof TaskWorkspace>;
 export const PrepareWorkspaceBody = z.object({ confirmLargeCopy: z.literal(true) }).strict();
@@ -31,6 +32,7 @@ export const WorkspaceRecord = z.object({
   ignoreGlobs: z.array(z.string()), largeFiles: z.array(WorkspaceFile),
   sourceFiles: z.array(WorkspaceFile), snapshotFiles: z.array(WorkspaceFile).default([]), lfs: z.boolean(),
   state: z.enum(['preparing', 'ready', 'removing', 'failed']), createdAt: z.number(),
+  removalRef: z.string().optional(),
 });
 export type WorkspaceRecord = z.infer<typeof WorkspaceRecord>;
 export const WorkspaceChange = z.object({
@@ -48,3 +50,35 @@ export const RestoreWorkspaceFileBody = z.object({ path: z.string().min(1).max(4
 export const WorkspaceChangeTotals = WorkspaceChanges.pick({ added: true, removed: true }).extend({ fileCount: z.number().int().nonnegative() });
 export const WorkspaceDiffLine = z.object({ kind: z.enum(['context', 'add', 'remove', 'header', 'note']), text: z.string(), oldLine: z.number().nullable(), newLine: z.number().nullable() });
 export type WorkspaceDiffLine = z.infer<typeof WorkspaceDiffLine>;
+
+export const MergeWorkspaceBody = z.object({ strategy: z.enum(['squash', 'merge']), message: z.string().trim().min(1).max(4000) }).strict();
+export type MergeWorkspaceBody = z.infer<typeof MergeWorkspaceBody>;
+export const WorkspaceOperationResult = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('merged'), commit: z.string() }),
+  z.object({ status: z.literal('applied'), files: z.array(z.string()), skippedLargeFiles: z.array(z.string()) }),
+  z.object({ status: z.literal('conflict'), files: z.array(z.string()) }),
+  z.object({ status: z.literal('dirty'), files: z.array(z.string()) }),
+  z.object({ status: z.literal('source_changed'), files: z.array(z.string()) }),
+  z.object({ status: z.literal('wrong_branch'), expected: z.string().nullable(), actual: z.string().nullable() }),
+  z.object({ status: z.literal('new_commits'), expected: z.string(), actual: z.string() }),
+  z.object({ status: z.literal('rolled_back'), skippedLargeFiles: z.array(z.string()), commit: z.string().optional() }),
+  z.object({ status: z.literal('discarded') }),
+  z.object({ status: z.literal('no_changes') }),
+]);
+export type WorkspaceOperationResult = z.infer<typeof WorkspaceOperationResult>;
+export const WorkspaceOperationRecord = z.object({
+  taskId: z.string(), state: z.enum(['merged', 'applied', 'discarded', 'rolled_back', 'restored', 'conflict', 'pending']),
+  beforeCommit: z.string().nullable(), mergeCommit: z.string().nullable(), rollbackCommit: z.string().nullable(),
+  strategy: z.enum(['squash', 'merge']).nullable(), conflictFiles: z.array(z.string()),
+  appliedFiles: z.array(WorkspaceFile), changedFiles: z.array(z.string()), skippedLargeFiles: z.array(z.string()),
+  finishedAt: z.number(), removedAt: z.number().nullable(),
+  pending: z.object({kind:z.enum(['merge','rollback']),headBefore:z.string(),expectedTree:z.string()}).optional(),
+});
+export type WorkspaceOperationRecord = z.infer<typeof WorkspaceOperationRecord>;
+export const WorkspaceRetention = z.object({ days: z.number().int().min(1).max(365) }).strict();
+export type WorkspaceRetention = z.infer<typeof WorkspaceRetention>;
+
+// 可信文件宿主内部协议；不提供给 Agent 或网页作为任意文件写入入口。
+export const WorkspaceTransferItem = z.object({path:z.string(),expectedHash:z.string().nullable(),source:z.string().nullable(),sourceHash:z.string().nullable()});
+export type WorkspaceTransferItem = z.infer<typeof WorkspaceTransferItem>;
+export const WorkspaceTransferReply = z.object({ok:z.boolean(),files:z.array(z.string()),reason:z.enum(['forbidden','not_found','busy','conflict','io_error','interrupted']).optional()});

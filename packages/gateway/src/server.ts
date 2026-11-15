@@ -224,7 +224,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   });
   const attachments = new AttachmentService(db, dataDir);
   attachments.cleanup();
-  const cleanupTimer = setInterval(() => { try { attachments.cleanup(); } catch (e) { log('附件清理失败：' + String(e)); } }, 60 * 60_000);
+  const cleanupTimer = setInterval(() => { try { attachments.cleanup(); } catch (e) { log('附件清理失败：' + String(e)); } void cleanWorkspaces(); }, 60 * 60_000);
   cleanupTimer.unref?.();
   tasks.attachments = attachments;
   tasks.agentSvc = agentSvc;
@@ -237,6 +237,17 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   tasks.independentRuntime = independentRuntime;
   const projects = new ProjectService(db);
   tasks.workspaces = workspaces;
+  const unresolvedWorkspaceOperations=await workspaces.recoverOperations();
+  if(unresolvedWorkspaceOperations.length)log(`有 ${unresolvedWorkspaceOperations.length} 项工作区操作需要核对，已阻止重复派发。`);
+  let workspaceCleanup: Promise<unknown> = Promise.resolve();
+  const cleanWorkspaces=()=>{
+    workspaceCleanup=workspaceCleanup.then(async()=>{
+      await orphanCleanup;
+      const result=await tasks.cleanupWorkspaces();if(result.failed.length)log(`工作副本清理未完成：${result.failed.length} 项，保留登记以便再次检查。`);
+    }).catch(()=>log('工作副本清理失败，已保留登记。'));
+    return workspaceCleanup;
+  };
+  void cleanWorkspaces();
   const groups = new GroupService(db, tasks);
 
   const services: Services = {
@@ -285,7 +296,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
       independentDiscovery.close();
       ws.close();
       agentSvc.shutdown();
-      const graceful = Promise.all([tasks.shutdown(), attachments.close()]);
+      const graceful = Promise.all([tasks.shutdown(), attachments.close(), workspaceCleanup, workspaces.settle()]);
       if (opts.deadlineMs !== undefined) {
         // 两段式：正常收尾最多等 deadlineMs，到点就先同步结束所有 Agent 进程树，再给写库收尾一点时间
         const timedOut = await Promise.race([graceful.then(() => false), delay(opts.deadlineMs).then(() => true)]);

@@ -5,6 +5,8 @@ import type { PickedFolder, Platform } from './types';
 type FolderPickerHost = () => Promise<PickedFolder | null>;
 let folderHost: FolderPickerHost | null = null;
 export function registerFolderPicker(host: FolderPickerHost | null) { folderHost = host; }
+let workspaceHost:((taskId:string)=>Promise<void>)|null=null;
+export function registerWorkspaceOpener(host:(taskId:string)=>Promise<void>){workspaceHost=host;}
 
 const PREFIX = 'aic.';
 const ls = {
@@ -34,6 +36,7 @@ export function createBrowserPlatform(baseUrl = ''): Platform {
       return folderHost();
     },
     canOpenInIde: false,
+    async openWorkspace(taskId) {if(!workspaceHost)throw new Error('工作副本入口尚未就绪');await workspaceHost(taskId);},
     async openInIde() {
       throw new Error('浏览器里不能直接打开 IDE，桌面版提供');
     },

@@ -74,6 +74,12 @@ export function applyEvents(s: CoreState, events: readonly EventEnvelope[], sour
 
 function applyEntity(s: CoreState, ev: EventEnvelope): CoreState {
   switch (ev.type) {
+    case 'task.deleted': {
+      const id=ev.data.id,key='t:'+id;if(!newer(s,key,ev.seq))return s;
+      const tasks={...s.tasks},logs={...s.logs};delete tasks[id];delete logs[id];
+      const approvals=Object.fromEntries(Object.entries(s.approvals).filter(([,a])=>a.taskId!==id));
+      return {...s,tasks,logs,approvals,entitySeq:{...s.entitySeq,[key]:ev.seq}};
+    }
     case 'task.created':
     case 'task.updated': {
       const t = ev.data.task;
@@ -83,6 +89,7 @@ function applyEntity(s: CoreState, ev: EventEnvelope): CoreState {
     }
     case 'approval.requested': {
       const a = ev.data.approval;
+      if(!s.tasks[a.taskId]&&(s.entitySeq['t:'+a.taskId]??0)>=ev.seq)return s;
       const key = 'a:' + a.id;
       if (!newer(s, key, ev.seq)) return s;
       return { ...s, approvals: { ...s.approvals, [a.id]: a }, entitySeq: { ...s.entitySeq, [key]: ev.seq } };

@@ -3,11 +3,11 @@ import { useMemo, useState, type DragEvent } from 'react';
 import { FeatureKey, type Group, type Project, type Task } from '@aic/protocol';
 import { Icon } from './Icon';
 import { AgentBadge, StatusMark, confirmDialog, nameDialog, openMenu, toastErrorOf, useAgentName } from './ui';
-import { createGroup, deleteGroup, patchTask, removeProject, renameGroup, renameProject, useApp } from '../state/app';
+import { api, createGroup, deleteGroup, patchTask, removeProject, renameGroup, renameProject, useApp } from '../state/app';
 import { setPref, usePref } from '../state/prefs';
 import { navigate, routeStore, toast, type Route } from '../state/ui';
 import { useStore } from '../state/store';
-import { ago, taskStatusText } from '../lib/format';
+import { ago, taskStatusLabel } from '../lib/format';
 import { openAddProject, openNewTask } from './dialogs';
 import { requestFocusApproval } from './focus';
 
@@ -222,7 +222,7 @@ function Section({ sec, open, onToggle, view, projects, groups, currentTaskId }:
 
 function TaskRow({ t, view, current, projects, groups }: { t: Task; view: 'project' | 'group'; current: boolean; projects: Project[]; groups: Group[] }) {
   const agentName = useAgentName(t.agent);
-  const [stText, shape] = taskStatusText[t.status];
+  const [stText, shape] = taskStatusLabel(t);
   const projName = projects.find((p) => p.id === t.projectId)?.name ?? '';
   const menu = (anchor: HTMLElement, at?: { x: number; y: number }) => {
     const curGroup = groups.find((g) => g.id === t.groupId);
@@ -234,6 +234,10 @@ function TaskRow({ t, view, current, projects, groups }: { t: Task; view: 'proje
       { label: '新建分组并移入…', onSelect: () => nameDialog({ title: '新建分组', label: '分组名称', ok: '创建并移入', placeholder: '例如：本周上线',
         onSave: async (v) => { const g = await createGroup(v); await patchTask(t.id, { groupId: g.id }); toast(`已创建分组“${v}”，并移入了任务`); } }) },
       ...(curGroup ? [{ label: '移出分组（回到未分类）', onSelect: () => void move(null, '已移到“未分类”') }] : []),
+      {label:'删除任务…',danger:true,disabled:['running','waiting','queued'].includes(t.status),onSelect:async()=>{
+        if(!await confirmDialog({title:'删除任务',ok:'删除任务',danger:true,body:<p>将“{t.title}”从工作台移除，并删除它的工作副本、任务分支与附件。原项目文件不受影响；已合并或应用的结果不会撤销。历史事件按审计规则保留。</p>}))return;
+        try{await api.deleteTask(t.id);if(current)navigate({page:'home'});toast('已删除任务');}catch(e){toastErrorOf(e);}
+      }},
     ], at);
   };
   return (

@@ -46,10 +46,10 @@ public sealed class AicFileGuard : IDisposable {
         return new HashSet<string> { ".git", ".aic-data", ".claude", ".codex", ".codebuddy", ".workbuddy", ".zcode", ".ssh", ".aws", ".azure", "auth.json", "credentials.json", "credentials", ".npmrc", ".netrc", ".pypirc" }.Contains(value)
             || value == ".env" || value.StartsWith(".env.") || value.StartsWith(".aic-stage-") || value.StartsWith(".aic-old-") || value.EndsWith(".pem") || value.EndsWith(".key") || value.EndsWith(".pfx") || value.EndsWith(".p12");
     }
-    static void Component(string part) {
+    static void Component(string part, bool projectFile = false) {
         if (String.IsNullOrEmpty(part) || part == "." || part == ".." || part.Length > 200 || part.TrimEnd('.', ' ') != part
             || part.IndexOfAny(new char[] { '<', '>', ':', '"', '/', '\\', '|', '?', '*', '\0' }) >= 0
-            || Regex.IsMatch(part, "[\\x00-\\x1f\\x7f]") || Regex.IsMatch(part, "^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\\.|$)", RegexOptions.IgnoreCase) || Blocked(part)) throw Error("forbidden");
+            || Regex.IsMatch(part, "[\\x00-\\x1f\\x7f]") || Regex.IsMatch(part, "^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\\.|$)", RegexOptions.IgnoreCase) || (!projectFile && Blocked(part))) throw Error("forbidden");
     }
     static string Final(SafeFileHandle handle) {
         StringBuilder result = new StringBuilder(32768);
@@ -87,9 +87,9 @@ public sealed class AicFileGuard : IDisposable {
             foreach (string part in root.Substring(drive.Length).Split('\\')) { if (!managed) Component(part); current = Path.Combine(current, part); roots.Add(Open(current, true, false, false)); }
         } catch { Dispose(); throw; }
     }
-    string Target(string relative) {
+    string Target(string relative, bool projectFile = false) {
         if (relative == null || relative.Length > 1000 || relative.IndexOf('\\') >= 0) throw Error("forbidden");
-        foreach (string part in relative.Split('/')) Component(part);
+        foreach (string part in relative.Split('/')) { Component(part, projectFile); if (projectFile && (part.Equals(".git", StringComparison.OrdinalIgnoreCase) || part.StartsWith(".aic-", StringComparison.OrdinalIgnoreCase))) throw Error("forbidden"); }
         string full = Path.GetFullPath(Path.Combine(root, relative.Replace('/', '\\')));
         if (!full.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase) || (!managed && (String.Equals(full, protectedRoot, StringComparison.OrdinalIgnoreCase) || full.StartsWith(protectedRoot + "\\", StringComparison.OrdinalIgnoreCase)))) throw Error("forbidden");
         return full;
@@ -246,6 +246,52 @@ public sealed class AicFileGuard : IDisposable {
             if (stage != null && !published) { try { Disposition(stage, true); } catch { } }
             if (newStream != null) newStream.Dispose(); if (stage != null) stage.Dispose();
             if (oldStream != null) oldStream.Dispose(); if (original != null) original.Dispose();
+            foreach (SafeFileHandle handle in held) handle.Dispose();
+        }
+    }
+    static string StreamHash(FileStream stream) {
+        stream.Position = 0;
+        using (SHA256 hash = SHA256.Create()) return BitConverter.ToString(hash.ComputeHash(stream)).Replace("-", "").ToLowerInvariant();
+    }
+    // 仅供明确的工作区应用 / 回滚使用，不暴露给独立 Agent 的文本文件协议。
+    // 候选来自数据目录的本次传输文件，允许二进制和大文件，仍固定目录与文件句柄。
+    public void TransferFile(string relative, string expectedHash, string source, string sourceHash) {
+        string target = Target(relative, true); List<SafeFileHandle> held = Parents(target, !String.IsNullOrEmpty(source));
+        SafeFileHandle original = null, stage = null, input = null; FileStream oldStream = null, newStream = null, inputStream = null;
+        bool moved = false, published = false; string parent = Path.GetDirectoryName(target);
+        try {
+            byte[] security = null; uint attributes = 0;
+            if (!String.IsNullOrEmpty(expectedHash)) {
+                original = Open(target, false, true, false); Info info; if (!GetFileInformationByHandle(original, out info)) WinError();
+                if ((info.Attributes & ~0x20A6U) != 0) throw Error("forbidden");
+                DefaultStreamOnly(original); attributes = info.Attributes & 0x2026U; security = Security(original);
+                oldStream = new FileStream(original, FileAccess.Read);
+                if (StreamHash(oldStream) != expectedHash) throw Error("conflict");
+            }
+            if (String.IsNullOrEmpty(source)) {
+                if (original == null) throw Error("forbidden");
+                Disposition(original, true); return;
+            }
+            string prefix = protectedRoot + "\\workspace-transfers\\";
+            if (!source.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) || !Regex.IsMatch(source.Substring(prefix.Length), @"^[a-zA-Z0-9_-]+\\[0-9]+\.(before|after)$")) throw Error("forbidden");
+            string cursor = Path.GetPathRoot(source); held.Add(Open(cursor, true, false, false));
+            foreach (string part in Path.GetDirectoryName(source).Substring(cursor.Length).Split('\\')) { cursor = Path.Combine(cursor, part); held.Add(Open(cursor, true, false, false)); }
+            input = Open(source, false, false, false); inputStream = new FileStream(input, FileAccess.Read);
+            if (StreamHash(inputStream) != sourceHash) throw Error("conflict"); inputStream.Position = 0;
+            stage = CreateStage(Path.Combine(parent, ".aic-stage-" + Guid.NewGuid().ToString("N")), security, attributes);
+            ProtectStage(stage); newStream = new FileStream(stage, FileAccess.ReadWrite); inputStream.CopyTo(newStream); newStream.Flush(true);
+            if (original != null) { Rename(original, Path.Combine(parent, ".aic-old-" + Guid.NewGuid().ToString("N"))); moved = true; }
+            Disposition(stage, false); Rename(stage, target); published = true;
+            if (original != null) Disposition(original, true);
+        } catch {
+            // 只尝试把自己移走的原 inode 放回空位；绝不覆盖竞争者。
+            if (moved && !published) { try { Rename(original, target); moved = false; } catch { } }
+            if (moved || published) throw Error("interrupted"); throw;
+        } finally {
+            if (stage != null && !published) { try { Disposition(stage, true); } catch { } }
+            if (newStream != null) newStream.Dispose(); if (stage != null) stage.Dispose();
+            if (oldStream != null) oldStream.Dispose(); if (original != null) original.Dispose();
+            if (inputStream != null) inputStream.Dispose(); if (input != null) input.Dispose();
             foreach (SafeFileHandle handle in held) handle.Dispose();
         }
     }

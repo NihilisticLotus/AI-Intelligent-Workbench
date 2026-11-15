@@ -258,6 +258,8 @@ const MIGRATIONS: string[] = [
   ALTER TABLE projects ADD COLUMN carry_globs TEXT;
   CREATE TABLE workspace_preparations (task_id TEXT PRIMARY KEY, state TEXT NOT NULL, bytes INTEGER, error TEXT, defer_prompt INTEGER NOT NULL DEFAULT 0);
   `,
+  // v17：完成与回滚凭据独立保留，清理副本后仍能展示历史结果。
+  `CREATE TABLE workspace_operations (task_id TEXT PRIMARY KEY, record_json TEXT NOT NULL);`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

@@ -2,7 +2,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FeatureKey, type ApiError, type Approval, type PermissionLevel, type Task } from '@aic/protocol';
 import { appStore, cancelTask, patchTask, sendPrompt, switchConfig, useApp } from '../state/app';
-import { toast } from '../state/ui';
+import { navigate, toast } from '../state/ui';
 import { createStore, useStore } from '../state/store';
 import type { SessionCfg } from '../state/core';
 import { permInfo, permOrder } from '../lib/format';
@@ -77,7 +77,8 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
   }, [task.id, text, attachments.ids.join(','),draftReady]);
 
   const working = busyStatuses.has(task.status);
-  const canSend = online && draftReady && !working && !sending && (text.trim().length > 0 || annos.length > 0 || attachments.ids.length>0) && !attachments.uploading && !attachments.failed;
+  const finished=['merged','discarded'].includes(task.status);
+  const canSend = !finished && online && draftReady && !working && !sending && (text.trim().length > 0 || annos.length > 0 || attachments.ids.length>0) && !attachments.uploading && !attachments.failed;
 
   const send = async (force = false) => {
     if (!canSend) return;
@@ -124,6 +125,7 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
   return (
     <div className="composer">
       <div className="composer-inner">
+        {finished?<div className="offline-note"><span>任务已结束，不能继续对话。</span><button className="btn sm" onClick={()=>navigate({page:'new',preset:{projectId:task.projectId,prompt:task.prompt,agent:task.agent}})}>基于这次结果新建任务</button></div>:null}
         {!online ? (
           <div className={'offline-note' + (serviceStopped ? ' is-down' : '')} role={serviceStopped ? 'alert' : 'status'}>
             <Icon name={serviceStopped ? 'alert' : 'refresh'} />
@@ -149,7 +151,7 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
           <input type="file" multiple hidden ref={attachmentInput.input} onChange={(e)=>{attachments.add(Array.from(e.target.files??[]));e.target.value='';}}/>
           <AnnotationChip taskId={task.id} />
           <label htmlFor="prompt" className="sr-only">给 Agent 发消息</label>
-          <textarea id="prompt" ref={ta} value={text} placeholder={placeholder} maxLength={100_000}
+          <textarea id="prompt" ref={ta} value={text} disabled={finished} placeholder={finished?'任务已结束，请新建任务继续。':placeholder} maxLength={100_000}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               // 输入法组字时的回车不算发送

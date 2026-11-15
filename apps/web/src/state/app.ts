@@ -11,6 +11,7 @@ import { WsClient, type ConnState } from '../api/ws';
 import { guessDeviceName } from '../lib/format';
 import { imageCache } from '../lib/image-cache';
 import { platform } from '../platform';
+import { registerWorkspaceOpener } from '../platform/browser';
 import {
   applyAgentSnapshot, applyApprovalSnapshot, applyEvents, applyTaskSnapshot, emptyCore, mergeRestTask, type CoreState,
 } from './core';
@@ -57,6 +58,7 @@ export const api = new HttpClient({
 });
 
 let ws: WsClient | null = null;
+registerWorkspaceOpener(async taskId=>{await api.openWorkspace(taskId);});
 
 // ---------- 实时事件：每帧合并一次，流式输出时不会每个字都触发一次渲染 ----------
 let queue: EventEnvelope[] = [];

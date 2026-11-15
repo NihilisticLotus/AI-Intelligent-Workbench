@@ -300,6 +300,7 @@ export type TaskFile = z.infer<typeof TaskFile>;
 export const EventEnvelope = z.discriminatedUnion('type', [
   ev('task.created', z.object({ task: Task })),
   ev('task.updated', z.object({ task: Task })),
+  ev('task.deleted', z.object({ id: Id })),
   ev('task.changes_updated', WorkspaceChangeTotals),
   ev('session.started', z.object({
     agent: AgentKind, model: z.string().nullable(),

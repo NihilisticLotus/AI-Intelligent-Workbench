@@ -122,7 +122,7 @@ export function NewTaskPage({ preset = {} }: { preset?: NewTaskPreset }) {
         {agent === 'independent' ? <IndependentTaskConfig initialModelId={model} onChange={(value) => { setIndependent(value); if (value) setModel(value.selection.modelId); }} disabled={locked} /> : null}
         {!readiness.ready ? <div className="alert attn"><div className="body"><strong>{readiness.reason}</strong><p>请在 Agent 页完成安装、登录或连接检测。</p><button type="button" className="btn sm" onClick={() => navigate(agent ? { page: 'agents', agent } : { page: 'agents' })}>去 Agent 页处理</button></div></div> : null}
         <div className="nt-quick">{quickTemplates.map((template) => <button key={template.id} type="button" className="nt-q" disabled={busy} onClick={() => { const draft = templateDraft(template); setPrompt(draft.text); requestAnimationFrame(() => { textarea.current?.focus(); textarea.current?.setSelectionRange(draft.start, draft.end); }); }}>{template.label}</button>)}</div>
-        <p className="nt-foot">Ctrl+Enter 派发。{agent && isRealAgent(agent) ? permission === 'readonly' ? '当前为只读，Agent 不会修改项目文件。' : '任务直接在项目目录里运行，会直接修改项目文件，建议保持需审批。' : '演示 Agent 不调用真实模型。'}</p>
+        <p className="nt-foot">Ctrl+Enter 派发。{agent && isRealAgent(agent) ? permission === 'readonly' ? '当前为只读，Agent 不会修改项目文件。' : '任务在独立工作副本中运行，确认合并或应用后才更新项目文件。' : '演示 Agent 不调用真实模型。'}</p>
         {note?.warn ? <p className="nt-foot">{note.text}。</p> : null}
       </>}
     </div>

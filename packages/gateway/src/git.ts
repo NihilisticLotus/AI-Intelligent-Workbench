@@ -51,10 +51,23 @@ export class Git {
       if (this.environment[k] !== undefined) env[k] = this.environment[k];
     }
     Object.assign(env, options.env, { GIT_TERMINAL_PROMPT: '0', GIT_NO_LAZY_FETCH: '1', GIT_LFS_SKIP_SMUDGE: '1', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' });
-    const fullArgs = ['--no-pager', '-c', 'core.quotepath=false', '-c', 'core.fsmonitor=false'];
+    const fullArgs = ['--no-pager', '-c', 'core.quotepath=false', '-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`, '-c', 'commit.gpgSign=false'];
+    if(['worktree','add','commit','commit-tree','merge','revert','reset','checkout','read-tree','write-tree','update-index','hash-object','status','diff'].includes(args[0]??'')) {
+      // 继承提交身份与换行设置，但不执行用户配置中的任意过滤器 / 合并程序。
+      // 仅读取键名，不读取或输出配置值；命令级覆盖不改磁盘配置。
+      const configured=await this.run(['config','--null','--name-only','--get-regexp','^(filter\\..*\\.(clean|smudge|process|required)|merge\\..*\\.driver)$'],options);
+      if(configured.code!==0&&configured.code!==1)throw new GitError('failed','config',configured.code);
+      for(const key of configured.stdout.toString().split('\0').filter(Boolean)) {
+        if(!/^(filter\.[^\r\n\0=]+\.(clean|smudge|process|required)|merge\.[^\r\n\0=]+\.driver)$/.test(key))throw new GitError('failed','config');
+        // 未使用的驱动不阻断普通仓库；实际命中时只运行固定的 shell 内建退出，返回冲突。
+        if(key.startsWith('merge.')) {fullArgs.push('-c',key+'=exit 1');continue;}
+        fullArgs.push('-c',key+'='+(key.endsWith('.required')?'false':''));
+      }
+    }
     if (options.gitDir) fullArgs.push(`--git-dir=${options.gitDir}`);
     if (options.workTree) fullArgs.push(`--work-tree=${options.workTree}`);
-    fullArgs.push(...args);
+    // 每个内部差异调用都禁止外部 diff / textconv，包括合并预检的 quiet 形式。
+    fullArgs.push(...(args[0]==='diff'?['diff','--no-ext-diff','--no-textconv',...args.slice(1)]:args));
     return new Promise((resolve, reject) => {
       const child = spawn(this.executable!, [...this.prefixArgs, ...fullArgs], { cwd: options.cwd, env, shell: false, windowsHide: true, stdio: 'pipe' });
       const chunks: Buffer[] = [];

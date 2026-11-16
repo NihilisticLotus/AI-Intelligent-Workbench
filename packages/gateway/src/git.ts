@@ -12,7 +12,7 @@ export class GitError extends Error {
 
 export class Git {
   version: string | null = null;
-  /** 过滤器 / 合并驱动键名的短时缓存（ISSUE-0083）：同一次刷新连续十几条命令只查一次；只缓存键名，不缓存值。 */
+  /** 过滤器 / 合并驱动键名的短时缓存（ISSUE-0102）：同一次刷新连续十几条命令只查一次；只缓存键名，不缓存值。 */
   private filterKeys = new Map<string, { at: number; keys: Promise<string[]> }>();
   constructor(readonly executable: string | null, private readonly environment: NodeJS.ProcessEnv = process.env, private readonly prefixArgs: string[] = []) {}
   get available() { return this.executable !== null; }
@@ -39,7 +39,7 @@ export class Git {
   async run(args: string[], options: {
     cwd: string; gitDir?: string | null; workTree?: string; timeoutMs?: number; signal?: AbortSignal;
     maxOutput?: number; input?: string | Buffer; env?: NodeJS.ProcessEnv;
-    /** 在用户自己的项目目录里生成提交：保留用户的提交钩子与签名设置（ISSUE-0079）。只能用于内容已核对、不含 Agent 改过的钩子文件的提交。 */
+    /** 在用户自己的项目目录里生成提交：保留用户的提交钩子与签名设置（ISSUE-0098）。只能用于内容已核对、不含 Agent 改过的钩子文件的提交。 */
     userCommit?: boolean;
   }): Promise<{ stdout: Buffer; code: number }> {
     // 错误只包含固定命令种类，不包含路径、提交说明或 git 原始 stderr。

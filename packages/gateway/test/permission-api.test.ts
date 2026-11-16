@@ -17,7 +17,7 @@ async function setup(){
   const settled=()=>vi.waitFor(()=>expect(service.get(task.id).status).toBe('review'),{timeout:10000});
   return {token,project,service,task,outcomes,request,settled};
 }
-describe('普通读取自动允许不刷屏（ISSUE-0084）',{timeout:30000},()=>{
+describe('普通读取自动允许不刷屏（ISSUE-0103）',{timeout:30000},()=>{
   it('无规则的只读操作自动允许但不在对话里逐条提示',async()=>{
     const outcomes:PermissionOutcome[]=[];const fake=createFakeAdapter({speed:0});
     t=await startGw({adapters:[{...fake,spawn:async options=>{const connection=await fake.spawn(options);connection.prompt=async(_,signal)=>{

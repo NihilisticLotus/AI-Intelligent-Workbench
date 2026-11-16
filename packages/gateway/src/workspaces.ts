@@ -58,7 +58,7 @@ async function safePath(root: string, relative: string, missing = false): Promis
   }
   return cursor;
 }
-/** 只用于显示改动的哈希缓存：大小、修改时间和文件编号都没变时不重读内容（ISSUE-0081）。 */
+/** 只用于显示改动的哈希缓存：大小、修改时间和文件编号都没变时不重读内容（ISSUE-0100）。 */
 export type HashCache = Map<string, { size: number; mtimeMs: number; ino: number; hash: string }>;
 async function fileInfo(root: string, relative: string, cache?: HashCache): Promise<WorkspaceFile> {
   const file = await safePath(root, relative);
@@ -456,7 +456,7 @@ export class WorkspaceManager {
       try { return await action(record); } finally { this.projectOperations.delete(key); this.invalidate(taskId); }
     });
   }
-  /** 这些路径里由 Git LFS 管理的文件（ISSUE-0078）：工作台不下载 LFS 对象，代为检出只会写出指针文本。 */
+  /** 这些路径里由 Git LFS 管理的文件（ISSUE-0097）：工作台不下载 LFS 对象，代为检出只会写出指针文本。 */
   private async lfsFiles(cwd: string, files: string[]): Promise<string[]> {
     if (!files.length) return [];
     const out = (await this.git.checked(['check-attr','-z','--stdin','filter'], { cwd, input: files.join('\0') + '\0' })).toString().split('\0');
@@ -464,7 +464,7 @@ export class WorkspaceManager {
     for (let i = 0; i + 2 < out.length; i += 3) if (out[i + 2] === 'lfs') result.push(out[i]!);
     return result;
   }
-  /** 任务改了提交钩子所在目录时，不能在用户项目里运行它们（ISSUE-0079）。 */
+  /** 任务改了提交钩子所在目录时，不能在用户项目里运行它们（ISSUE-0098）。 */
   private async hookFiles(projectPath: string, files: string[]): Promise<string[]> {
     const configured = await this.git.run(['config','--get','core.hooksPath'], { cwd: projectPath });
     const dirs = ['.husky', '.githooks'];
@@ -496,7 +496,7 @@ export class WorkspaceManager {
   private async originalReady(record: WorkspaceRecord): Promise<WorkspaceOperationResult | null> {
     const actual=await this.currentBranch(record.projectPath);
     if (!record.baseBranch || actual!==record.baseBranch) return {status:'wrong_branch',expected:record.baseBranch,actual};
-    // 带入副本的本地文件在项目里是未跟踪文件，合并不会碰它们；只排除这些未跟踪项，任何已跟踪改动仍阻止（ISSUE-0080）。
+    // 带入副本的本地文件在项目里是未跟踪文件，合并不会碰它们；只排除这些未跟踪项，任何已跟踪改动仍阻止（ISSUE-0099）。
     const carried=new Set(record.kind==='worktree'?record.sourceFiles.map(f=>process.platform==='win32'?f.path.toLowerCase():f.path):[]);
     const files=(await this.dirtyFiles(record.projectPath,carried));
     return files.length ? {status:'dirty',files} : null;
@@ -578,7 +578,7 @@ export class WorkspaceManager {
       const current=await this.currentFiles(record);
       if(!equivalent(record.snapshotFiles,current))return fail('workspace.changed','副本在最新快照后发生变化，请先完成一轮任务更新快照再应用。');
       const names=this.changedPaths(record.sourceFiles,current);if(!names.length)return {status:'no_changes'};
-      // 只有任务要写的文件在项目里也被改过才算冲突；用户对其他文件的改动不阻止应用，也不会被覆盖（ISSUE-0082）。
+      // 只有任务要写的文件在项目里也被改过才算冲突；用户对其他文件的改动不阻止应用，也不会被覆盖（ISSUE-0101）。
       const touched=new Set(names);
       const drift=this.changedPaths(record.sourceFiles,original).filter(name=>touched.has(name));if(drift.length)return {status:'source_changed',files:drift};
       for(const name of names) {
@@ -607,7 +607,7 @@ export class WorkspaceManager {
       const operation=this.operation(taskId), applied=operation?.state==='applied';
       if(operation && ['discarded','rolled_back','merged'].includes(operation.state))return fail('workspace.finished','没有可以回滚的副本或应用。');
       const root=applied?record.projectPath:record.path, current=await enumerate(root,record.ignoreGlobs,true);
-      // 撤销应用只处理当初应用的文件；用户之后对其他文件的改动保留，不算冲突（ISSUE-0082）。
+      // 撤销应用只处理当初应用的文件；用户之后对其他文件的改动保留，不算冲突（ISSUE-0101）。
       const appliedNames=applied?new Set(operation.changedFiles):null;
       if(applied) { const drift=this.changedPaths(operation.appliedFiles,current).filter(name=>appliedNames!.has(name));if(drift.length)return {status:'source_changed',files:drift}; }
       const names=this.changedPaths(record.sourceFiles,current).filter(name=>!appliedNames||appliedNames.has(name));
@@ -635,7 +635,7 @@ export class WorkspaceManager {
       const before=await this.head(record.projectPath), opts={cwd:record.path};
       if ((await this.dirtyFiles(record.path)).length) {
         await this.git.checked(['add','--all','--','.'],opts);
-        // 从项目带入的本地文件只供副本运行使用，不能进入任务提交和用户仓库历史（ISSUE-0080）。
+        // 从项目带入的本地文件只供副本运行使用，不能进入任务提交和用户仓库历史（ISSUE-0099）。
         const carried=record.sourceFiles.map(f=>workspaceRelative(f.path));
         if(carried.length)await this.git.checked(['reset','-q','--pathspec-from-file=-','--pathspec-file-nul'],{...opts,input:carried.join('\0')+'\0',env:{GIT_LITERAL_PATHSPECS:'1'}});
         const staged=await this.git.run(['diff','--cached','--quiet'],opts);

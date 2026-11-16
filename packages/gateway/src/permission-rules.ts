@@ -84,7 +84,7 @@ export function evaluatePermission(operation:PermissionOperation,context:Permiss
   }
   if(operation.tool==='read'&&operation.complete&&!outside)return finish('allow','只读操作',safe);
   // 全自动只放行能核对范围的操作：命令带 -c / 引号脚本 / 重定向 / 变量时无法确认是否越过工作副本或触碰原项目，
-  // 始终禁止清单在这种情况下无法生效，必须回到审批（ISSUE-0077）。
+  // 始终禁止清单在这种情况下无法生效，必须回到审批（ISSUE-0096）。
   if(context.level==='full'&&safe)return finish('allow','全自动权限',safe);
   if(context.level==='workspace'&&operation.tool==='edit'&&safe&&!deletion)return finish('allow','工作副本内文件修改',safe);
   return finish('ask','按当前权限需要审批',safe);

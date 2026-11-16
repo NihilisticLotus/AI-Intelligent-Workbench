@@ -199,7 +199,7 @@ export class TaskService {
     } finally { if (write) this.configuring.delete(id); }
   }
 
-  /** 工具结束时的刷新合并到 1.5 秒一次；进行中的刷新完成后再补一次，不在每个工具后都全量计算（ISSUE-0081）。 */
+  /** 工具结束时的刷新合并到 1.5 秒一次；进行中的刷新完成后再补一次，不在每个工具后都全量计算（ISSUE-0100）。 */
   private changeTimers = new Map<string, { timer: NodeJS.Timeout; done: Promise<void>; resolve: () => void }>();
   scheduleChanges(taskId: string, delayMs = 1500): Promise<void> {
     const pending = this.changeTimers.get(taskId);
@@ -1217,7 +1217,7 @@ export class TaskService {
     if(decision.action==='allow') {
       const o=pick(['allow_once']);
       if(o){
-        // 普通读取不在对话里逐条提示，避免刷屏；按项目规则或自动档放行的修改和命令仍留一行记录（ISSUE-0084）。
+        // 普通读取不在对话里逐条提示，避免刷屏；按项目规则或自动档放行的修改和命令仍留一行记录（ISSUE-0103）。
         if(decision.ruleId||operation.tool!=='read')this.events.append({type:'session.notice',taskId,sessionId,data:{level:'info',text:(decision.ruleId?'已按规则自动允许：':'已自动允许：')+decision.reason}});
         return {outcome:'selected',optionId:o.id};}
     }

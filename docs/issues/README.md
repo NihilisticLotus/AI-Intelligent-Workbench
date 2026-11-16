@@ -101,11 +101,11 @@
 | [ISSUE-0093](ISSUE-0093-explicit-model-fallback.md) | 显式模型失效后自动回退并发送消息 | fixed | bug | 2026-11-15 | 2026-11-15 |
 | [ISSUE-0094](ISSUE-0094-codebuddy-copy-acceptance-timeout.md) | CodeBuddy 非 git 补验等待审批超过观察上限 | deferred | 验收未通过 | 2026-11-15 | |
 | [ISSUE-0095](ISSUE-0095-independent-copy-output-limit.md) | 智谱非 git 补验写入成功但最终回复触及预算 | open | 验收未通过 | 2026-11-15 | |
-| [ISSUE-0077](ISSUE-0077-full-auto-unparsed-command.md) | “全自动”放行无法核对范围的命令，能绕过始终禁止清单 | fixed | bug | 2026-11-16 | 2026-11-16 |
-| [ISSUE-0078](ISSUE-0078-lfs-merge-pointer.md) | Git LFS 项目合并或撤销会把资产写成指针文本 | fixed | bug | 2026-11-16 | 2026-11-16 |
-| [ISSUE-0079](ISSUE-0079-user-repo-hooks-signing.md) | 在用户仓库生成的合并 / 撤销提交跳过了用户的提交钩子和签名 | fixed | bug | 2026-11-16 | 2026-11-16 |
-| [ISSUE-0080](ISSUE-0080-carried-files-committed.md) | 带入工作副本的本地文件会被提交，并让合并永远被拦下 | fixed | bug | 2026-11-16 | 2026-11-16 |
-| [ISSUE-0081](ISSUE-0081-changes-full-rehash.md) | 每个工具结束都全量读取并哈希整个工作副本 | fixed | 技术债 | 2026-11-16 | 2026-11-16 |
-| [ISSUE-0082](ISSUE-0082-copy-apply-unrelated-drift.md) | 非 git 项目里任何无关改动都阻止“应用结果”和撤销 | fixed | bug | 2026-11-16 | 2026-11-16 |
-| [ISSUE-0083](ISSUE-0083-git-config-per-command.md) | 每条 git 命令前都多启动一次 git config | fixed | 技术债 | 2026-11-16 | 2026-11-16 |
-| [ISSUE-0084](ISSUE-0084-read-allow-notice-noise.md) | 每次自动允许的读取都在对话里插一条提示 | fixed | bug | 2026-11-16 | 2026-11-16 |
+| [ISSUE-0096](ISSUE-0096-full-auto-unparsed-command.md) | “全自动”放行无法核对范围的命令，能绕过始终禁止清单 | fixed | bug | 2026-11-16 | 2026-11-16 |
+| [ISSUE-0097](ISSUE-0097-lfs-merge-pointer.md) | Git LFS 项目合并或撤销会把资产写成指针文本 | fixed | bug | 2026-11-16 | 2026-11-16 |
+| [ISSUE-0098](ISSUE-0098-user-repo-hooks-signing.md) | 在用户仓库生成的合并 / 撤销提交跳过了用户的提交钩子和签名 | fixed | bug | 2026-11-16 | 2026-11-16 |
+| [ISSUE-0099](ISSUE-0099-carried-files-committed.md) | 带入工作副本的本地文件会被提交，并让合并永远被拦下 | fixed | bug | 2026-11-16 | 2026-11-16 |
+| [ISSUE-0100](ISSUE-0100-changes-full-rehash.md) | 每个工具结束都全量读取并哈希整个工作副本 | fixed | 技术债 | 2026-11-16 | 2026-11-16 |
+| [ISSUE-0101](ISSUE-0101-copy-apply-unrelated-drift.md) | 非 git 项目里任何无关改动都阻止“应用结果”和撤销 | fixed | bug | 2026-11-16 | 2026-11-16 |
+| [ISSUE-0102](ISSUE-0102-git-config-per-command.md) | 每条 git 命令前都多启动一次 git config | fixed | 技术债 | 2026-11-16 | 2026-11-16 |
+| [ISSUE-0103](ISSUE-0103-read-allow-notice-noise.md) | 每次自动允许的读取都在对话里插一条提示 | fixed | bug | 2026-11-16 | 2026-11-16 |

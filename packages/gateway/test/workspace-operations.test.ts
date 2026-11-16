@@ -37,11 +37,11 @@ describe('非 git 应用与回滚保护',{timeout:60000},()=>{
     const record=await copyWorkspace();expect((await manager.rollbackCopy(record.taskId)).status).toBe('rolled_back');
     expect(await readFile(path.join(record.projectPath,'notes.txt'),'utf8')).toBe('初始\n');expect(await readFile(path.join(record.path,'notes.txt'),'utf8')).toBe('初始\n');expect((await manager.diff(record.taskId)).files).toEqual([]);expect(manager.operation(record.taskId)?.state).toBe('restored');
   });
-  it('任务要写的文件在原目录被改过时整批阻止应用（ISSUE-0082）',async()=>{
+  it('任务要写的文件在原目录被改过时整批阻止应用（ISSUE-0101）',async()=>{
     const record=await copyWorkspace();await put(record.projectPath,'notes.txt','用户改过');expect(await manager.applyCopy(record.taskId)).toEqual({status:'source_changed',files:['notes.txt']});
     expect(await readFile(path.join(record.projectPath,'notes.txt'),'utf8')).toBe('用户改过');expect(await readFile(path.join(record.projectPath,'delete.txt'),'utf8')).toBe('保留\n');await expect(access(path.join(record.projectPath,'new'))).rejects.toMatchObject({code:'ENOENT'});
   });
-  it('原目录里无关文件的改动不阻止应用和撤销，也不被覆盖（ISSUE-0082）',async()=>{
+  it('原目录里无关文件的改动不阻止应用和撤销，也不被覆盖（ISSUE-0101）',async()=>{
     const record=await copyWorkspace();await put(record.projectPath,'user.txt','用户');
     expect(await manager.applyCopy(record.taskId)).toMatchObject({status:'applied',files:['delete.txt','new/added.bin','notes.txt']});
     await put(record.projectPath,'user2.txt','之后的用户文件');
@@ -127,7 +127,7 @@ describe('临时仓库合并与撤销',()=>{
     await put(project,'.gitignore','local.txt\n');await run(project,'add','--all');await run(project,'commit','-m','忽略规则');const record=await workspace();await put(project,'local.txt','用户本地文件');await put(record.path,'local.txt','任务文件');await run(record.path,'add','-f','local.txt');
     expect(await merge(record.taskId)).toEqual({status:'dirty',files:['local.txt']});expect(await readFile(path.join(project,'local.txt'),'utf8')).toBe('用户本地文件');
   });
-  it('带入副本的本地文件不进入合并提交，也不阻止合并（ISSUE-0080）',async()=>{
+  it('带入副本的本地文件不进入合并提交，也不阻止合并（ISSUE-0099）',async()=>{
     await put(project,'local.json','{"key":"本地密钥"}');
     const record=await manager.createWorktree(WorkspaceRequest.parse({taskId:'task_carry',projectId:'project_merge',projectPath:project,title:'带入文件',carryGlobs:['local.json']}));
     await put(record.path,'notes.txt','修改\n');
@@ -136,7 +136,7 @@ describe('临时仓库合并与撤销',()=>{
     expect(await run(project,'log','--all','--name-only','--format=')).not.toContain('local.json');
     expect(await readFile(path.join(project,'local.json'),'utf8')).toBe('{"key":"本地密钥"}');
   });
-  it('任务改了 Git LFS 文件时不代为合并，原项目不变（ISSUE-0078）',async()=>{
+  it('任务改了 Git LFS 文件时不代为合并，原项目不变（ISSUE-0097）',async()=>{
     await put(project,'.gitattributes','*.psd filter=lfs diff=lfs merge=lfs -text\n');await run(project,'add','--all');await run(project,'commit','-m','LFS 规则');
     const record=await workspace('task_lfs');await put(record.path,'art.psd','version https://git-lfs.github.com/spec/v1\noid sha256:'+'a'.repeat(64)+'\nsize 10\n');await put(record.path,'notes.txt','修改\n');
     const before=await run(project,'rev-parse','HEAD');
@@ -144,13 +144,13 @@ describe('临时仓库合并与撤销',()=>{
     expect(await run(project,'rev-parse','HEAD')).toBe(before);await expect(access(path.join(project,'art.psd'))).rejects.toMatchObject({code:'ENOENT'});
     await expect(manager.restoreFile(record.taskId,'art.psd')).rejects.toMatchObject({code:'workspace.lfs'});
   });
-  it('任务改了提交钩子目录时不在用户项目里合并（ISSUE-0079）',async()=>{
+  it('任务改了提交钩子目录时不在用户项目里合并（ISSUE-0098）',async()=>{
     const record=await workspace('task_hooks');await mkdir(path.join(record.path,'.husky'));await put(record.path,'.husky/pre-commit','echo agent > ran.txt\n');
     const before=await run(project,'rev-parse','HEAD');
     expect(await merge(record.taskId)).toEqual({status:'manual_required',reason:'hooks',files:['.husky/pre-commit']});
     expect(await run(project,'rev-parse','HEAD')).toBe(before);
   });
-  it('用户项目里的合并提交运行用户自己的提交钩子（ISSUE-0079）',async()=>{
+  it('用户项目里的合并提交运行用户自己的提交钩子（ISSUE-0098）',async()=>{
     const hooks=path.join(base,'user-hooks');await mkdir(hooks);const marker=path.join(base,'hook-ran.txt').replaceAll('\\','/');
     await writeFile(path.join(hooks,'pre-commit'),'#!/bin/sh\necho ran > "'+marker+'"\n',{mode:0o755});await run(project,'config','core.hooksPath',hooks);
     const record=await workspace('task_user_hook');await put(record.path,'notes.txt','修改\n');

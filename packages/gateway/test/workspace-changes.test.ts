@@ -22,7 +22,7 @@ function change(root: string) {
 }
 
 describe('任务改动 REST 与还原', () => {
-  it('哈希缓存不漏掉同样大小的内容改动（ISSUE-0081）', async () => {
+  it('哈希缓存不漏掉同样大小的内容改动（ISSUE-0100）', async () => {
     const f=await setup(true); const file=path.join(f.root,'modify.txt');
     writeFileSync(file,'AAAA\n'); utimesSync(file,new Date(Date.now()-60_000),new Date(Date.now()-60_000));
     f.manager.invalidate(f.task.id); expect((await f.manager.diff(f.task.id)).files.find(x=>x.path==='modify.txt')).toBeDefined();

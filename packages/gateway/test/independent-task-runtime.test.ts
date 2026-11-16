@@ -58,7 +58,7 @@ describe('正式独立任务的离线接口与闭环', () => {
   },60000);
   it.each(['workspace','full','forbidden'] as const)('独立命令 %s：规则外审批、全自动执行、固定禁止拒绝',async mode=>{
     // 禁止文本只放在输出字符串中；即使保护回归，也不会实际启动 git 或访问网络。
-    // 全自动只放行能核对范围的命令，所以这里用 --version；带 -e 内联脚本的情况见下一个用例（ISSUE-0077）。
+    // 全自动只放行能核对范围的命令，所以这里用 --version；带 -e 内联脚本的情况见下一个用例（ISSUE-0096）。
     const f=await setup(n=>n===1?{choices:[{index:0,message:{role:'assistant',content:'',tool_calls:[{id:'auto-command',type:'function',function:{name:'command',arguments:JSON.stringify({program:process.execPath,args:mode==='forbidden'?['-e','process.stdout.write("git push")']:mode==='full'?['--version']:['-e','process.stdout.write("离线自动命令")'],timeoutMs:10000,maxOutputBytes:4096})}}]},finish_reason:'tool_calls'}],usage:{prompt_tokens:5,completion_tokens:5}}:done('完成'));
     await f.s.tasks.patch(f.task.id,{permission:mode==='workspace'?'workspace':'full'});await f.s.tasks.prompt(f.task.id,'验证命令权限');
     if(mode==='workspace'){
@@ -69,7 +69,7 @@ describe('正式独立任务的离线接口与闭环', () => {
     expect(result).toMatchObject({outcome:mode==='full'?'ok':'rejected'});expect(f.s.processes.livePids()).toEqual([]);
     if(mode==='forbidden')expect(JSON.stringify(result)).toContain('始终禁止');
   },60000);
-  it('全自动下带 -e 内联脚本的独立命令改为审批（ISSUE-0077）',async()=>{
+  it('全自动下带 -e 内联脚本的独立命令改为审批（ISSUE-0096）',async()=>{
     const f=await setup(n=>n===1?{choices:[{index:0,message:{role:'assistant',content:'',tool_calls:[{id:'inline',type:'function',function:{name:'command',arguments:JSON.stringify({program:process.execPath,args:['-e','process.stdout.write("x")'],timeoutMs:10000,maxOutputBytes:4096})}}]},finish_reason:'tool_calls'}],usage:{prompt_tokens:10,completion_tokens:5}}:done('完成'));
     await f.s.tasks.patch(f.task.id,{permission:'full'});await f.s.tasks.prompt(f.task.id,'内联脚本');
     await expect.poll(()=>f.s.tasks.listApprovals('pending').length,{timeout:30000}).toBe(1);await f.s.tasks.approve(f.s.tasks.listApprovals('pending')[0]!.id,'reject',undefined,'test');

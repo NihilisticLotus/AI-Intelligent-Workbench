@@ -28,8 +28,9 @@ export function WorkspaceActions({task,changes,refresh}:{task:Task;changes:Works
     :result?.status==='source_changed'?'项目目录已发生变化，已停止整批操作。请先核对以下文件。'
     :result?.status==='wrong_branch'?`项目当前分支为 ${result.actual??'分离 HEAD'}，请先切回 ${result.expected??'任务基准分支'}。`
     :result?.status==='new_commits'?'项目已有后续提交，已停止操作。'
-    :result?.status==='no_changes'?'没有可合并或应用的改动。':null;
-  const blockedFiles=result&&'files'in result&&['dirty','source_changed'].includes(result.status)?result.files:[];
+    :result?.status==='no_changes'?'没有可合并或应用的改动。'
+    :result?.status==='manual_required'?(result.reason==='lfs'?'以下文件由 Git LFS 管理。工作台不下载 LFS 资产，代为合并或撤销会把资产写成指针文本，所以已停止，原项目未改动。请用你平时的 git 工具处理这些文件。':'任务改动了提交钩子。工作台不会在你的项目里运行 Agent 改过的钩子，已停止，原项目未改动。请先核对这些文件，再用你平时的 git 工具合并。'):null;
+  const blockedFiles=result&&'files'in result&&['dirty','source_changed','manual_required'].includes(result.status)?result.files:[];
   const rollbackLabel=copy?(finished?'撤销这次应用':'回滚副本到任务前'):'撤销这次合并';
   const notices=<>{error?<p role="alert">{error}</p>:null}{notice?<div role="alert"><p>{notice}</p>{blockedFiles.length?<ul>{blockedFiles.map(f=><li key={f}>{f}</li>)}</ul>:null}</div>:null}</>;
   return <div className="workspace-actions">

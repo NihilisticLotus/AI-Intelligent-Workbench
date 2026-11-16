@@ -11,6 +11,21 @@ const edit=(...paths:string[]):PermissionOperation=>({tool:'edit',command:null,p
 const shell=(command:string):PermissionOperation=>({...edit(),tool:'shell',command});
 const rule=(action:PermissionRule['action'],extra:Partial<PermissionRule>={}):PermissionRule=>({id:'r',projectId:'p',ord:0,action,tool:'any',match:null,path:null,source:'manual',createdAt:1,...extra});
 
+describe('全自动不放行无法核对范围的命令（ISSUE-0077）',()=>{
+  const full={...context,level:'full' as const};
+  it.each([
+    String.raw`powershell -Command "Remove-Item -Recurse -Force C:\Users\me\Documents\x"`,
+    String.raw`cmd /c "echo x > C:\project\a.txt"`,
+    String.raw`del %USERPROFILE%\notes.txt`,
+    `node -e "require('fs').rmSync('C:/project',{recursive:true})"`,
+  ])('%s 改为需要审批',command=>{
+    expect(evaluatePermission(shell(command),full,[]).action).not.toBe('allow');
+  });
+  it('能核对范围的简单命令和工作副本内修改仍自动放行',()=>{
+    expect(evaluatePermission(shell('npm test'),full,[]).action).toBe('allow');
+    expect(evaluatePermission(edit('src/a.ts'),full,[]).action).toBe('allow');
+  });
+});
 describe('权限规则优先级与路径',()=>{
   it('按顺序命中即停，询问可以挡住后续允许',()=>{
     expect(evaluatePermission(shell('npm test'),context,[rule('ask'),rule('allow')]).action).toBe('ask');

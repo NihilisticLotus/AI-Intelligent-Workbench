@@ -199,7 +199,25 @@ export class TaskService {
     } finally { if (write) this.configuring.delete(id); }
   }
 
+  /** 工具结束时的刷新合并到 1.5 秒一次；进行中的刷新完成后再补一次，不在每个工具后都全量计算（ISSUE-0081）。 */
+  private changeTimers = new Map<string, { timer: NodeJS.Timeout; done: Promise<void>; resolve: () => void }>();
+  scheduleChanges(taskId: string, delayMs = 1500): Promise<void> {
+    const pending = this.changeTimers.get(taskId);
+    if (pending) return pending.done;
+    let resolve!: () => void; const done = new Promise<void>((r) => { resolve = r; });
+    const timer = setTimeout(() => { this.changeTimers.delete(taskId); void this.refreshChanges(taskId).finally(resolve); }, delayMs);
+    timer.unref?.(); this.changeTimers.set(taskId, { timer, done, resolve });
+    return done;
+  }
   refreshChanges(taskId: string): Promise<void> {
+    const scheduled = this.changeTimers.get(taskId);
+    if (scheduled) { clearTimeout(scheduled.timer); this.changeTimers.delete(taskId); }
+    const job0 = this.refreshNow(taskId);
+    if (scheduled) void job0.finally(scheduled.resolve);
+    return job0;
+  }
+  private refreshNow(taskId: string): Promise<void> {
+    if (!this.db.get('SELECT id FROM tasks WHERE id=?', taskId)) return Promise.resolve();
     if (!['worktree', 'copy'].includes(this.getRow(taskId).workspace_kind ?? '') || !this.workspaces?.get(taskId)) return Promise.resolve();
     this.workspaces.invalidate(taskId);
     const job = this.workspaces.diff(taskId).then(changes => {
@@ -635,7 +653,7 @@ export class TaskService {
         if (text) this.events.append({ ...base, type: 'tool.output', data: { toolId: u.toolId, text } });
         break;
       }
-      case 'tool_end': this.events.append({ ...base, type: 'tool.end', data: { toolId: u.toolId, ok: u.ok, summary: u.summary === null ? null : clean(u.summary), ...(u.rejected ? { rejected: true } : {}) } }); void this.refreshChanges(taskId); break;
+      case 'tool_end': this.events.append({ ...base, type: 'tool.end', data: { toolId: u.toolId, ok: u.ok, summary: u.summary === null ? null : clean(u.summary), ...(u.rejected ? { rejected: true } : {}) } }); void this.scheduleChanges(taskId); break;
       case 'plan': this.events.append({ ...base, type: 'plan.update', data: { items: secrets.length ? u.items.map((i) => ({ ...i, text: clean(i.text) })) : u.items } }); break;
       case 'config': {
         const row = this.getRow(taskId);
@@ -1198,7 +1216,10 @@ export class TaskService {
     }
     if(decision.action==='allow') {
       const o=pick(['allow_once']);
-      if(o){this.events.append({type:'session.notice',taskId,sessionId,data:{level:'info',text:(decision.ruleId?'已按规则自动允许：':'已自动允许：')+decision.reason}});return {outcome:'selected',optionId:o.id};}
+      if(o){
+        // 普通读取不在对话里逐条提示，避免刷屏；按项目规则或自动档放行的修改和命令仍留一行记录（ISSUE-0084）。
+        if(decision.ruleId||operation.tool!=='read')this.events.append({type:'session.notice',taskId,sessionId,data:{level:'info',text:(decision.ruleId?'已按规则自动允许：':'已自动允许：')+decision.reason}});
+        return {outcome:'selected',optionId:o.id};}
     }
     const preview=pick(['allow_once'])?await this.permissions.preview(operation,context):null;
     if(signal.aborted)throw new AbortError();
@@ -1322,7 +1343,10 @@ export class TaskService {
   async shutdown() {
     if (this.idleTimer) { clearInterval(this.idleTimer); this.idleTimer = null; }
     for (const abort of this.turnAborts.values()) abort.abort();
-    await Promise.allSettled([...this.turns]); await Promise.allSettled([...this.changeJobs]);
+    await Promise.allSettled([...this.turns]);
+    for (const pending of this.changeTimers.values()) { clearTimeout(pending.timer); pending.resolve(); }
+    this.changeTimers.clear();
+    await Promise.allSettled([...this.changeJobs]);
     for (const t of this.emitTimers.values()) clearTimeout(t);
     this.emitTimers.clear();
     for (const p of [...this.pending.values()]) p.cleanup();

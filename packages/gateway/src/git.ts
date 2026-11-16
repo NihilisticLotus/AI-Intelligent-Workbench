@@ -12,6 +12,8 @@ export class GitError extends Error {
 
 export class Git {
   version: string | null = null;
+  /** 过滤器 / 合并驱动键名的短时缓存（ISSUE-0083）：同一次刷新连续十几条命令只查一次；只缓存键名，不缓存值。 */
+  private filterKeys = new Map<string, { at: number; keys: Promise<string[]> }>();
   constructor(readonly executable: string | null, private readonly environment: NodeJS.ProcessEnv = process.env, private readonly prefixArgs: string[] = []) {}
   get available() { return this.executable !== null; }
 
@@ -37,6 +39,8 @@ export class Git {
   async run(args: string[], options: {
     cwd: string; gitDir?: string | null; workTree?: string; timeoutMs?: number; signal?: AbortSignal;
     maxOutput?: number; input?: string | Buffer; env?: NodeJS.ProcessEnv;
+    /** 在用户自己的项目目录里生成提交：保留用户的提交钩子与签名设置（ISSUE-0079）。只能用于内容已核对、不含 Agent 改过的钩子文件的提交。 */
+    userCommit?: boolean;
   }): Promise<{ stdout: Buffer; code: number }> {
     // 错误只包含固定命令种类，不包含路径、提交说明或 git 原始 stderr。
     const commands = new Set(['worktree','rev-parse','symbolic-ref','ls-files','ls-tree','diff','status','init','add','read-tree','write-tree','commit-tree','update-ref','cat-file','branch','config','hash-object']);
@@ -51,13 +55,24 @@ export class Git {
       if (this.environment[k] !== undefined) env[k] = this.environment[k];
     }
     Object.assign(env, options.env, { GIT_TERMINAL_PROMPT: '0', GIT_NO_LAZY_FETCH: '1', GIT_LFS_SKIP_SMUDGE: '1', GIT_OPTIONAL_LOCKS: '0', LC_ALL: 'C' });
-    const fullArgs = ['--no-pager', '-c', 'core.quotepath=false', '-c', 'core.fsmonitor=false', '-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`, '-c', 'commit.gpgSign=false'];
+    const fullArgs = ['--no-pager', '-c', 'core.quotepath=false', '-c', 'core.fsmonitor=false'];
+    // 工作副本里的内容由 Agent 写入，钩子可能被改过，默认不运行钩子、不签名；用户项目里的最终提交按用户自己的设置执行。
+    if (!options.userCommit) fullArgs.push('-c', `core.hooksPath=${process.platform === 'win32' ? 'NUL' : '/dev/null'}`, '-c', 'commit.gpgSign=false');
     if(['worktree','add','commit','commit-tree','merge','revert','reset','checkout','read-tree','write-tree','update-index','hash-object','status','diff'].includes(args[0]??'')) {
       // 继承提交身份与换行设置，但不执行用户配置中的任意过滤器 / 合并程序。
       // 仅读取键名，不读取或输出配置值；命令级覆盖不改磁盘配置。
-      const configured=await this.run(['config','--null','--name-only','--get-regexp','^(filter\\..*\\.(clean|smudge|process|required)|merge\\..*\\.driver)$'],options);
-      if(configured.code!==0&&configured.code!==1)throw new GitError('failed','config',configured.code);
-      for(const key of configured.stdout.toString().split('\0').filter(Boolean)) {
+      const cacheKey=JSON.stringify([options.cwd,options.gitDir??null,options.workTree??null]);
+      let cached=this.filterKeys.get(cacheKey);
+      if(!cached||Date.now()-cached.at>2000) {
+        const keys=this.run(['config','--null','--name-only','--get-regexp','^(filter\\..*\\.(clean|smudge|process|required)|merge\\..*\\.driver)$'],{...options,input:undefined}).then(configured=>{
+          if(configured.code!==0&&configured.code!==1)throw new GitError('failed','config',configured.code);
+          return configured.stdout.toString().split('\0').filter(Boolean);
+        });
+        cached={at:Date.now(),keys};this.filterKeys.set(cacheKey,cached);
+        keys.catch(()=>{if(this.filterKeys.get(cacheKey)===cached)this.filterKeys.delete(cacheKey);});
+        if(this.filterKeys.size>200)this.filterKeys.delete(this.filterKeys.keys().next().value!);
+      }
+      for(const key of await cached.keys) {
         if(!/^(filter\.[^\r\n\0=]+\.(clean|smudge|process|required)|merge\.[^\r\n\0=]+\.driver)$/.test(key))throw new GitError('failed','config');
         // 未使用的驱动不阻断普通仓库；实际命中时只运行固定的 shell 内建退出，返回冲突。
         if(key.startsWith('merge.')) {fullArgs.push('-c',key+'=exit 1');continue;}
@@ -80,7 +95,7 @@ export class Git {
         if (child.pid) termination = killTree(child.pid);
       };
       const cancel = () => stop('cancelled');
-      const timer = setTimeout(() => stop('timeout'), options.timeoutMs ?? 30_000);
+      const timer = setTimeout(() => stop('timeout'), options.timeoutMs ?? (options.userCommit ? 300_000 : 30_000));
       options.signal?.addEventListener('abort', cancel, { once: true });
       if (options.signal?.aborted) cancel();
       child.stdout.on('data', (chunk: Buffer) => {

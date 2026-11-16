@@ -58,15 +58,22 @@ async function safePath(root: string, relative: string, missing = false): Promis
   }
   return cursor;
 }
-async function fileInfo(root: string, relative: string): Promise<WorkspaceFile> {
+/** 只用于显示改动的哈希缓存：大小、修改时间和文件编号都没变时不重读内容（ISSUE-0081）。 */
+export type HashCache = Map<string, { size: number; mtimeMs: number; ino: number; hash: string }>;
+async function fileInfo(root: string, relative: string, cache?: HashCache): Promise<WorkspaceFile> {
   const file = await safePath(root, relative);
   const before = await lstat(file);
   if (!before.isFile()) fail('workspace.file', '工作区只支持普通文件。');
+  const known = cache?.get(file);
+  if (known && known.size === before.size && known.mtimeMs === before.mtimeMs && known.ino === before.ino) return { path: relative, size: before.size, mtimeMs: before.mtimeMs, hash: known.hash };
   const hash = createHash('sha256');
   for await (const chunk of createReadStream(file)) hash.update(chunk);
   const after = await lstat(await safePath(root, relative));
   if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ino !== after.ino) fail('workspace.changed', '准备工作区时文件发生变化，请重试。');
-  return { path: relative, size: before.size, mtimeMs: before.mtimeMs, hash: hash.digest('hex') };
+  const digest = hash.digest('hex');
+  // 与 git 的“同一时刻写入”判断一致：刚修改不到 2 秒的文件不缓存，避免同一时间戳内的再次写入被漏掉。
+  if (cache && Date.now() - before.mtimeMs > 2000) cache.set(file, { size: before.size, mtimeMs: before.mtimeMs, ino: before.ino, hash: digest });
+  return { path: relative, size: before.size, mtimeMs: before.mtimeMs, hash: digest };
 }
 async function enumerate(root: string, ignores: string[], builtins: boolean): Promise<WorkspaceFile[]> {
   // 先校验规则，空目录也不能绕过非法规则校验。
@@ -93,6 +100,7 @@ export class WorkspaceManager {
   private projectOperations = new Set<string>();
   private pending = new Map<string, Promise<unknown>>();
   private changesCache = new Map<string, { fingerprint: string; until: number; value: { result: WorkspaceChanges; tree: string } }>();
+  private hashCaches = new Map<string, HashCache>();
   invalidate(taskId: string) { this.changesCache.delete(taskId); }
   async settle() { await Promise.allSettled([...this.pending.values()]); }
   constructor(private readonly db: Db, readonly git: Git, private readonly dataDir: string) {}
@@ -237,7 +245,8 @@ export class WorkspaceManager {
     if (record.baseRef) names.push(...(await this.git.checked(['ls-tree','-r','--name-only','-z',record.baseRef],this.options(record))).toString().split('\0').filter(Boolean));
     const result: WorkspaceFile[] = [];
     for (const file of [...new Set(names)]) {
-      try { result.push(await fileInfo(record.path, file)); }
+      let cache = this.hashCaches.get(record.taskId); if (!cache) { cache = new Map(); this.hashCaches.set(record.taskId, cache); }
+      try { result.push(await fileInfo(record.path, file, cache)); }
       catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
     }
     return result;
@@ -394,6 +403,7 @@ export class WorkspaceManager {
       if (!file) return fail('workspace.file', '该文件不在任务改动列表中。');
       if (record.largeFiles.some(f => f.path === relative || f.path === file.oldPath)) return fail('workspace.large', '此文件超过快照上限，不能还原。');
       const names = [...new Set([file.path, ...(file.oldPath ? [file.oldPath] : [])])];
+      if (record.kind === 'worktree' && (await this.lfsFiles(record.path, names)).length) return fail('workspace.lfs', '此文件由 Git LFS 管理，工作台不能还原它的内容，请用你自己的 git 工具处理。');
       const before = await Promise.all(names.map(async name => {
         const target = await safePath(record.path, name, true);
         try {
@@ -446,17 +456,39 @@ export class WorkspaceManager {
       try { return await action(record); } finally { this.projectOperations.delete(key); this.invalidate(taskId); }
     });
   }
+  /** 这些路径里由 Git LFS 管理的文件（ISSUE-0078）：工作台不下载 LFS 对象，代为检出只会写出指针文本。 */
+  private async lfsFiles(cwd: string, files: string[]): Promise<string[]> {
+    if (!files.length) return [];
+    const out = (await this.git.checked(['check-attr','-z','--stdin','filter'], { cwd, input: files.join('\0') + '\0' })).toString().split('\0');
+    const result: string[] = [];
+    for (let i = 0; i + 2 < out.length; i += 3) if (out[i + 2] === 'lfs') result.push(out[i]!);
+    return result;
+  }
+  /** 任务改了提交钩子所在目录时，不能在用户项目里运行它们（ISSUE-0079）。 */
+  private async hookFiles(projectPath: string, files: string[]): Promise<string[]> {
+    const configured = await this.git.run(['config','--get','core.hooksPath'], { cwd: projectPath });
+    const dirs = ['.husky', '.githooks'];
+    if (configured.code === 0) {
+      const value = configured.stdout.toString().trim();
+      const resolved = path.resolve(projectPath, value);
+      if (value && isInside(projectPath, resolved)) dirs.push(path.relative(projectPath, resolved).split(path.sep).join('/'));
+    }
+    const fold = (s: string) => process.platform === 'win32' ? s.toLowerCase() : s;
+    return files.filter(file => dirs.some(dir => fold(file) === fold(dir) || fold(file).startsWith(fold(dir) + '/')));
+  }
   private async head(cwd: string) { return (await this.git.checked(['rev-parse','--verify','HEAD'],{cwd})).toString().trim(); }
   private async currentBranch(cwd: string) {
     const result=await this.git.run(['symbolic-ref','--quiet','--short','HEAD'],{cwd});
     if (result.code!==0 && result.code!==1) throw new GitError('failed','symbolic-ref',result.code);
     return result.code===0 ? result.stdout.toString().trim() : null;
   }
-  private async dirtyFiles(cwd: string) {
+  private async dirtyFiles(cwd: string, untrackedAllowed: ReadonlySet<string> = new Set()) {
     const fields=(await this.git.checked(['status','--porcelain=v1','-z','--untracked-files=all'],{cwd})).toString().split('\0');
     const files: string[]=[];
     for(let i=0;i<fields.length && fields[i];i++) {
-      const entry=fields[i]!; files.push(workspaceRelative(entry.slice(3)));
+      const entry=fields[i]!;
+      if(entry.startsWith('?? ')&&untrackedAllowed.has(process.platform==='win32'?entry.slice(3).toLowerCase():entry.slice(3)))continue;
+      files.push(workspaceRelative(entry.slice(3)));
       if (/[RC]/.test(entry.slice(0,2))) files.push(workspaceRelative(fields[++i]!));
     }
     return [...new Set(files)];
@@ -464,7 +496,9 @@ export class WorkspaceManager {
   private async originalReady(record: WorkspaceRecord): Promise<WorkspaceOperationResult | null> {
     const actual=await this.currentBranch(record.projectPath);
     if (!record.baseBranch || actual!==record.baseBranch) return {status:'wrong_branch',expected:record.baseBranch,actual};
-    const files=await this.dirtyFiles(record.projectPath);
+    // 带入副本的本地文件在项目里是未跟踪文件，合并不会碰它们；只排除这些未跟踪项，任何已跟踪改动仍阻止（ISSUE-0080）。
+    const carried=new Set(record.kind==='worktree'?record.sourceFiles.map(f=>process.platform==='win32'?f.path.toLowerCase():f.path):[]);
+    const files=(await this.dirtyFiles(record.projectPath,carried));
     return files.length ? {status:'dirty',files} : null;
   }
 
@@ -541,10 +575,12 @@ export class WorkspaceManager {
       if(record.kind!=='copy') return fail('workspace.kind','此操作只用于非 git 独立副本。');
       if(['applied','merged','discarded','rolled_back'].includes(this.operation(taskId)?.state??''))return fail('workspace.finished','此任务已结束。');
       const original=await enumerate(record.projectPath,record.ignoreGlobs,true);
-      const drift=this.changedPaths(record.sourceFiles,original);if(drift.length)return {status:'source_changed',files:drift};
       const current=await this.currentFiles(record);
       if(!equivalent(record.snapshotFiles,current))return fail('workspace.changed','副本在最新快照后发生变化，请先完成一轮任务更新快照再应用。');
       const names=this.changedPaths(record.sourceFiles,current);if(!names.length)return {status:'no_changes'};
+      // 只有任务要写的文件在项目里也被改过才算冲突；用户对其他文件的改动不阻止应用，也不会被覆盖（ISSUE-0082）。
+      const touched=new Set(names);
+      const drift=this.changedPaths(record.sourceFiles,original).filter(name=>touched.has(name));if(drift.length)return {status:'source_changed',files:drift};
       for(const name of names) {
         const initial=record.sourceFiles.find(f=>f.path===name);if(!initial||initial.size>SNAPSHOT_FILE_LIMIT)continue;
         const bytes=await this.git.checked(['show',record.baseRef!+':'+name],{...this.options(record),maxOutput:SNAPSHOT_FILE_LIMIT});
@@ -558,7 +594,8 @@ export class WorkspaceManager {
         return safePath(record.path,name);
       },async()=>{
         const applied=await enumerate(record.projectPath,record.ignoreGlobs,true);
-        if(!equivalent(current,applied))fail('workspace.changed','应用时目标或副本发生变化，正在恢复本次写入。');
+        const want=new Map(current.map(f=>[f.path,f.hash])),got=new Map(applied.map(f=>[f.path,f.hash]));
+        if(names.some(name=>want.get(name)!==got.get(name)))fail('workspace.changed','应用时目标或副本发生变化，正在恢复本次写入。');
         this.saveOperation({...this.operationRecord(taskId,'applied'),appliedFiles:applied,changedFiles:names,skippedLargeFiles:large});
       });
       return {status:'applied',files:names,skippedLargeFiles:large};
@@ -570,8 +607,10 @@ export class WorkspaceManager {
       const operation=this.operation(taskId), applied=operation?.state==='applied';
       if(operation && ['discarded','rolled_back','merged'].includes(operation.state))return fail('workspace.finished','没有可以回滚的副本或应用。');
       const root=applied?record.projectPath:record.path, current=await enumerate(root,record.ignoreGlobs,true);
-      if(applied) { const drift=this.changedPaths(operation.appliedFiles,current);if(drift.length)return {status:'source_changed',files:drift}; }
-      const names=this.changedPaths(record.sourceFiles,current);
+      // 撤销应用只处理当初应用的文件；用户之后对其他文件的改动保留，不算冲突（ISSUE-0082）。
+      const appliedNames=applied?new Set(operation.changedFiles):null;
+      if(applied) { const drift=this.changedPaths(operation.appliedFiles,current).filter(name=>appliedNames!.has(name));if(drift.length)return {status:'source_changed',files:drift}; }
+      const names=this.changedPaths(record.sourceFiles,current).filter(name=>!appliedNames||appliedNames.has(name));
       const skipped=names.filter(name=>[...record.sourceFiles,...current].some(f=>f.path===name&&f.size>SNAPSHOT_FILE_LIMIT));
       const small=names.filter(name=>!skipped.includes(name));const originals=new Map(record.sourceFiles.map(f=>[f.path,f]));
       const previous=structuredClone(record);
@@ -596,6 +635,9 @@ export class WorkspaceManager {
       const before=await this.head(record.projectPath), opts={cwd:record.path};
       if ((await this.dirtyFiles(record.path)).length) {
         await this.git.checked(['add','--all','--','.'],opts);
+        // 从项目带入的本地文件只供副本运行使用，不能进入任务提交和用户仓库历史（ISSUE-0080）。
+        const carried=record.sourceFiles.map(f=>workspaceRelative(f.path));
+        if(carried.length)await this.git.checked(['reset','-q','--pathspec-from-file=-','--pathspec-file-nul'],{...opts,input:carried.join('\0')+'\0',env:{GIT_LITERAL_PATHSPECS:'1'}});
         const staged=await this.git.run(['diff','--cached','--quiet'],opts);
         if(staged.code===1) await this.git.checked(['commit','-m',body.message],opts);
         else if(staged.code!==0) throw new GitError('failed','diff',staged.code);
@@ -617,6 +659,8 @@ export class WorkspaceManager {
       if(same.code===0) return {status:'no_changes'};
       if(same.code!==1) throw new GitError('failed','diff',same.code);
       const changed=(await this.git.checked(['diff','--name-only','-z',before,taskHead],opts)).toString().split('\0').filter(Boolean).map(workspaceRelative);
+      const lfs = await this.lfsFiles(record.path, changed); if (lfs.length) return { status: 'manual_required', reason: 'lfs', files: lfs };
+      const hooks = await this.hookFiles(record.projectPath, changed); if (hooks.length) return { status: 'manual_required', reason: 'hooks', files: hooks };
       // 被忽略的本地文件也不能因新增受跟踪文件而被静默覆盖。
       const ignored=(await this.git.checked(['ls-files','--others','--ignored','--exclude-standard','-z'],{cwd:record.projectPath})).toString().split('\0').filter(Boolean);
       const collisions=ignored.filter(file=>changed.some(p=>samePath(p,file)||isInside(p,file)||isInside(file,p)));
@@ -629,8 +673,8 @@ export class WorkspaceManager {
       try {
         if(body.strategy==='squash') {
           await this.git.checked(['merge','--squash','--no-commit','--no-overwrite-ignore',record.branch],original);
-          await this.git.checked(['commit','-m',body.message],original);
-        } else await this.git.checked(['merge','--no-ff','--no-edit','--no-overwrite-ignore','-m',body.message,record.branch],original);
+          await this.git.checked(['commit','-m',body.message],{...original,userCommit:true});
+        } else await this.git.checked(['merge','--no-ff','--no-edit','--no-overwrite-ignore','-m',body.message,record.branch],{...original,userCommit:true});
       } catch(e) {
         const merging=await this.git.run(['rev-parse','--verify','MERGE_HEAD'],original);
         if(merging.code===0) await this.git.checked(['merge','--abort'],original);
@@ -654,10 +698,11 @@ export class WorkspaceManager {
       const actual=await this.head(record.projectPath);
       if(actual!==operation.mergeCommit) return {status:'new_commits',expected:operation.mergeCommit,actual};
       const opts={cwd:record.projectPath};
+      const lfs=await this.lfsFiles(record.projectPath,operation.changedFiles);if(lfs.length)return {status:'manual_required',reason:'lfs',files:lfs};
       this.saveOperation({...operation,state:'pending',pending:{kind:'rollback',headBefore:actual,expectedTree:(await this.git.checked(['rev-parse',operation.beforeCommit+'^{tree}'],opts)).toString().trim()}});
       try {
         await this.git.checked(['revert','--no-commit',...(operation.strategy==='merge'?['-m','1']:[]),operation.mergeCommit],opts);
-        await this.git.checked(['commit','-m','撤销任务合并','-m',`撤销的合并提交：${operation.mergeCommit}`],opts);
+        await this.git.checked(['commit','-m','撤销任务合并','-m',`撤销的合并提交：${operation.mergeCommit}`],{...opts,userCommit:true});
       }catch(e) {
         const state=await this.git.run(['rev-parse','--verify','REVERT_HEAD'],opts);
         if(state.code===0)await this.git.checked(['revert','--abort'],opts);
@@ -782,7 +827,7 @@ export class WorkspaceManager {
   }
   private finishRemoval(taskId:string) {
     this.db.tx(()=>{
-      this.db.run('DELETE FROM workspace_records WHERE task_id=?',taskId);
+      this.db.run('DELETE FROM workspace_records WHERE task_id=?',taskId);this.hashCaches.delete(taskId);
       const operation=this.operation(taskId);if(operation)this.saveOperation({...operation,removedAt:Date.now()});
     });this.invalidate(taskId);
   }

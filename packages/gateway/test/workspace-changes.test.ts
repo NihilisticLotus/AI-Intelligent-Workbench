@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, readFileSync, writeFileSync, unlinkSync, renameSync, mkdirSync, symlinkSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, utimesSync, unlinkSync, renameSync, mkdirSync, symlinkSync } from 'node:fs';
 import path from 'node:path';
 import { Task, WorkspaceChanges, WorkspaceFileDiff } from '@aic/protocol';
 import { startGw, makeProject, type TestGw } from './helpers';
@@ -22,6 +22,15 @@ function change(root: string) {
 }
 
 describe('任务改动 REST 与还原', () => {
+  it('哈希缓存不漏掉同样大小的内容改动（ISSUE-0081）', async () => {
+    const f=await setup(true); const file=path.join(f.root,'modify.txt');
+    writeFileSync(file,'AAAA\n'); utimesSync(file,new Date(Date.now()-60_000),new Date(Date.now()-60_000));
+    f.manager.invalidate(f.task.id); expect((await f.manager.diff(f.task.id)).files.find(x=>x.path==='modify.txt')).toBeDefined();
+    const first=await f.manager.fileDiff(f.task.id,'modify.txt'); expect(first.patch).toContain('+AAAA');
+    // 同样大小、新的修改时间：缓存必须失效
+    writeFileSync(file,'BBBB\n'); utimesSync(file,new Date(Date.now()-30_000),new Date(Date.now()-30_000));
+    f.manager.invalidate(f.task.id); const second=await f.manager.fileDiff(f.task.id,'modify.txt'); expect(second.patch).toContain('+BBBB');
+  });
   it.each([true,false])('%s git：实际 A/M/D、补丁和逐项还原仅作用副本', async isGit => {
     const f=await setup(isGit); change(f.root);
     if (!isGit) await f.manager.snapshot(f.task.id,'测试完成');

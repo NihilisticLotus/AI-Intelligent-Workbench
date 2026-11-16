@@ -17,6 +17,20 @@ async function setup(){
   const settled=()=>vi.waitFor(()=>expect(service.get(task.id).status).toBe('review'),{timeout:10000});
   return {token,project,service,task,outcomes,request,settled};
 }
+describe('普通读取自动允许不刷屏（ISSUE-0084）',{timeout:30000},()=>{
+  it('无规则的只读操作自动允许但不在对话里逐条提示',async()=>{
+    const outcomes:PermissionOutcome[]=[];const fake=createFakeAdapter({speed:0});
+    t=await startGw({adapters:[{...fake,spawn:async options=>{const connection=await fake.spawn(options);connection.prompt=async(_,signal)=>{
+      for(const name of ['a.txt','b.txt','c.txt'])outcomes.push(await options.host.requestPermission({toolId:'r-'+name,title:'读取',detail:name,reason:'读取',cwd:options.cwd,
+        operation:{tool:'read',command:null,paths:[name],complete:true,deletion:false},options:[{id:'once',kind:'allow_once',label:'允许'},{id:'no',kind:'reject_once',label:'拒绝'}]},signal));
+      return {stopReason:'end_turn'};};return connection;}}]});
+    const token=await t.pair(),project=await makeProject(t,token);const service=t.gw.services.tasks;
+    const task=await service.create({projectId:project.id,agent:'fake',prompt:'读三个文件',permission:'ask'});
+    await vi.waitFor(()=>expect(service.get(task.id).status).toBe('review'),{timeout:10000});
+    expect(outcomes.every(o=>o.outcome==='selected'&&o.optionId==='once')).toBe(true);
+    expect(t.gw.services.events.read({after:0,taskId:task.id,limit:1000}).filter(e=>e.type==='session.notice'&&e.data.text.includes('自动允许'))).toHaveLength(0);
+  });
+});
 describe('权限接口与工作台总是允许',{timeout:30000},()=>{
   it('规则读写仍校验令牌、Host、Origin，整表修订冲突返回 409',async()=>{
     const {token,project}=await setup(),url=`/projects/${project.id}/rules`;

@@ -61,7 +61,8 @@ describe('任务工作副本接入', () => {
     expect(changes.files.map(x=>[x.path,x.status]).sort()).toEqual([['added.txt','A'],['delete.txt','D'],['modify.txt','M']]);
     expect(readFileSync(path.join(f.project.path,'modify.txt'),'utf8')).toBe('原始\n'); expect(existsSync(path.join(f.project.path,'delete.txt'))).toBe(true); expect(existsSync(path.join(f.project.path,'added.txt'))).toBe(false);
     const events=f.services.events.read({after:0,limit:1000,taskId:task.id}).filter(e=>e.type==='task.changes_updated');
-    expect(events.at(-1)?.data).toEqual({added:2,removed:2,fileCount:3}); expect(events.length).toBeGreaterThanOrEqual(2);
+    expect(events.at(-1)?.data).toEqual({added:2,removed:2,fileCount:3}); // 工具结束后的刷新与回合结束合并为一次（ISSUE-0081），最终统计必须正确
+    expect(events.length).toBeGreaterThanOrEqual(1);
   });
   it('非 git 同项目串行，取消排队者不会释放正在运行的任务', async () => {
     const releases: (() => void)[] = [];

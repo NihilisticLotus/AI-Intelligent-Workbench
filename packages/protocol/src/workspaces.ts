@@ -64,6 +64,8 @@ export const WorkspaceOperationResult = z.discriminatedUnion('status', [
   z.object({ status: z.literal('rolled_back'), skippedLargeFiles: z.array(z.string()), commit: z.string().optional() }),
   z.object({ status: z.literal('discarded') }),
   z.object({ status: z.literal('no_changes') }),
+  /** 工作台不能安全代为处理，需要用户用自己的 git 工具完成（ISSUE-0078、0079）：lfs = 涉及 Git LFS 文件；hooks = 任务改了提交钩子。 */
+  z.object({ status: z.literal('manual_required'), reason: z.enum(['lfs', 'hooks']), files: z.array(z.string()) }),
 ]);
 export type WorkspaceOperationResult = z.infer<typeof WorkspaceOperationResult>;
 export const WorkspaceOperationRecord = z.object({

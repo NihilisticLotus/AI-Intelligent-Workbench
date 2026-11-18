@@ -44,3 +44,4 @@ ACP 的 `session/new` 允许客户端传入 `mcpServers`。社区有报告称：
 - 2026-11-18 阶段 3 离线验证：演示适配器收到交接会话的服务配置，在一个正常消息回合中通过 stdio 列出四个工具并调用一次搜索。Gateway 记录了成功调用；普通任务没有收到历史服务。真实模型是否实际调用仍待阶段 7 补验。
 - 2026-11-18 第 1.6 步真实补验：用户取消 Claude Code，仅准用 Codex GPT-6 Luna。工作副本中的原生会话报告 gpt-6-luna，在首轮实际发起一次 mcp.aic-history.search，查询词“北门”。工作台记录了工具开始及失败；原生审批到期，内部成功读取为 0，模型也说明查询已取消。因此已证实模型会选择并发起对注入工具的调用，真实取回结果尚未验证。此轮没有重发。见 [ISSUE-0123](ISSUE-0123-handoff-history-approval-title.md) 和 [1.6 验收](../acceptance/step-1.6.md)。
 - 2026-11-18 修复后在新的临时 git 项目获准补验。GPT-6 Luna 首轮实际完成一次 mcp.aic-history.search。工作台内部读接口成功计数为 1，同次工具报告成功结束，模型复述了北门、两项已改文件和后续工作。由此确认原生 Codex 的模型可以使用会话注入的 aic_history 取回当前任务历史；Claude Code、CodeBuddy 的模型级调用和全局 MCP 行为本次未验证，保留原单跟踪。见 [阶段 7 实收证据](../acceptance/step-1.6.md)。
+- 2026-11-18 用户授权 5 元补验 Claude Code。claude-haiku-5-5 在原生 ACP 交接中调用注入的历史搜索，Gateway 成功读取 1 次。核对该次原生会话中的工具结果及最后回复，两者均含本任务的随机识别词。Claude 与 Codex 的模型级历史查询已有实证；CodeBuddy 和全局 MCP 行为仍沿用原单状态。见 [Claude 真实补验](../acceptance/step-1.6.md)。

@@ -74,6 +74,7 @@ describe('只读历史 MCP',()=>{
     queryFromAgent=async()=>{
       const hello=await rpc('initialize');
       const catalog=await rpc('tools/list');
+      for (const tool of catalog.result.tools) expect(tool.annotations).toMatchObject({readOnlyHint:true,destructiveHint:false,openWorldHint:false});
       const search=await call('search',{query:'关卡'});
       agentReply={server:hello.result.serverInfo.name,tools:catalog.result.tools.map((t:{name:string})=>t.name),text:search.content[0].text};
     };

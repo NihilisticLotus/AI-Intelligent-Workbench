@@ -46,6 +46,28 @@ async function setup(respond: (n: number, body: any) => unknown = () => done('�
 }
 
 describe('正式独立任务的离线接口与闭环', () => {
+  it('零工具长会话自动交接已核实的事实，实收正文说明不能回查', async () => {
+    const f = await setup(() => done('接下来核对 Level.txt。'));
+    const task = await f.s.tasks.create({projectId:f.task.projectId, agent:'fake', permission:'readonly', prompt:'核对北门', deferPrompt:true});
+    const options = {...f.options, limits:{...f.options.limits, maxToolCalls:0}};
+    await f.s.tasks.updateIndependent(task.id,'configure',options);
+    writeFileSync(path.join(task.workspace!.path!, 'Level.txt'), '北门');
+    const base = {taskId:task.id, sessionId:null};
+    f.s.events.append({...base,type:'message.done',data:{messageId:'previous',text:'较早的巡视细节。'.repeat(6000)}});
+    f.s.events.append({...base,type:'tool.start',data:{toolId:'check',kind:'execute',title:'执行',target:'npm test'}});
+    f.s.events.append({...base,type:'tool.end',data:{toolId:'check',ok:false,summary:'北门断言失败'}});
+    await f.s.tasks.prompt(task.id,'复述目标',[],{agent:'independent'});
+    await f.s.tasks.idle();
+    const receipt = f.s.events.read({after:0,taskId:task.id,limit:1000}).find(e=>e.type==='session.handoff');
+    expect(receipt?.data).toMatchObject({to:'independent',level:'H4'});
+    expect(f.bodies).toHaveLength(1);
+    expect(f.bodies[0].tools ?? []).toHaveLength(0);
+    const received = JSON.stringify(f.bodies[0].messages);
+    for (const fact of ['核对北门','Level.txt','失败：npm test']) expect(received).toContain(fact);
+    expect(received).toContain('本次不能回查省略的细节');
+    expect(received).not.toMatch(/aic_history|先读 \.aic\/TASK\.md|较早的巡视细节/);
+    expect(receipt?.data).toMatchObject({quality:{historyAvailable:false,coveragePassed:true}});
+  },60000);
   it('独立会话与演示 Agent 双向交接，沿用同一预算且开启独立的新会话',async()=>{
     const f=await setup(()=>done('已了解交接目标'));
     const {id}=f.task;

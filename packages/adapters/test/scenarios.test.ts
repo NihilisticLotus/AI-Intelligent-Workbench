@@ -42,6 +42,16 @@ const STD_OPTIONS = [
 ];
 
 describe('permission：审批桥接', () => {
+  it('同一工具调用的审批沿用已报告的 MCP 名称，权限仍按原请求判断',async()=>{
+    const sc=use(scenario({turns:[{steps:[
+      {update:{sessionUpdate:'tool_call',toolCallId:'hist',title:'mcp.aic-history.search',kind:'execute',status:'pending'}},
+      {permission:{toolCall:{toolCallId:'hist',kind:'execute',status:'pending'},options:STD_OPTIONS}},
+    ]}]}));
+    const {conn,host}=await open(sc);
+    await conn.prompt({text:'核对北门'},sig());
+    expect(host.requests[0]?.title).toContain('mcp.aic-history.search');
+    expect(host.requests[0]?.operation).toMatchObject({tool:'any',complete:false});
+  });
   it('保留原生选项给 Gateway 识别；回传一次允许；拒绝后 tool_end rejected', async () => {
     const sc = use(scenario({ turns: [permTurn(STD_OPTIONS), permTurn(STD_OPTIONS, 'c2')] }));
     const { host, conn } = await open(sc);

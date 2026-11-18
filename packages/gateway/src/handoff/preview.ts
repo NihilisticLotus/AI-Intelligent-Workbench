@@ -44,7 +44,9 @@ export async function previewHandoff(s:Services,id:string,target:HandoffTarget,o
   const source=sanitizeDocument(raw,redactor);
   const fullBlocks=transcriptBlocks(lines,redactor);
   const fullTokens=estimateTokens(JSON.stringify(source)+'\n'+fullBlocks.join('\n'));
-  const inline=!s.workspaces.get(id) || await s.workspaces.artifactConflicts(id,'.aic/TASK.md');
+  // 独立运行时使用任务自己的工具清单。只有 ACP 接收会话会挂载历史服务。
+  const historyAvailable = target.agent !== 'independent';
+  const inline = !historyAvailable || !s.workspaces.get(id) || await s.workspaces.artifactConflicts(id,'.aic/TASK.md');
   function build(level:HandoffLevel, generated?:HandoffNarrative):HandoffPreview {
     let blocks=fullBlocks;
     const doc=structuredClone(source); doc.meta.level=level; doc.meta.checkpoint=options.checkpoint??null;
@@ -76,8 +78,8 @@ export async function previewHandoff(s:Services,id:string,target:HandoffTarget,o
       blocks=level==='H3'?recentWithin(blocks,Math.max(0,dialogue-estimateTokens(JSON.stringify(doc.userMessages))),v=>v):[];
     }
     const added=restoreCoverage(doc,source);
-    const markdown=renderHandoff(doc,blocks,inline);
-    return HandoffPreview.parse({document:doc,markdown,level,quality:{added,inconsistent:rejected,redactions:redactor.count,
+    const markdown=renderHandoff(doc,blocks,inline,historyAvailable);
+    return HandoffPreview.parse({document:doc,markdown,level,quality:{added,inconsistent:rejected,redactions:redactor.count,historyAvailable,
       coveragePassed:coverageComplete(raw,raw) && new Set(source.vcs.changed.map(file=>file.path)).size===new Set(raw.vcs.changed.map(file=>file.path)).size
         && coverageComplete(doc,source),consistencyPassed:!rejected.length,window,estimatedTokens:estimateTokens(markdown)}});
   }

@@ -127,4 +127,7 @@
 | [ISSUE-0119](ISSUE-0119-handoff-live-feedback.md) | 已发送后仍可点击撤销，任务账本没有及时显示计划 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0120](ISSUE-0120-handoff-session-slots.md) | 保留原会话时模拟第三方 Agent 无法取得接收名额 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0121](ISSUE-0121-approval-watchdog-test-start.md) | 无回应计时用例在审批请求登记之前快进时间 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
-| [ISSUE-0122](ISSUE-0122-handoff-without-history-tools.md) | 接收模型禁用工具时，交接正文和分隔条仍称可以查历史 | investigating | 验收未通过 | 2026-11-18 | |
+| [ISSUE-0122](ISSUE-0122-handoff-without-history-tools.md) | 接收模型禁用工具时，交接正文和分隔条仍称可以查历史 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0123](ISSUE-0123-handoff-history-approval-title.md) | 历史工具审批丢失同一次调用的名称 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0124](ISSUE-0124-handoff-approval-expiry.md) | 接收首轮审批到期仍会发布成功交接收据 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0125](ISSUE-0125-handoff-return-chain.md) | 原生切回后较早的交接分隔条缺少切回按钮 | fixed | bug | 2026-11-18 | 2026-11-18 |

@@ -107,6 +107,12 @@ export class UpdateMapper {
 
   markRejected(toolCallId: string) { this.tool(toolCallId).rejected = true; }
 
+  /** 只为同一会话中仍在进行的调用补审批标题，不参与权限判定。 */
+  activeToolTitle(id: string) {
+    const tool = this.tools.get(id);
+    return tool?.ended ? undefined : tool?.title;
+  }
+
   /** 权限请求里带的工具没见过时，先补一条 tool_start */
   ensureTool(toolCall: Record<string, unknown>) {
     const id = str(toolCall.toolCallId);

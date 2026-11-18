@@ -1043,7 +1043,8 @@ export class TaskService {
       rt.lastActive = now();
       if (rt.redactor.active) this.flushRedactor(taskId, rt.sessionId, rt.redactor);
       if (r.usage && !abort.signal.aborted && r.stopReason !== 'cancelled' && r.stopReason !== 'error') usage = { ...r.usage, source };
-      if(handoff && !abort.signal.aborted && !['error','cancelled'].includes(r.stopReason)) {
+      const handoffTurnCompleted = () => r.stopReason === 'end_turn' && !abort.signal.aborted && !this.approvalTimedOut.has(taskId);
+      if(handoff && handoffTurnCompleted()) {
         const correction=await this.handoffs!.restatement(taskId,rt.sessionId,handoff.record);
         if(correction) {
           this.events.append({type:'session.notice',taskId,sessionId:rt.sessionId,data:{level:'warn',text:correction}});
@@ -1060,7 +1061,7 @@ export class TaskService {
       }
       await finishSnapshot();
       await this.refreshChanges(taskId);
-      if (handoff && !abort.signal.aborted && !['error','cancelled'].includes(r.stopReason)) {
+      if (handoff && handoffTurnCompleted()) {
         this.db.tx(()=>{
           this.db.run("UPDATE handoffs SET state='sent' WHERE task_id=? AND id=?",taskId,handoff.record.id);
           this.db.run("UPDATE handoffs SET state='returned' WHERE task_id=? AND id=(SELECT json_extract(request_json,'$.reverseOf') FROM handoffs WHERE id=?)",taskId,handoff.record.id);
@@ -1071,7 +1072,7 @@ export class TaskService {
         this.handoffs!.progress(taskId,updated.id,'send','done');
         sent=true;
       }
-      this.setStatus(taskId, r.stopReason === 'cancelled' || timedOut ? 'paused' : r.stopReason === 'error' ? 'failed' : 'review');
+      this.setStatus(taskId, r.stopReason === 'cancelled' || timedOut || (handoff && r.stopReason === 'refusal') ? 'paused' : r.stopReason === 'error' ? 'failed' : 'review');
     } catch (e) {
       try { await finishSnapshot(); } catch (error) { e = error; }
       // 尚在项目队列时取消，没有 Agent 进入副本，也没有本轮改动需要等待。
@@ -1239,8 +1240,7 @@ export class TaskService {
     if(!this.handoffs)throw Errors.invalidState('交接服务尚未就绪');
     const record=this.handoffs.get(taskId,id);
     const task=this.get(taskId);
-    const latest=this.db.get<{id:string}>("SELECT id FROM handoffs WHERE task_id=? AND state='sent' ORDER BY ordinal DESC LIMIT 1",taskId);
-    if(record.state!=='sent' || latest?.id!==id || task.agent!==record.document.meta.to.agent || FINAL.includes(task.status)) throw Errors.invalidState('请从当前交接记录切回原 Agent');
+    if(record.state!=='sent' || !record.latestSent || task.agent!==record.document.meta.to.agent || FINAL.includes(task.status)) throw Errors.invalidState('请从当前交接记录切回原 Agent');
     if(this.isBusy(taskId))throw Errors.invalidState('请等当前回合结束，或先停止当前回合');
     return record;
   }

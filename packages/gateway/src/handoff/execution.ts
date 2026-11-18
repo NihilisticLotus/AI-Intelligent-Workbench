@@ -102,9 +102,10 @@ export class HandoffExecution {
   }
 
   get(taskId:string,id:string) {
-    const r=this.s.db.get('SELECT * FROM handoffs WHERE task_id=? AND id=?',taskId,id);
+    const r=this.s.db.get(`SELECT h.*, h.id = (SELECT id FROM handoffs WHERE task_id=h.task_id AND state='sent'
+      ORDER BY ordinal DESC LIMIT 1) AS latest_sent FROM handoffs h WHERE h.task_id=? AND h.id=?`,taskId,id);
     if (!r) throw Errors.notFound('找不到本任务的交接记录');
-    return HandoffRecord.parse({id,document:JSON.parse(String(r.document_json)),quality:JSON.parse(String(r.quality_json)),
+    return HandoffRecord.parse({id,latestSent:!!r.latest_sent,document:JSON.parse(String(r.document_json)),quality:JSON.parse(String(r.quality_json)),
       markdown:r.content_md,level:r.level,state:r.state,createdAt:r.created_at,ordinal:r.ordinal??1,edited:!!r.edited_by_user});
   }
 

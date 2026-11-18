@@ -1,10 +1,13 @@
 import type { HandoffDocument } from '@aic/protocol';
 import { HISTORY_NOTICE } from './transcript';
 
-export function renderHandoff(d:HandoffDocument,blocks:string[],inlineSummary:boolean): string {
+export function renderHandoff(d:HandoffDocument,blocks:string[],inlineSummary:boolean,historyAvailable:boolean): string {
   const {from,to,level}=d.meta;
   const party=(p:typeof from)=>p.agent+(p.model?'（'+p.model+'）':'');
-  const sections=['以工作区当前文件为准。以下步骤已经执行，请勿重复。先读正在改的文件再动手，不确定时先用 aic_history 查询。',
+  const guidance = historyAvailable
+    ? '先读正在改的文件再动手，不确定时先用 aic_history 查询。'
+    : '请依据下文已核实的事实继续。'+(level==='H2'?'本次无法调用历史查询工具。':'本次不能回查省略的细节。');
+  const sections=['以工作区当前文件为准。以下步骤已经执行，请勿重复。'+guidance,
     '# 交接：从 '+party(from)+' 到 '+party(to)+'（'+level+'）'];
   function section(title:string,lines:(string|null|undefined)[]) {
     const content=lines.filter(Boolean);
@@ -35,6 +38,6 @@ export function renderHandoff(d:HandoffDocument,blocks:string[],inlineSummary:bo
   section('用户原话',d.userMessages.map(m=>m.text));
   section('最近对话',blocks.length?[HISTORY_NOTICE,...blocks]:[]);
   section('下一步',[d.current]);
-  if(level!=='H2') sections.push(inlineSummary?'任务说明已内联。需要更多细节时请用 aic_history 查询本任务历史。':'先读 .aic/TASK.md，需要更多细节时用 aic_history 查询本任务历史。');
+  if(level!=='H2' && historyAvailable) sections.push(inlineSummary?'任务说明已内联。需要更多细节时请用 aic_history 查询本任务历史。':'先读 .aic/TASK.md，需要更多细节时用 aic_history 查询本任务历史。');
   return sections.join('\n\n');
 }

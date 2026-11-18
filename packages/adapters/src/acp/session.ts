@@ -334,7 +334,10 @@ export class AcpSession implements AgentConnection {
   /** session/request_permission → 工作台审批 */
   async onPermission(params: Record<string, unknown>, reqSignal: AbortSignal): Promise<unknown> {
     this.emit({ kind: 'activity' });
-    const n = normalizePermission(params, { agentName: this.spec.displayName, cwd: this.opts.cwd });
+    const n = normalizePermission(params, {
+      agentName: this.spec.displayName, cwd: this.opts.cwd,
+      activeTitle: id => this.mapper.activeToolTitle(id),
+    });
     for (const w of n.warnings) this.log('warn', `[agent:${this.spec.kind}] ${w}`);
     if (n.toolCall) this.mapper.ensureTool(n.toolCall);
     if (this.driftFix) {

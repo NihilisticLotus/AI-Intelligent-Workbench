@@ -10,7 +10,7 @@ delete process.env.AIC_HISTORY_TOKEN;
 const string = { type: 'string' };
 const integer = { type: 'integer' };
 function tool(name, description, properties) {
-  return { name, description, inputSchema: {
+  return { name, description, annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false }, inputSchema: {
     type: 'object', properties, required: Object.keys(properties), additionalProperties: false,
   } };
 }

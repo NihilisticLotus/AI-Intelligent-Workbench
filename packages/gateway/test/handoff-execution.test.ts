@@ -10,6 +10,61 @@ let gw:TestGw | undefined;
 afterEach(async()=>{await gw?.stop();gw=undefined;});
 
 describe('发送时交接',()=>{
+  it('两次交接后原生切回，较早的分隔条重新成为可操作记录',async()=>{
+    const fake=createFakeAdapter({speed:0});
+    const resumable:typeof fake={...fake,
+      async probeCapabilities(c){return {...await fake.probeCapabilities(c),resume:true};},
+      async spawn(opts){
+        const connection=await fake.spawn(opts);
+        if(opts.resume)Object.assign(connection,{resumed:true});
+        connection.prompt=async()=>({stopReason:'end_turn'});
+        return connection;
+      },
+    };
+    gw=await startGw({adapters:[resumable,{...resumable,id:'codex'}]});
+    const token=await gw.pair(),project=await makeProject(gw,token),s=gw.gw.services;
+    const task=await s.tasks.create({projectId:project.id,agent:'fake',permission:'readonly',prompt:'分两次交接',deferPrompt:true});
+    await s.tasks.prompt(task.id,'开始核对');await s.tasks.idle();
+    for(const agent of ['codex','fake'] as const){
+      await s.tasks.prompt(task.id,'继续核对',[],{agent});await s.tasks.idle();
+    }
+    const records=s.db.all<{id:string}>('SELECT id FROM handoffs WHERE task_id=? ORDER BY ordinal',task.id);
+    expect(records).toHaveLength(2);
+    const urls=records.map(r=>'/tasks/'+task.id+'/handoff/'+r.id);
+    const current=async()=>Promise.all(urls.map(async url=>(await gw!.api('GET',url,{token})).json.latestSent));
+    expect(await current()).toEqual([false,true]);
+    expect((await gw.api('POST',urls[1]+'/return',{token,body:{}})).json.level).toBe('H1');
+    expect(await current()).toEqual([true,false]);
+    expect((await gw.api('POST',urls[0]+'/return',{token,body:{}})).json.level).toBe('H1');
+    expect(await current()).toEqual([false,false]);
+  });
+  it.each(['审批到期','首轮拒绝'])('%s 时不发布成功收据，原会话能继续',async reason=>{
+    const fake=createFakeAdapter({speed:0});
+    let calls=0;
+    gw=await startGw({approvalTimeoutMs:80,adapters:[{...fake,async spawn(opts){
+      const c=await fake.spawn(opts);
+      c.prompt=async()=>{calls++;return {stopReason:'end_turn'};};
+      return c;
+    }},{...fake,id:'codex',async spawn(opts){
+      const c=await fake.spawn(opts);
+      c.prompt=async(_input,signal)=>{
+        if(reason==='首轮拒绝')return {stopReason:'refusal'};
+        await opts.host.requestPermission({toolId:'history',title:'工具审批',detail:'查询历史',reason:'',cwd:opts.cwd,
+          options:[{id:'once',label:'允许一次',kind:'allow_once'}]},signal);
+        return {stopReason:'end_turn'};
+      };
+      return c;
+    }}]});
+    const s=gw.gw.services,project=await makeProject(gw,await gw.pair());
+    const task=await s.tasks.create({projectId:project.id,agent:'fake',permission:'ask',prompt:'核对入口',deferPrompt:true});
+    await s.tasks.prompt(task.id,'记录入口');await s.tasks.idle();
+    await s.tasks.prompt(task.id,'继续核对',[],{agent:'codex'});await s.tasks.idle();
+    expect(s.db.get('SELECT state FROM handoffs WHERE task_id=?',task.id)).toEqual({state:'failed'});
+    expect(s.events.read({after:0,taskId:task.id,limit:200}).some(e=>e.type==='session.handoff')).toBe(false);
+    expect(s.tasks.get(task.id).agent).toBe('fake');
+    await s.tasks.prompt(task.id,'继续原会话');await s.tasks.idle();
+    expect(calls).toBe(2);
+  });
   it.each(['等待','中断'])('当前轮执行中选择%s，只有空闲时才能按目标权限交接',async mode=>{
     const fake=createFakeAdapter({speed:0});
     let finish: (()=>void) | undefined;

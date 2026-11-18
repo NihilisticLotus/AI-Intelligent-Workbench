@@ -41,7 +41,7 @@ const KIND_VERB: Record<string, string> = {
   execute: '执行命令', edit: '修改文件', delete: '删除文件', read: '读取文件', search: '搜索', fetch: '访问网络', think: '思考', other: '使用工具',
 };
 
-export function normalizePermission(params: Record<string, unknown>, ctx: { agentName: string; cwd: string | null }): NormalizedPermission {
+export function normalizePermission(params: Record<string, unknown>, ctx: { agentName: string; cwd: string | null; activeTitle?: (id: string) => string | undefined }): NormalizedPermission {
   const warnings: string[] = [];
   const toolCall = isRecord(params.toolCall) ? params.toolCall : null;
   const toolCallId = toolCall ? str(toolCall.toolCallId) : null;
@@ -76,6 +76,7 @@ export function normalizePermission(params: Record<string, unknown>, ctx: { agen
   const toolName = str(meta['codebuddy.ai/toolName']);
   const kind = toolCall ? mapToolKind(toolCall.kind) : 'other';
   const title = (toolCall && str(toolCall.title))
+    ?? (toolCallId ? ctx.activeTitle?.(toolCallId) : undefined)
     ?? (toolName ? `${ctx.agentName} 请求使用工具：${toolName}` : `${ctx.agentName} 请求${KIND_VERB[kind] ?? '使用工具'}`);
 
   // 详情：完整的命令或文件路径（rawInput）

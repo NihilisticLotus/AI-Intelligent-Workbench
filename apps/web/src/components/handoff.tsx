@@ -30,7 +30,7 @@ function EditHandoff({record,finish}:{record:HandoffRecord;finish:(value:Handoff
 
 const labels:Record<HandoffProgressStep,string>={generate:'生成交接内容',coverage:'检查事实覆盖',consistency:'核对一致性',probe:'探针问答',send:'发送到新会话'};
 const statuses={running:'进行中',done:'✓ 完成',skipped:'跳过',failed:'失败'};
-const reasons={H2:'传递完整转写与任务状态',H3:'使用摘要与最近对话',H4:'使用确定性记录与本任务历史查询'};
+const reasons={H2:'传递完整转写与任务状态',H3:'使用摘要与最近对话',H4:'传递已核实的任务记录'};
 function Quality({record}:{record:HandoffRecord}) {
   const q=record.quality;
   return <div><p>覆盖校验{q.coveragePassed?'通过':'未通过'} · 自动补齐 {q.added.length} 项 · 自动打码 {q.redactions} 次</p>
@@ -64,7 +64,7 @@ export function HandoffDivider({item,task}:{item:HandoffItem;task:Task}) {
     api.handoff(task.id,item.id).then(r=>{if(live){setRecord(r);}}).catch(e=>{if(live)setError(asApiError(e));});
     return ()=>{live=false;};
   },[task.id,item.id,expanded,item.receipt,item.steps.generate,expanded?revision:0]);
-  const canAct=record?.state==='sent' && latest===item.id && record.document.meta.to.agent===task.agent && !['running','queued','waiting','merged','discarded'].includes(task.status);
+  const canAct=record?.state==='sent' && (record.latestSent ?? (latest===item.id)) && record.document.meta.to.agent===task.agent && !['running','queued','waiting','merged','discarded'].includes(task.status);
   const action=async(kind:'return'|'redo')=>{
     if (busy || !canAct) return;
     setBusy(true); setError(null);
@@ -94,11 +94,14 @@ export function HandoffDivider({item,task}:{item:HandoffItem;task:Task}) {
     return '（'+(model?.name??p.model)+'）';
   };
   const failed=Object.values(item.steps).includes('failed') && !item.receipt;
+  const receipt=item.receipt;
+  const historyAvailable=receipt?.quality.historyAvailable ?? (receipt?.to !== 'independent');
   return <section className="handoff-divider">
     <button className="handoff-title" type="button" aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)}>
       {item.receipt?<><strong>已自动交接 · {from}{modelLabel(party?.from)} → {to}{modelLabel(party?.to)}</strong>
         <span>{item.receipt.level} · {item.receipt.quality.coveragePassed?'覆盖通过':'待核对'}</span></>:<strong>{failed?'交接未完成':item.steps.generate==='done'&&!item.steps.send?'已生成交接内容':'正在交接'}</strong>}<span aria-hidden="true">{expanded?'▴':'▾'}</span>
     </button>
+    {receipt && !historyAvailable && <p>{receipt.level==='H2'?'本次无法调用历史查询工具。':'本次不能回查省略的细节，已核实的事实已随交接发送。'}</p>}
     {!item.receipt||expanded?<ol className="handoff-steps" aria-label="交接进度" role="status">{(Object.keys(labels) as HandoffProgressStep[]).map(k=>
       <li key={k}>{labels[k]} <small>{item.steps[k]?statuses[item.steps[k]!]: '待处理'}</small></li>)}</ol>:null}
     {expanded && record?<><p>{record.level} · {reasons[record.level]}。估算 {record.quality.estimatedTokens.toLocaleString()} token，目标窗口 {record.quality.window.toLocaleString()}。</p>

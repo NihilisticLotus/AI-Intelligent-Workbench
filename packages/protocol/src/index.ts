@@ -381,6 +381,8 @@ export const HandoffQuality = z.object({
   restatement: z.object({text:z.string(),matched:z.boolean(),corrected:z.boolean()}).optional(),
   warnings: z.array(z.string()).optional(),
   historyCalls: z.number().int().nonnegative().optional(),
+  /** 生成这份交接时，接收会话是否配有本任务的只读历史工具。 */
+  historyAvailable: z.boolean().optional(),
   added: z.array(z.string()), inconsistent: z.array(z.string()), redactions: z.number().int().nonnegative(),
   coveragePassed: z.boolean(), consistencyPassed: z.boolean(), window: z.number().positive(), estimatedTokens: z.number().nonnegative(),
   windowConfirmation: z.boolean().optional(),
@@ -403,6 +405,7 @@ export type HandoffReturnBody = z.infer<typeof HandoffReturnBody>;
 export const HandoffActionResult = z.union([z.object({taskId:Id,level:z.literal('H1')}),
   z.object({taskId:Id,messageId:Id,pendingHandoffId:Id.optional()})]);
 export const HandoffRecord = HandoffPreview.extend({
+  latestSent:z.boolean().optional(),
   id:Id,ordinal:z.number().int().positive(),createdAt:Ts,edited:z.boolean(),state:z.enum(['prepared','sent','failed','returned']),
 }).strict();
 export type HandoffRecord = z.infer<typeof HandoffRecord>;

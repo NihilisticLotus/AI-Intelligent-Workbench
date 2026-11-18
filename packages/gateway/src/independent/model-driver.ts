@@ -15,7 +15,7 @@ import { contextCounter, contextCountReply, contextInput, contextReport } from '
 export class IndependentApiDriver implements IndependentModelDriver {
   private active = new Map<string, Promise<unknown>>();
   private config: IndependentModelDriverConfig;
-  constructor(private catalog: IndependentCatalog, config: IndependentModelDriverConfig = {}, private resolver?: typeof lookup) {
+  constructor(private catalog: Pick<IndependentCatalog, 'bound' | 'credentials' | 'getNetwork'>, config: IndependentModelDriverConfig = {}, private resolver?: typeof lookup) {
     this.config = { ...config, tools: config.tools ? structuredClone(config.tools.map((t) => IndependentModelToolDefinition.parse(t))) : undefined,
       generation: config.generation ? IndependentGenerationOptions.parse(config.generation) : undefined,
       context: config.context ? IndependentContextPolicy.parse(config.context) : undefined };

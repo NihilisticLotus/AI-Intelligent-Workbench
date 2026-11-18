@@ -1,3 +1,4 @@
+import { IndependentRequestLedger } from '../independent/request-ledger';
 import { createHash } from 'node:crypto';
 import { HandoffRecord, HandoffSettings, type HandoffTarget, type HandoffSendOptions, type HandoffProgressStep, type PromptAttachment, type EventEnvelope } from '@aic/protocol';
 import type { Services } from '../services';
@@ -7,7 +8,11 @@ import { outgoingRedactor } from './history';
 import { environmentValues,isEnvSource } from './redact';
 
 export class HandoffExecution {
+  readonly summaryLedger: IndependentRequestLedger;
+
   constructor(private readonly s: Services) {
+    this.summaryLedger = new IndependentRequestLedger(s.db, 'summary');
+    this.summaryLedger.recover();
     s.events.bus.on(event=>this.guard(event));
   }
 
@@ -81,9 +86,12 @@ export class HandoffExecution {
   }
 
   settings(value?: HandoffSettings) {
-    if (value) this.s.db.run("INSERT INTO meta(key,value) VALUES('handoff_settings',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",JSON.stringify(value));
-    const row = this.s.db.get<{value:string}>("SELECT value FROM meta WHERE key='handoff_settings'");
-    return HandoffSettings.parse(row ? JSON.parse(row.value) : {confirmBeforeSend:false});
+    if (value?.summaryModel) {
+      const {serviceId,modelId} = value.summaryModel;
+      if (!this.s.independent.getService(serviceId).enabled || !this.s.independent.getModel(serviceId,modelId).enabled)
+        throw Errors.badRequest('请选择已启用的摘要服务和模型');
+    }
+    return this.summaryLedger.summarySettings(value);
   }
 
   get(taskId:string,id:string) {
@@ -122,7 +130,7 @@ export class HandoffExecution {
     const ordinal=used.reduce((n,row)=>Math.max(n,Number(row.ref.split('/').at(-1))),Number(db.get('SELECT MAX(ordinal) AS n FROM handoffs WHERE task_id=?',taskId)?.n??0))+1;
     try {
       const checkpoint=workspaces.get(taskId)?await workspaces.createCheckpoint(taskId,ordinal):undefined;
-      const preview=await previewHandoff(this.s,taskId,target,{checkpoint,forceH2:options.forceH2,environment});
+      const preview=await previewHandoff(this.s,taskId,target,{checkpoint,forceH2:options.forceH2,environment,summaryModel:this.settings().summaryModel??undefined});
       const {document,quality,level,markdown}=preview;
       const source=db.get('SELECT agent,model,effort,profile_id FROM tasks WHERE id=?',taskId);
       db.run(`INSERT INTO handoffs(id,task_id,from_session_id,level,content_md,document_json,quality_json,created_at,state,ordinal,request_json)
@@ -130,11 +138,11 @@ export class HandoffExecution {
       this.progress(taskId,id,'generate','done');
       this.progress(taskId,id,'coverage',quality.coveragePassed?'done':'failed');
       this.progress(taskId,id,'consistency','done');
-      this.progress(taskId,id,'probe','skipped');
+      this.progress(taskId,id,'probe',quality.summaryFailure==='probe'?'failed':quality.probe?'done':'skipped');
       if(!quality.coveragePassed) throw Errors.invalidState('交接内容未覆盖任务事实，原会话可继续使用');
       const record=this.get(taskId,id);
       await this.publish(taskId,record);
-      return {record,pending:this.settings().confirmBeforeSend};
+      return {record,pending:this.settings().confirmBeforeSend || !!record.quality.windowConfirmation};
     } catch(error) {
       db.run("UPDATE handoffs SET state='failed' WHERE task_id=? AND id=?",taskId,id);
       this.progress(taskId,id,'generate','failed');

@@ -258,6 +258,24 @@ export class IndependentCatalog {
     return { service, key };
   }
 
+  /** 为摘要固定一次调用的目录修订，不安装或更换任务的执行绑定。 */
+  summarySource(taskId: string, selection: IndependentSelection) {
+    const createdAt = now();
+    const bound = (id: string) => {
+      if (id !== taskId) throw Errors.conflict('交接摘要不属于本任务');
+      const {service, model} = this.usable(selection);
+      return {taskId, ...selection, configRevision:service.configRevision, modelRevision:model.revision, createdAt};
+    };
+    return {
+      bound, getNetwork: () => this.getNetwork(),
+      credentials: async (id: string) => {
+        const binding = bound(id);
+        const {service, key} = await this.discoveryCredentials(binding.serviceId, binding.configRevision);
+        return {service, model:this.getModel(service.id, binding.modelId), key};
+      },
+    };
+  }
+
   /** 仅按任务固定绑定读取运行凭据。 */
   async credentials(taskId: string) {
     const binding = this.bound(taskId); const { service, model } = this.usable(binding);

@@ -8,6 +8,7 @@ import { credsOf, readBody } from './app';
 
 export function systemRoutes(s: Services) {
   const r = new Hono<Env>();
+  r.get('/settings/handoff/usage',c=>c.json(s.tasks.handoffs!.summaryLedger.summaryUsage()));
   r.get('/settings/handoff',c=>c.json(s.tasks.handoffs!.settings()));
   r.put('/settings/handoff',async c=>c.json(s.tasks.handoffs!.settings(await readBody(c,HandoffSettings))));
   r.get('/settings/workspaces',c=>c.json(s.workspaces.retention()));

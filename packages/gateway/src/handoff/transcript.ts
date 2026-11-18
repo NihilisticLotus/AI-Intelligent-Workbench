@@ -20,7 +20,7 @@ export function acpLines(events: EventEnvelope[], fallback: AgentKind): Transcri
     if (e.type==='session.started') session=e.sessionId;
     const id=e.sessionId ?? (e.type==='message.user' ? nextSession.get(e.seq) : null) ?? session;
     const agent=(id ? names.get(id) : undefined) ?? fallback;
-    const line = (role:TranscriptLine['role'],text:string):TranscriptLine => ({session:id,agent,at:e.ts,role,text});
+    const line = (role:TranscriptLine['role'],text:string):TranscriptLine => ({session:id,agent,at:e.ts,seq:e.seq,role,text});
     // 用户原话始终来自入口事件；独立 Agent 的助手和工具则从已校验的可移植会话读取。
     if (e.type==='message.user') { lines.push(line('用户',e.data.text)); continue; }
     if (agent==='independent') continue;

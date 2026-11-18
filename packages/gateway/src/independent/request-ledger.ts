@@ -1,14 +1,46 @@
 // 每次网络尝试先占用持久预算；失败与崩溃不退回，避免把未知账单当成免费。
 import {
   IndependentModelBinding, IndependentRequestAttempt, IndependentRequestBudget, IndependentRequestBudgetSnapshot,
-  IndependentRequestRecord, IndependentRequestSettlement, type IndependentRequestAccounting,
+  HandoffSettings, HandoffSummaryRequest, type HandoffSummaryUsage, IndependentRequestRecord, IndependentRequestSettlement, type IndependentRequestAccounting,
 } from '@aic/protocol';
 import type { Db } from '../db';
 import { Errors, newId, now } from '../util';
 import { ModelTransportError } from './model-http';
 
 export class IndependentRequestLedger {
-  constructor(private db: Db) {}
+  constructor(private db: Db, private readonly scope: 'execution' | 'summary' = 'execution') {}
+
+  private get table() {
+    return this.scope === 'summary' ? 'handoff_summary_requests' : 'independent_request_attempts';
+  }
+
+  summaryUsage(): HandoffSummaryUsage {
+    return this.db.get<HandoffSummaryUsage>(`SELECT COUNT(*) AS count,
+      COALESCE(SUM(reserved_micros),0) AS reserved,
+      COALESCE(SUM(CASE WHEN state='reserved' THEN 1 ELSE 0 END),0) AS pending FROM handoff_summary_requests`)!;
+  }
+
+  summarySettings(value?: HandoffSettings): HandoffSettings {
+    if (value) return this.db.tx(()=>this.readOrUpdateSettings(value));
+    return this.readOrUpdateSettings();
+  }
+  private readOrUpdateSettings(value?: HandoffSettings): HandoffSettings {
+    const row = this.db.get<{value:string}>("SELECT value FROM meta WHERE key='handoff_settings'");
+    const current = HandoffSettings.parse(row ? JSON.parse(row.value) : {confirmBeforeSend:false});
+    if (!value) return current;
+    const next = HandoffSettings.parse({...current, ...value});
+    const policy = next.summaryBudget;
+    if (next.summaryModel && !policy) throw Errors.badRequest('请选择摘要请求额度');
+    if (policy) {
+      const used = this.summaryUsage(), old = current.summaryBudget;
+      if (policy.maxRequests < used.count || policy.money && policy.money.maxReservedMicros < used.reserved)
+        throw Errors.badRequest('摘要额度不能低于已占用的次数或金额');
+      if (used.count && old?.money?.currency !== policy.money?.currency)
+        throw Errors.badRequest('摘要已有请求，请保留原币种与金额记账方式');
+    }
+    this.db.run("INSERT INTO meta(key,value) VALUES('handoff_settings',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", JSON.stringify(next));
+    return next;
+  }
 
   private budget(taskId: string) {
     const row = this.db.get('SELECT * FROM independent_request_budgets WHERE task_id=?', taskId);
@@ -39,9 +71,10 @@ export class IndependentRequestLedger {
       remainingMicros: policy.money ? Math.max(0, policy.money.maxReservedMicros - totals.reserved) : null, actualCostMicros: null, revision });
   }
   get(id: string): IndependentRequestRecord {
-    const row = this.db.get('SELECT * FROM independent_request_attempts WHERE id=?', id);
+    const row = this.db.get(`SELECT * FROM ${this.table} WHERE id=?`, id);
     if (!row) throw Errors.notFound('找不到独立请求记录');
-    return IndependentRequestRecord.parse({ id: row.id, taskId: row.task_id, ordinal: row.ordinal, binding: JSON.parse(String(row.binding_json)),
+    const schema = this.scope === 'summary' ? HandoffSummaryRequest : IndependentRequestRecord;
+    return schema.parse({ id: row.id, taskId: row.task_id, ordinal: row.ordinal, binding: JSON.parse(String(row.binding_json)),
       attempt: JSON.parse(String(row.attempt_json)), status: row.state,
       settlement: row.settlement_json === null ? null : JSON.parse(String(row.settlement_json)), reservedMicros: row.reserved_micros,
       currency: row.currency, createdAt: row.created_at, updatedAt: row.updated_at });
@@ -53,16 +86,30 @@ export class IndependentRequestLedger {
   reserve(bindingInput: IndependentModelBinding, attemptInput: IndependentRequestAttempt): string {
     const binding = IndependentModelBinding.parse(bindingInput), attempt = IndependentRequestAttempt.parse(attemptInput);
     return this.db.tx(() => {
-      const snapshot = this.snapshot(binding.taskId);
-      if (JSON.stringify(binding) !== JSON.stringify(snapshot.binding)) throw Errors.conflict('请求与任务预算绑定不一致');
+      const snapshot = this.reservationBalance(binding);
+      if (this.scope === 'summary') attempt.purpose = 'handoff_summary';
       const money = snapshot.policy.money, ceiling = money ? (attempt.kind === 'model' ? money.modelCeilingMicros : money.counterCeilingMicros) : null;
       if (snapshot.remainingRequests < 1 || money && (ceiling === null || ceiling > snapshot.remainingMicros!)) throw new ModelTransportError('budget');
       const id = newId('ireq'), at = now();
-      this.db.run("INSERT INTO independent_request_attempts(id,task_id,ordinal,attempt_json,state,reserved_micros,created_at,updated_at,binding_json,currency) VALUES (?,?,?,?,'reserved',?,?,?,?,?)",
+      this.db.run(`INSERT INTO ${this.table}(id,task_id,ordinal,attempt_json,state,reserved_micros,created_at,updated_at,binding_json,currency) VALUES (?,?,?,?,'reserved',?,?,?,?,?)`,
         id, binding.taskId, snapshot.attemptedRequests + 1, JSON.stringify(attempt), ceiling, at, at, JSON.stringify(binding), money?.currency ?? null);
       return id;
     });
   }
+  private reservationBalance(binding: IndependentModelBinding) {
+    if (this.scope === 'execution') {
+      const snapshot = this.snapshot(binding.taskId);
+      if (JSON.stringify(binding) !== JSON.stringify(snapshot.binding)) throw Errors.conflict('请求与任务预算绑定不一致');
+      return snapshot;
+    }
+    const {summaryBudget:policy, summaryModel:model} = this.summarySettings();
+    if (!policy || !model || model.serviceId !== binding.serviceId || model.modelId !== binding.modelId)
+      throw Errors.conflict('交接摘要设置已变化');
+    const used = this.summaryUsage();
+    return {policy, attemptedRequests:used.count, remainingRequests:policy.maxRequests-used.count,
+      remainingMicros:policy.money ? policy.money.maxReservedMicros-used.reserved : null};
+  }
+
   /** 仅由空闲任务的显式配置操作调用；保存历史快照与已占额度。 */
   adjust(bindingInput: IndependentModelBinding, policyInput: IndependentRequestBudget, expectedRevision: number) {
     const binding = IndependentModelBinding.parse(bindingInput), policy = IndependentRequestBudget.parse(policyInput);
@@ -90,18 +137,18 @@ export class IndependentRequestLedger {
         if (JSON.stringify(current.settlement) !== JSON.stringify(settlement)) throw Errors.conflict('请求已有终态，不能由迟到结果覆盖');
         return current;
       }
-      this.db.run('UPDATE independent_request_attempts SET state=?,settlement_json=?,updated_at=? WHERE id=? AND state=?',
+      this.db.run(`UPDATE ${this.table} SET state=?,settlement_json=?,updated_at=? WHERE id=? AND state=?`,
         settlement.outcome, JSON.stringify(settlement), now(), id, 'reserved');
       return this.get(id);
     });
   }
   /** 只能在旧网络连接收尾后调用；保留所有次数和金额预留，不重发请求。 */
   recover(taskId?: string) {
-    return this.db.tx(() => this.db.all("SELECT id FROM independent_request_attempts WHERE state='reserved'" + (taskId ? ' AND task_id=?' : ''), ...(taskId ? [taskId] : []))
+    return this.db.tx(() => this.db.all(`SELECT id FROM ${this.table} WHERE state='reserved'` + (taskId ? ' AND task_id=?' : ''), ...(taskId ? [taskId] : []))
       .map((r) => this.settle(String(r.id), { outcome: 'interrupted', failure: 'interrupted', usage: null, countedInputTokens: null })));
   }
   accounting(taskId: string): IndependentRequestAccounting {
-    this.budget(taskId);
+    if (this.scope === 'execution') this.budget(taskId);
     const committed = () => {
       let done = false; this.db.afterCommit(() => { done = true; });
       if (!done) throw Errors.invalidState('请求记账仍在外层事务中，提交前不能继续网络或报告结算成功');

@@ -122,3 +122,4 @@
 | [ISSUE-0114](ISSUE-0114-handoff-binary-attachment.md) | 新消息中的二进制附件会绕过交接正文打码 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0115](ISSUE-0115-handoff-source-continuity.md) | 无原生恢复能力时交接失败会丢失来源会话状态 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0116](ISSUE-0116-return-confirmation.md) | 反向交接草稿确认请求被拒 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0117](ISSUE-0117-handoff-summary-budget.md) | 交接摘要模型与任务执行模型使用不同的请求预算绑定 | fixed | 待办 | 2026-11-18 | 2026-11-18 |

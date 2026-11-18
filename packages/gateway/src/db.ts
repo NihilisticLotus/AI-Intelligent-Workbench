@@ -295,6 +295,13 @@ const MIGRATIONS: string[] = [
    ALTER TABLE handoffs ADD COLUMN ordinal INTEGER;
    ALTER TABLE handoffs ADD COLUMN request_json TEXT;
    CREATE UNIQUE INDEX idx_handoffs_ordinal ON handoffs(task_id,ordinal);`,
+  // v24：摘要额度跨任务累计，保留每笔请求所属任务，删除任务不会退回已花额度。
+  `CREATE TABLE handoff_summary_requests (
+    id TEXT PRIMARY KEY, task_id TEXT NOT NULL, ordinal INTEGER NOT NULL UNIQUE,
+    attempt_json TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('reserved','succeeded','failed','interrupted')),
+    settlement_json TEXT, reserved_micros INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+    binding_json TEXT NOT NULL, currency TEXT);
+   CREATE INDEX idx_summary_requests_task ON handoff_summary_requests(task_id,ordinal);`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

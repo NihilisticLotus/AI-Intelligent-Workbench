@@ -354,6 +354,7 @@ export const HandoffDocument = HandoffNarrative.extend({
 }).strict();
 export type HandoffDocument = z.infer<typeof HandoffDocument>;
 export interface TranscriptLine {
+  seq?: number;
   session: string | null;
   agent: AgentKind;
   at: number;
@@ -382,15 +383,16 @@ export const HandoffQuality = z.object({
   historyCalls: z.number().int().nonnegative().optional(),
   added: z.array(z.string()), inconsistent: z.array(z.string()), redactions: z.number().int().nonnegative(),
   coveragePassed: z.boolean(), consistencyPassed: z.boolean(), window: z.number().positive(), estimatedTokens: z.number().nonnegative(),
-  probe: z.object({passed:z.number().int(),total:z.number().int()}).optional(),
+  windowConfirmation: z.boolean().optional(),
+  summaryFailure: z.enum(['summary','probe']).optional(),
+  probe: z.object({passed:z.number().int(),total:z.number().int(),
+    items:z.array(z.object({question:z.string(),passed:z.boolean()})).max(8).optional()}).optional(),
 }).strict();
 export type HandoffQuality = z.infer<typeof HandoffQuality>;
 export const HandoffPreview = z.object({ document: HandoffDocument, markdown: z.string(), level: HandoffLevel, quality: HandoffQuality }).strict();
 export type HandoffPreview = z.infer<typeof HandoffPreview>;
 export const HandoffProgressStep = z.enum(['generate','coverage','consistency','probe','send']);
 export type HandoffProgressStep = z.infer<typeof HandoffProgressStep>;
-export const HandoffSettings = z.object({confirmBeforeSend:z.boolean()}).strict();
-export type HandoffSettings = z.infer<typeof HandoffSettings>;
 export const HandoffSendOptions = z.object({
   forceH2:z.boolean().optional(), confirmedId:Id.optional(), markdown:z.string().max(2_000_000).optional(),
 }).strict();
@@ -1098,7 +1100,18 @@ export const IndependentRequestBudget = z.object({
   }).strict().nullable(),
 }).strict();
 export type IndependentRequestBudget = z.infer<typeof IndependentRequestBudget>;
+export const HandoffSummaryBudget = IndependentRequestBudget.extend({maxRequests:z.number().int().min(1).max(1_000_000_000)});
+export const HandoffSettings = z.object({
+  confirmBeforeSend:z.boolean(), summaryModel:IndependentSelection.nullable().optional(), summaryBudget:HandoffSummaryBudget.optional(),
+}).strict();
+export type HandoffSettings = z.infer<typeof HandoffSettings>;
+export const HandoffSummaryUsage = z.object({
+  count:z.number().int().nonnegative(),reserved:z.number().int().nonnegative(),pending:z.number().int().nonnegative(),
+}).strict();
+export type HandoffSummaryUsage = z.infer<typeof HandoffSummaryUsage>;
+export const HandoffProbeAnswers = z.object({answers:z.array(z.string()).min(5).max(8)}).strict();
 export const IndependentRequestAttempt = z.object({
+  purpose: z.literal('handoff_summary').optional(),
   kind: z.enum(['model', 'counter']), requestHash: z.string().regex(/^[a-f0-9]{64}$/),
 }).strict();
 export type IndependentRequestAttempt = z.infer<typeof IndependentRequestAttempt>;
@@ -1136,6 +1149,7 @@ export const IndependentRequestRecord = z.object({
   settlement: IndependentRequestSettlement.nullable(), reservedMicros: IndependentMoneyMicros.nullable(),
   currency: z.string().regex(/^[A-Z]{3}$/).nullable(), createdAt: Ts, updatedAt: Ts,
 }).strict();
+export const HandoffSummaryRequest = IndependentRequestRecord.extend({ordinal:z.number().int().positive()});
 export type IndependentRequestRecord = z.infer<typeof IndependentRequestRecord>;
 export const IndependentRequestBudgetSnapshot = z.object({
   binding: IndependentModelBinding, policy: IndependentRequestBudget,

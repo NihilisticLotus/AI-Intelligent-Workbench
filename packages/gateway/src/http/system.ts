@@ -27,6 +27,7 @@ export function systemRoutes(s: Services) {
         [FeatureKey.FsBrowse]: true,
         [FeatureKey.Worktrees]: false,
         [FeatureKey.Handoff]: false,
+        [FeatureKey.TaskMemory]: true,
         [FeatureKey.Lan]: false,
         [FeatureKey.SideChat]: false,
         [FeatureKey.AgentToggle]: true,

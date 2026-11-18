@@ -10,6 +10,7 @@ import {
   type AgentKind, type AgentLoginBody, type CreateProfileBody, type DeviceKind, type PatchAgentBody, type PatchProfileBody, type PutTaskDraftBody,
 } from '@aic/protocol';
 import { z } from 'zod';
+import { TaskMemoryList } from '@aic/protocol';
 import { TaskUsage, TaskFile, SavedEnvironment, type CreateEnvironmentBody } from '@aic/protocol';
 import {
   IndependentService, IndependentModel, IndependentDefault, IndependentNetworkSettings, IndependentDiscoveryState, ImportIndependentModelsResult,
@@ -216,6 +217,10 @@ export class HttpClient {
   workspaceRetention() {return this.request('GET','/settings/workspaces',{parse:oneOf(WorkspaceRetention)});}
   setWorkspaceRetention(body:WorkspaceRetention) {return this.request('PUT','/settings/workspaces',{body,parse:oneOf(WorkspaceRetention)});}
   taskFiles(id: string) { return this.request('GET', `/tasks/${encodeURIComponent(id)}/files`, { parse: listOf(TaskFile) }).then((r) => r.items); }
+  taskMemory(id: string) { return this.request('GET', `/tasks/${encodeURIComponent(id)}/memory`, { parse:oneOf(TaskMemoryList) }); }
+  markConstraint(id: string, sourceSeq: number) {
+    return this.request('POST', `/tasks/${encodeURIComponent(id)}/memory`, { body:{kind:'constraint',sourceSeq}, parse:oneOf(TaskMemoryList) });
+  }
   createProject(name: string, path: string) { return this.request('POST', '/projects', { body: { name, path }, parse: oneOf(Project) }); }
   patchProject(id: string, body: PatchProjectBody) { return this.request('PATCH', `/projects/${encodeURIComponent(id)}`, { body, parse: oneOf(Project) }); }
   projectRules(id:string) {return this.request('GET',`/projects/${encodeURIComponent(id)}/rules`,{parse:oneOf(PermissionRuleSet)});}

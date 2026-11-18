@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, writeFileSync, readFileSync, unlinkSync } from '
 import { open } from 'node:fs/promises';
 import path from 'node:path';
 import { createFakeAdapter, type AgentAdapter, type SpawnOptions } from '@aic/adapters';
-import { Task, PatchProjectBody } from '@aic/protocol';
+import { Task, PatchProjectBody, TaskMemoryList } from '@aic/protocol';
 import { Git } from '../src/git';
 import { WorkspaceManager } from '../src/workspaces';
 import { startGw, makeProject, type TestGw } from './helpers';
@@ -12,11 +12,11 @@ let t: TestGw | undefined;
 afterEach(async () => { await t?.stop(); t = undefined; });
 const environment = { ...process.env, GIT_CONFIG_GLOBAL: process.platform === 'win32' ? 'NUL' : '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: '派发测试', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: '派发测试', GIT_COMMITTER_EMAIL: 'test@example.invalid' };
 async function setup(run?: (o: SpawnOptions, signal: AbortSignal) => Promise<void>) {
-  const starts: string[] = [], base = createFakeAdapter({ speed: 0 });
+  const starts: string[] = [], prompts: string[] = [], base = createFakeAdapter({ speed: 0 });
   const adapter: AgentAdapter = { ...base, async spawn(o) {
     starts.push(o.cwd); const conn = await base.spawn(o);
     return { ...conn, agentSessionId: conn.agentSessionId, setConfig: c => conn.setConfig(c), setPermission: p => conn.setPermission(p), close: () => conn.close(),
-      async prompt(_input, signal) { await run?.(o, signal); return { stopReason: signal.aborted ? 'cancelled' : 'end_turn' }; } };
+      async prompt(input, signal) { prompts.push(typeof input === 'string' ? input : input.text); await run?.(o, signal); return { stopReason: signal.aborted ? 'cancelled' : 'end_turn' }; } };
   } };
   t = await startGw({ adapters: [adapter] });
   const git = await Git.discover(environment);
@@ -26,9 +26,71 @@ async function setup(run?: (o: SpawnOptions, signal: AbortSignal) => Promise<voi
     const response = await t!.api('POST', '/tasks', { token, body: { projectId: project.id, prompt: '测试派发', agent: 'fake', permission: 'ask', deferPrompt } });
     expect(response.status).toBe(201); return Task.parse(response.json);
   };
-  return { token, project, starts, git, create, services: t.gw.services };
+  return { token, project, starts, prompts, git, create, services: t.gw.services };
 }
 describe('任务工作副本接入', () => {
+  it('项目已跟踪同名说明时保留两处项目文件，并把正确的账本内联给 Agent', async () => {
+    const f = await setup();
+    const name = '.aic/TASK.md', original = '项目自己的资产规则';
+    mkdirSync(path.join(f.project.path,'.aic'));
+    writeFileSync(path.join(f.project.path,name),original);
+    for (const args of [['init','-b','main'],['add',name],['commit','-m','项目原有说明']]) await f.git.checked(args,{cwd:f.project.path});
+    const task = await f.create(true);
+    await f.services.tasks.updateMemory(task.id,()=>f.services.tasks.memory.constrain(task.id,{kind:'constraint',content:'只调整关卡存档'}));
+    await f.services.tasks.prompt(task.id,'继续核对');
+    await f.services.tasks.idle();
+    expect(f.prompts[0]).toContain('只调整关卡存档');
+    expect(f.prompts[0]).toContain('继续核对');
+    expect(f.prompts[0]).not.toContain(name);
+    expect(f.prompts[0]).not.toContain(original);
+    const workspace = f.services.workspaces.get(task.id)!;
+    expect(readFileSync(path.join(workspace.path,name),'utf8')).toBe(original);
+    expect(readFileSync(path.join(f.project.path,name),'utf8')).toBe(original);
+    const user = f.services.events.read({after:0,limit:100,taskId:task.id}).find(e=>e.type==='message.user');
+    expect(user?.data.text).toBe('继续核对');
+  });
+  it('演示任务把文件、命令、最新计划和约束写入账本与任务说明，再合并项目成果', async () => {
+    const f = await setup(async o => {
+      const host=o.host;
+      host.update({kind:'plan',items:[{text:'旧计划',status:'pending'}]});
+      host.update({kind:'plan',items:[{text:'修正说明',status:'completed'}]});
+      host.update({kind:'tool_start',toolId:'edit',toolKind:'edit',title:'修改说明',target:'notes.txt'});
+      writeFileSync(path.join(o.cwd,'notes.txt'),'修改后\n');
+      host.update({kind:'tool_update',toolId:'edit',files:[{path:'notes.txt',added:1,removed:1,created:false}]});
+      host.update({kind:'tool_end',toolId:'edit',ok:true,summary:'已修改'});
+      host.update({kind:'tool_start',toolId:'cmd',toolKind:'execute',title:'测试',target:'npm test'});
+      host.update({kind:'tool_output',toolId:'cmd',text:'token=synthetic-test-value\n断言失败'});
+      host.update({kind:'tool_end',toolId:'cmd',ok:false,summary:'测试未通过'});
+    });
+    writeFileSync(path.join(f.project.path,'notes.txt'),'初始\n');
+    for (const args of [['init','-b','main'],['add','--all'],['commit','-m','初始']]) await f.git.checked(args,{cwd:f.project.path});
+    const task=await f.create(); await f.services.tasks.idle();
+    const url='/tasks/'+task.id+'/memory', auth={token:f.token};
+    expect((await t!.api('GET',url)).status).toBe(401);
+    expect((await t!.api('GET',url,{...auth,headers:{origin:'https://other.invalid'}})).status).toBe(403);
+    expect((await t!.api('GET',url,{...auth,headers:{host:'other.invalid'}})).status).toBe(403);
+    const list=TaskMemoryList.parse((await t!.api('GET',url,auth)).json);
+    expect(list.items.map(i=>i.kind)).toEqual(['goal','plan','file','command']);
+    expect(list.items.find(i=>i.kind==='plan')?.content).toEqual([{text:'修正说明',status:'completed'}]);
+    expect(list.items.find(i=>i.kind==='file')?.content).toMatchObject({path:'notes.txt',added:1,removed:1});
+    expect(list.items.find(i=>i.kind==='command')?.content).toMatchObject({ok:false,command:'npm test',output:'token=***\n断言失败'});
+    expect((await t!.api('DELETE',url+'/'+list.items[0]!.id,auth)).status).toBe(400);
+    const msg=f.services.events.read({after:0,limit:1000,taskId:task.id}).find(e=>e.type==='message.user')!;
+    const body={kind:'constraint',sourceSeq:msg.seq};
+    expect((await t!.api('POST',url,{...auth,body:{...body,kind:'goal'}})).status).toBe(400);
+    const add=()=>t!.api('POST',url,{...auth,body});
+    await add(); const added=TaskMemoryList.parse((await add()).json);
+    const constraints=added.items.filter(i=>i.source==='user');
+    expect(constraints).toHaveLength(1);
+    expect(constraints[0]?.content).toBe(msg.data.text);
+    const file=path.join(f.services.tasks.workspaces!.get(task.id)!.path,'.aic','TASK.md');
+    const text=readFileSync(file,'utf8'); expect(text).toContain('## 约束'); expect(text).toContain('修正说明'); expect(text).toContain('notes.txt'); expect(text).toContain('npm test'); expect(text).not.toContain('synthetic-test-value');
+    expect((await t!.api('DELETE',url+'/'+constraints[0]!.id,auth)).status).toBe(200);
+    expect(readFileSync(file,'utf8')).not.toContain('## 约束');
+    expect((await f.services.tasks.workspaces!.mergeGit(task.id,{strategy:'squash',message:'应用成果'})).status).toBe('merged');
+    expect(readFileSync(path.join(f.project.path,'notes.txt'),'utf8')).toBe('修改后\n');
+    expect(existsSync(path.join(f.project.path,'.aic'))).toBe(false);
+  },60000);
   it.each([false, true])('%s git 项目派发 cwd 为登记副本、文件与快照不写原目录', async isGit => {
     const f = await setup(async o => { writeFileSync(path.join(o.cwd, 'result.txt'), '副本结果'); });
     writeFileSync(path.join(f.project.path, 'source.txt'), '原文件');
@@ -87,6 +149,7 @@ describe('任务工作副本接入', () => {
     f.services.db.run('UPDATE tasks SET workspace_kind=NULL,workspace_path=NULL,base_ref=NULL WHERE id=?',old.id);
     await f.services.tasks.prompt(old.id,'旧任务'); await f.services.tasks.idle();
     expect(f.services.tasks.get(old.id).workspace?.kind).toBe('inplace'); expect(f.starts.at(-1)).toBe(f.project.path);
+    expect(existsSync(path.join(f.project.path,'.aic'))).toBe(false);
   });
   it('git 不可用时任务失败，继续发送不能回退原目录', async () => {
     const f = await setup(); f.services.tasks.workspaces = new WorkspaceManager(f.services.db,new Git(null),t!.dataDir);

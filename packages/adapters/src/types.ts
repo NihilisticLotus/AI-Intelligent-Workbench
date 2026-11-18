@@ -105,7 +105,7 @@ export type AgentUpdate =
   | { kind: 'tool_update'; toolId: string; title?: string; target?: string | null; toolKind?: ToolKindT; files?: ToolFile[] }
   | { kind: 'tool_output'; toolId: string; text: string }
   /** rejected：用户在审批里拒绝，工具没有执行（不是执行出错） */
-  | { kind: 'tool_end'; toolId: string; ok: boolean; summary: string | null; rejected?: boolean }
+  | { kind: 'tool_end'; toolId: string; ok: boolean; summary: string | null; rejected?: boolean; memoryCommand?: import('@aic/protocol').MemoryCommandResult }
   | { kind: 'plan'; items: { text: string; status: 'pending' | 'in_progress' | 'completed' }[] }
   | { kind: 'config'; model: string | null; effort: string | null }
   // ---- 1.2 新增 ----

@@ -115,5 +115,18 @@ export class SecretService {
     return this.db.get<{ hint: string }>('SELECT hint FROM secrets WHERE id = ?', id)?.hint ?? null;
   }
 
+  /** 交接材料只在 Gateway 内打码。密钥不写入工作副本，也不跨请求缓存。 */
+  async forRedaction(content: string): Promise<string[]> {
+    const rows = this.db.all<{id:string;hint:string}>('SELECT id,hint FROM secrets');
+    const values: string[] = [];
+    for (const {id,hint} of rows) {
+      // 已知末四位都没出现时，明文一定不在待发布内容里，无须解密。
+      if (hint && !content.includes(hint)) continue;
+      const value = await this.read(id);
+      if (value) values.push(value);
+    }
+    return values;
+  }
+
   delete(id: string | null) { if (id) this.db.run('DELETE FROM secrets WHERE id = ?', id); }
 }

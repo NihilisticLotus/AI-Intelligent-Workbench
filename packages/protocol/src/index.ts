@@ -307,6 +307,26 @@ export type TaskUsage = z.infer<typeof TaskUsage>;
 export const ToolKind = z.enum(['read', 'search', 'edit', 'create', 'delete', 'execute', 'fetch', 'think', 'other']);
 export const ToolFile = z.object({ path: z.string().min(1), added: TokenCount, removed: TokenCount, created: z.boolean() }).strict();
 export type ToolFile = z.infer<typeof ToolFile>;
+export const MemoryFact = z.discriminatedUnion('kind', [
+  z.object({ kind: z.enum(['goal','constraint','decision','issue','next']), content: z.string() }),
+  z.object({ kind: z.literal('plan'), content: z.array(z.object({ text: z.string(), status: z.enum(['pending','in_progress','completed']) })) }),
+  z.object({ kind: z.literal('file'), content: ToolFile.extend({ operation: z.enum(['create','edit','delete']) }) }),
+  z.object({ kind: z.literal('command'), content: z.object({ command: z.string(), ok: z.boolean(), output: z.string() }) }),
+]);
+export type MemoryFact = z.infer<typeof MemoryFact>;
+/** 独立运行时向本机账本提供的命令结果；不放入广播事件。 */
+export type MemoryCommandResult = Extract<MemoryFact,{kind:'command'}>['content'];
+export const TaskMemoryItem = MemoryFact.and(z.object({
+  id: Id, taskId: Id, sessionId: Id.nullable(), source: z.enum(['auto','user','llm']),
+  sourceSeq: z.number().int().positive().nullable(), pinned: z.boolean(), supersededBy: Id.nullable(), createdAt: Ts, updatedAt: Ts,
+}));
+export type TaskMemoryItem = z.infer<typeof TaskMemoryItem>;
+export const TaskMemoryList = z.object({ items: z.array(TaskMemoryItem) }).strict();
+export const AddTaskConstraint = z.union([
+  z.object({ kind: z.literal('constraint'), sourceSeq: z.number().int().positive() }).strict(),
+  z.object({ kind: z.literal('constraint'), content: z.string().min(1).max(65536) }).strict(),
+]);
+export type AddTaskConstraint = z.infer<typeof AddTaskConstraint>;
 export const TaskFile = ToolFile.extend({ sessionId: Id.nullable(), name: z.string(), directory: z.string(), updatedAt: Ts, source: z.enum(['agent', 'independent']) }).strict();
 export type TaskFile = z.infer<typeof TaskFile>;
 export const EventEnvelope = z.discriminatedUnion('type', [
@@ -314,6 +334,7 @@ export const EventEnvelope = z.discriminatedUnion('type', [
   ev('task.updated', z.object({ task: Task })),
   ev('task.deleted', z.object({ id: Id })),
   ev('task.changes_updated', WorkspaceChangeTotals),
+  ev('task.memory_updated', z.object({}).strict()),
   ev('session.started', z.object({
     agent: AgentKind, model: z.string().nullable(),
     /** 1.2 新增：会话使用的账号；resumed 表示这次是恢复原来的会话（H1） */
@@ -466,6 +487,7 @@ export const FeatureKey = {
   FsBrowse: 'fs.browse',
   Worktrees: 'workspace.worktree',   // 1.3 起
   Handoff: 'context.handoff',        // 1.4 起
+  TaskMemory: 'context.task_memory',
   Lan: 'access.lan',                 // 1.5 起
   SideChat: 'chat.side',             // 侧边聊天（design.md 第 26 节，后续阶段）；网页据此决定是否显示“在侧边聊天中提问”
   // 后续阶段的页面入口（侧栏按这些开关显示）；1.1 全部未开启

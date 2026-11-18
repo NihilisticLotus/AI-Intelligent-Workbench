@@ -268,6 +268,15 @@ const MIGRATIONS: string[] = [
   // v19：只有升级时已经应用的凭据能够撤销旧清单里的项目 .aic 文件。
   `ALTER TABLE workspace_operations ADD COLUMN legacy_applied INTEGER NOT NULL DEFAULT 0;
    UPDATE workspace_operations SET legacy_applied=1 WHERE json_extract(record_json,'$.state')='applied';`,
+  // v20：任务级确定性账本及其事件游标，可从旧任务的历史补齐。
+  `CREATE TABLE task_memory (
+     id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+     session_id TEXT, kind TEXT NOT NULL, content TEXT NOT NULL, source TEXT NOT NULL,
+     source_seq INTEGER, pinned INTEGER NOT NULL DEFAULT 0, superseded_by TEXT,
+     created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, item_key TEXT NOT NULL,
+     UNIQUE(task_id,item_key));
+   CREATE TABLE workspace_artifacts (task_id TEXT NOT NULL REFERENCES workspace_records(task_id) ON DELETE CASCADE, path TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(task_id,path));
+   CREATE TABLE task_memory_cursors (task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE, seq INTEGER NOT NULL);`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

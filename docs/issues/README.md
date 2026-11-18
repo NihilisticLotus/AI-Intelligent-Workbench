@@ -110,3 +110,7 @@
 | [ISSUE-0102](ISSUE-0102-git-config-per-command.md) | 每条 git 命令前都多启动一次 git config | fixed | 技术债 | 2026-11-16 | 2026-11-16 |
 | [ISSUE-0103](ISSUE-0103-read-allow-notice-noise.md) | 每次自动允许的读取都在对话里插一条提示 | fixed | bug | 2026-11-16 | 2026-11-16 |
 | [ISSUE-0104](ISSUE-0104-legacy-applied-aic.md) | 旧任务撤销应用时可能涉及项目自己的 .aic 文件 | fixed | 升级兼容 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0105](ISSUE-0105-memory-action-hidden.md) | 主对话里的“记为约束”跟随隐藏的消息标题消失 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0106](ISSUE-0106-queue-cancel-summary.md) | 取消排队任务时被工作副本说明写入拖住 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0107](ISSUE-0107-summary-unrelated-secret.md) | 写任务说明时解密了与内容无关的工作台旧密文 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0108](ISSUE-0108-tracked-task-file.md) | 项目已跟踪同名任务说明时，副本文件与工作台目标不同 | fixed | 升级兼容 | 2026-11-18 | 2026-11-18 |

@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ApiError, Approval, Task, AttachmentInfo, TurnUsage } from '@aic/protocol';
+import { FeatureKey } from '@aic/protocol';
 import { groupTurns, type PlanEntry, type ResolvedInfo, type TimelineItem, type ToolItem, type TurnItem, type TurnStep, type ViewItem } from '../state/core';
 import { platform } from '../platform';
 import { api, approve, loadDevices, useApp } from '../state/app';
@@ -40,6 +41,18 @@ export function Stream({ task, items, loading, onOpenPlan, active = true }: { ta
   const savedScroll = useRef(0);
   // 一轮回复的过程收进“用时 N 秒”，最终回答单独显示（和 Codex 等常见 Agent 软件一致）
   const events = useApp((s) => s.logs[task.id]);
+  const memoryAvailable = useApp(s=>!!s.hello?.features[FeatureKey.TaskMemory]);
+  const connected = useApp(s=>s.conn);
+  const memoryRevision = events?.findLast(e=>e.type==='task.memory_updated')?.seq;
+  const [constraints,setConstraints] = useState<Set<number>>(new Set());
+  const messageSeqs = useMemo(()=>new Map((events ?? []).filter(e=>e.type==='message.user').map(e=>[e.data.messageId,e.seq])),[events]);
+  useEffect(()=>{
+    let live=true;
+    if (memoryAvailable) api.taskMemory(task.id).then(({items})=>{
+      if (live) setConstraints(new Set(items.flatMap(i=>i.source==='user' && i.sourceSeq!==null ? [i.sourceSeq] : [])));
+    }).catch(e=>{if(live) toastErrorOf(e);});
+    return ()=>{live=false;};
+  },[task.id,memoryAvailable,connected,memoryRevision]);
   const view = useMemo(() => groupTurns(items, turnUsages(events ?? [])), [items, events]);
   /** 最后一条用户消息的位置：它之后的错误才是“当前的” */
   const lastUserIdx = useMemo(() => { for (let i = view.length - 1; i >= 0; i--) if (view[i]!.kind === 'user') return i; return -1; }, [view]);
@@ -67,7 +80,10 @@ export function Stream({ task, items, loading, onOpenPlan, active = true }: { ta
       <div className="stream-inner">
         {!items.length ? (
           <div className="empty stream-empty">{loading ? <p>正在载入对话…</p> : <><h3>还没有消息</h3><p>在下面的输入框里告诉 Agent 要做什么。</p></>}</div>
-        ) : view.map((it, i) => <Item key={it.key} it={it} task={task} onOpenPlan={onOpenPlan} live={i > lastUserIdx} />)}
+        ) : view.map((it, i) => {
+          const seq=it.kind==='user' && memoryAvailable ? messageSeqs.get(it.id) : undefined;
+          return <Item key={it.key} it={it} task={task} onOpenPlan={onOpenPlan} live={i > lastUserIdx} sourceSeq={seq} marked={seq!==undefined && constraints.has(seq)} />;
+        })}
       </div>
       <AnnotationLayer container={ref} taskId={task.id} />
     </div>
@@ -76,9 +92,9 @@ export function Stream({ task, items, loading, onOpenPlan, active = true }: { ta
   );
 }
 
-function Item({ it, task, onOpenPlan, live }: { it: ViewItem; task: Task; onOpenPlan: () => void; live: boolean }) {
+function Item({ it, task, onOpenPlan, live, sourceSeq, marked }: { it: ViewItem; task: Task; onOpenPlan: () => void; live: boolean; sourceSeq: number | undefined; marked: boolean }) {
   switch (it.kind) {
-    case 'user': return <UserMsg usage={it.usage} anchor={it.key} text={it.text} ts={it.ts} taskId={task.id} attachments={it.attachments} />;
+    case 'user': return <UserMsg usage={it.usage} anchor={it.key} text={it.text} ts={it.ts} taskId={task.id} attachments={it.attachments} sourceSeq={sourceSeq} marked={marked} />;
     case 'turn': return <Turn it={it} task={task} />;
     case 'plan': return <PlanInline items={it.items} onOpen={onOpenPlan} />;
     case 'approval': return <ApprovalCard approval={it.approval} resolvedInLog={it.resolved} task={task} />;
@@ -98,7 +114,13 @@ function ConfigNote({ it, fallbackAgent }: { it: Extract<TimelineItem, { kind: '
   return <div className="sysnote" role="note"><span>已切换为{parts.join('，')}（{how.replace('（', '，').replace('）', '')}），从下一条消息生效</span></div>;
 }
 
-export function UserMsg({ anchor, text, ts, taskId, attachments, usage }: { anchor: string; text: string; ts: number; taskId: string; attachments?: AttachmentInfo[]; usage?: TurnUsage }) {
+export function UserMsg({ anchor, text, ts, taskId, attachments, usage, sourceSeq, marked }: { anchor: string; text: string; ts: number; taskId: string; attachments?: AttachmentInfo[]; usage?: TurnUsage; sourceSeq?: number | undefined; marked?: boolean }) {
+  const [saving,setSaving] = useState(false);
+  async function mark() {
+    if (sourceSeq===undefined || saving || marked) return;
+    setSaving(true);
+    try { await api.markConstraint(taskId,sourceSeq); } catch(e) { toastErrorOf(e); } finally { setSaving(false); }
+  }
   const usageText = usage ? turnUsageText(usage) : null;
   return (
     <article className="msg user" data-key={anchor} aria-label="你的消息">
@@ -106,6 +128,7 @@ export function UserMsg({ anchor, text, ts, taskId, attachments, usage }: { anch
       <div>
         <div className="head"><b>你</b><span>{clock(ts)}</span></div>
         <div className="text"><RichText text={text} />{attachments?.length?<MessageAttachments taskId={taskId} items={attachments}/>:null}</div>
+        {sourceSeq !== undefined && <button type="button" className="detail-link" disabled={marked || saving} onClick={mark}>{marked ? '已记为约束' : saving ? '正在保存…' : '记为约束'}</button>}
         {usageText ? <p className="turn-usage" tabIndex={0} aria-label={usageText.detail} title={usageText.detail}>{usageText.summary}</p> : null}
       </div>
     </article>

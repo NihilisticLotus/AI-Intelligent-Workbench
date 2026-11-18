@@ -113,6 +113,57 @@ export class WorkspaceManager {
   private changesCache = new Map<string, { fingerprint: string; until: number; value: { result: WorkspaceChanges; tree: string } }>();
   private hashCaches = new Map<string, HashCache>();
   invalidate(taskId: string) { this.changesCache.delete(taskId); }
+  /** null 表示路径空闲；已有文件只在收据匹配时返回哈希，其他情况保留原文件。 */
+  private async artifactHash(record: WorkspaceRecord, name: string): Promise<string | null | undefined> {
+    const receipt = this.db.get<{hash:string}>('SELECT hash FROM workspace_artifacts WHERE task_id=? AND path=?',record.taskId,name);
+    try {
+      await safePath(record.path,name);
+      if (receipt && (await fileInfo(record.path,name)).hash === receipt.hash) return receipt.hash;
+      return undefined;
+    } catch (error) {
+      return (error as NodeJS.ErrnoException).code === 'ENOENT' ? null : undefined;
+    }
+  }
+  async artifactConflicts(taskId: string, name: string): Promise<boolean> {
+    const record = this.get(taskId);
+    return !!record && record.state === 'ready' && (await this.artifactHash(record,name)) === undefined;
+  }
+  /** 只发布到登记副本。目标目录与文件由现有 Windows 句柄宿主校验。 */
+  writeTaskArtifacts(taskId: string, files: ReadonlyMap<string,string>) {
+    // 保留目录已从改动和快照排除，说明写入只需与其他说明写入及清理串行。
+    return this.exclusive('artifacts:'+taskId, async () => {
+      const record = await this.checkedRecord(taskId);
+      if (record.state !== 'ready') return;
+      const artifacts = new Map(files);
+      for (const name of artifacts.keys()) {
+        if (name !== '.aic/TASK.md' && !/^\.aic\/handoffs\/[1-9]\d*\.(json|md)$/.test(name)) fail('workspace.path','工作台说明文件名无效。');
+      }
+      // 忽略文件自身也被 * 覆盖，Agent 的普通 git add 不会暂存本目录。
+      if (record.kind === 'worktree') artifacts.set('.aic/.gitignore','*\n');
+      const directory = await safePath(await this.root(),'workspace-transfers',true);
+      await mkdir(directory, {recursive:true});
+      const tmp = await mkdtemp(path.join(directory,taskId+'-'));
+      const batch: WorkspaceTransferItem[] = [];
+      try {
+        for (const [name,text] of artifacts) {
+          const hash = createHash('sha256').update(text).digest('hex');
+          const current = await this.artifactHash(record,name);
+          if (current === undefined || current === hash) continue;
+          const source = path.join(tmp,batch.length+'.after');
+          await writeFile(source,text,{flag:'wx',mode:0o600});
+          batch.push({path:name,expectedHash:current,source,sourceHash:hash});
+        }
+        if (!batch.length) return;
+        await this.guardedTransfer(record.path,batch,tmp);
+        this.db.tx(() => {
+          for (const item of batch) this.db.run('INSERT INTO workspace_artifacts(task_id,path,hash) VALUES(?,?,?) ON CONFLICT(task_id,path) DO UPDATE SET hash=excluded.hash',taskId,item.path,item.sourceHash);
+        });
+      } finally {
+        if (path.dirname(tmp) !== directory) fail('workspace.path','说明文件的临时目录位置不匹配。');
+        await rm(tmp,{recursive:true,force:true});
+      }
+    });
+  }
   async settle() { await Promise.allSettled([...this.pending.values()]); }
   constructor(private readonly db: Db, readonly git: Git, private readonly dataDir: string) {}
 
@@ -798,7 +849,7 @@ export class WorkspaceManager {
 
   removeWorktree(taskId: string): Promise<void> { return this.remove(taskId); }
   remove(taskId: string): Promise<void> {
-    return this.exclusive(taskId, async () => {
+    return this.exclusive('artifacts:'+taskId, () => this.exclusive(taskId, async () => {
       const pending = this.get(taskId);
       if(pending?.state==='removing') {
         const expected=await this.location(pending);
@@ -843,7 +894,7 @@ export class WorkspaceManager {
         if (record.gitDir) { await this.location(record, 'shadow'); await rm(record.gitDir, { recursive: true, force: true }); }
       }
       this.finishRemoval(taskId);
-    });
+    }));
   }
   private finishRemoval(taskId:string) {
     this.db.tx(()=>{

@@ -237,6 +237,8 @@ export class IndependentTaskRuntime {
         const target = IndependentRelativePath.safeParse(call.arguments && typeof call.arguments === 'object' && 'path' in call.arguments ? call.arguments.path : undefined);
         const toolId = newId('tool'); host.update({ kind: 'tool_start', toolId, toolKind: call.name === 'command' ? 'execute' : ['write_file', 'create_file', 'replace_text'].includes(call.name) ? 'edit' : 'read', title: call.name, target: target.success ? target.data : null });
         let ok = false;
+        let memoryCommand: import('@aic/protocol').MemoryCommandResult | undefined;
+        let rejected = false;
         try {
           if (!allowedTools.has(call.name)) return { role: 'tool', callId: call.id, name: call.name, outcome: 'error', text: '本次任务未声明这个工具，未执行' };
           if (call.name !== 'command') {
@@ -257,19 +259,23 @@ export class IndependentTaskRuntime {
             const decision = await approve(record.id, '执行项目命令', { kind: 'command', record, spec: spec.data,
               warning: '命令使用本机权限运行，可能读写工作区外文件、访问网络或调用已安装软件。这不是系统沙箱；请逐项核对参数。' }, signal);
             if (!decision.approved) {
+              rejected = !signal.aborted;
               if (signal.aborted) this.journal.cancel(record.id); else this.journal.reject(record.id);
               return result(signal.aborted ? 'cancelled' : 'rejected', decision.reason);
             }
             this.journal.approve(record.id);
             const output = await command.execute(record.id, spec.data, { cwd: workspace, approvalBasis: basis, signal, redact: secrets });
             ok = output.reason === 'completed' && output.exitCode === 0;
+            const commandText=[spec.data.program,...spec.data.args].map(s=>/\s/.test(s)?JSON.stringify(s):s).join(' ');
+            memoryCommand = {command:redact(commandText,secrets),ok,output:redact([output.stdout,output.stderr].filter(Boolean).join('\n'),secrets)};
             return result(ok ? 'ok' : output.reason === 'cancelled' ? 'cancelled' : 'error', redact(JSON.stringify(output), secrets));
           } catch (error) {
             const latest = this.journal.get(record.id);
             if (latest.state === 'pending' || latest.state === 'approved') this.journal.cancel(record.id);
             throw error;
           }
-        } finally { host.update({ kind: 'tool_end', toolId, ok, summary: ok ? '工具结果已保存到独立会话' : '工具未成功完成，请查看独立记录' }); this.changed(taskId); }
+        } finally { host.update({ kind: 'tool_end', toolId, ok, ...(rejected ? {rejected:true} : {}), ...(memoryCommand ? {memoryCommand} : {}),
+          summary: ok ? '工具结果已保存到独立会话' : '工具未成功完成，请查看独立记录' }); this.changed(taskId); }
       },
     }, { assistant: (_turn, reply) => {
       // 完整响应仍发布既有正文片段，旧客户端不认识可选 done.text 时也能显示回复。

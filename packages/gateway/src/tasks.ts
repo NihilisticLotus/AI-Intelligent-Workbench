@@ -19,6 +19,8 @@ import { emptyUsage, recordTurnUsage } from './usage';
 import { WorkspaceManager, WorkspaceError } from './workspaces';
 import { GitError } from './git';
 import { PermissionBroker } from './permission-rules';
+import { TaskMemory } from './task-memory';
+import { taskSummaryBody, limitTaskSummary } from './task-summary';
 import type { PermissionOperation, PermissionContext, AlwaysAllowConfirmation, PermissionRulePreview } from '@aic/protocol';
 import { validateProjectDir } from './fsbrowse';
 import type { TaskWorkspace, MergeWorkspaceBody, WorkspaceOperationResult } from '@aic/protocol';
@@ -88,6 +90,10 @@ class SlotBusyError extends Error {
 }
 
 export class TaskService {
+  readonly memory: TaskMemory;
+  private summaryJobs = new Map<string, Promise<void>>();
+  private dirtySummaries = new Set<string>();
+  savedSecrets: (content: string) => Promise<string[]> = async () => [];
   readonly permissions: PermissionBroker;
   private runtimes = new Map<string, Runtime>();
   private starting = new Map<string, Promise<Runtime>>();
@@ -127,6 +133,12 @@ export class TaskService {
   private configuring = new Set<string>();
 
   constructor(private db: Db, private events: EventStore, private agents: AgentRegistry, opts: TaskServiceOptions = {}) {
+    this.memory = new TaskMemory(db,id=>this.secretsOf.get(id) ?? []);
+    events.bus.on(event => {
+      if (!event.taskId || !['task.created','plan.update','tool.end','approval.resolved'].includes(event.type)) return;
+      this.memory.sync(event.taskId);
+      if (event.type !== 'task.created') this.scheduleSummary(event.taskId);
+    });
     this.permissions=new PermissionBroker(db);
     this.noResponseNoticeMs = opts.noResponseNoticeMs ?? 60_000;
     this.noResponseCancelMs = opts.noResponseCancelMs ?? 600_000;
@@ -136,6 +148,38 @@ export class TaskService {
     this.log = opts.log ?? ((m) => console.log(m));
     this.idleTimer = setInterval(() => this.reapIdle(), Math.min(60_000, Math.max(1000, Math.floor(this.idleTimeoutMs / 4))));
     this.idleTimer.unref?.();
+  }
+
+  private async taskSummaryText(id: string) {
+    const body = taskSummaryBody(this.memory.list(id));
+    const secrets = [...await this.savedSecrets(body),...(this.secretsOf.get(id) ?? [])];
+    return limitTaskSummary(body,secrets);
+  }
+
+  /** 同一副本的变化合并写入；新变化到达时，当前发布结束后重新从账本渲染。 */
+  private scheduleSummary(id: string) {
+    if (!this.workspaces?.get(id) || !['worktree','copy'].includes(this.getRow(id).workspace_kind ?? '')) return;
+    this.dirtySummaries.add(id);
+    if (this.summaryJobs.has(id)) return;
+    const job = Promise.resolve().then(async () => {
+      while (this.dirtySummaries.delete(id)) {
+          const text = await this.taskSummaryText(id);
+        await this.workspaces!.writeTaskArtifacts(id,new Map([['.aic/TASK.md',text]]));
+      }
+    }).catch(() => {
+      // 文件并非唯一载体，账本仍可读取。不把第三方的路径、输出或密钥放入通知。
+      if (this.db.get('SELECT id FROM tasks WHERE id=?',id)) this.events.append({type:'session.notice',taskId:id,sessionId:null,data:{level:'warn',text:'工作副本的任务说明未更新，完整记录可在任务账本中查看。'}});
+    }).finally(() => { this.summaryJobs.delete(id); });
+    this.summaryJobs.set(id,job);
+  }
+
+  async updateMemory(id: string, change: () => void) {
+    this.getRow(id);
+    change();
+    this.events.append({taskId:id,sessionId:null,type:'task.memory_updated',data:{}});
+    this.scheduleSummary(id);
+    await this.summaryJobs.get(id);
+    return {items:this.memory.list(id)};
   }
 
   /** 单调递增的“最近活动”时间，保证同一毫秒内的先后也能排出来 */
@@ -307,6 +351,7 @@ export class TaskService {
         ignoreGlobs: JSON.parse(project.ignore_globs ?? '[]') as string[], carryGlobs: JSON.parse(project.carry_globs ?? '[]') as string[], confirmLargeCopy: confirmed };
       if (selected === 'worktree') await this.workspaces.createWorktree(request);
       else await this.workspaces.createCopy(request);
+      this.scheduleSummary(id);
       this.db.run('DELETE FROM workspace_preparations WHERE task_id=?', id);
       this.syncWorkspace(id);
       return true;
@@ -653,7 +698,12 @@ export class TaskService {
         if (text) this.events.append({ ...base, type: 'tool.output', data: { toolId: u.toolId, text } });
         break;
       }
-      case 'tool_end': this.events.append({ ...base, type: 'tool.end', data: { toolId: u.toolId, ok: u.ok, summary: u.summary === null ? null : clean(u.summary), ...(u.rejected ? { rejected: true } : {}) } }); void this.scheduleChanges(taskId); break;
+      case 'tool_end': {
+        const end = this.events.append({ ...base, type: 'tool.end', data: { toolId: u.toolId, ok: u.ok, summary: u.summary === null ? null : clean(u.summary), ...(u.rejected ? { rejected: true } : {}) } });
+        if (u.memoryCommand) this.memory.command(taskId,sessionId,end.seq,end.ts,u.memoryCommand);
+        void this.scheduleChanges(taskId);
+        break;
+      }
       case 'plan': this.events.append({ ...base, type: 'plan.update', data: { items: secrets.length ? u.items.map((i) => ({ ...i, text: clean(i.text) })) : u.items } }); break;
       case 'config': {
         const row = this.getRow(taskId);
@@ -904,6 +954,8 @@ export class TaskService {
         await this.workspaces.snapshot(taskId, '回合开始前'); this.syncWorkspace(taskId); snapshotStarted = true; void this.refreshChanges(taskId);
       }
       rt = await this.ensureRuntime(taskId, abort.signal);
+      const inline = await this.workspaces?.artifactConflicts(taskId,'.aic/TASK.md');
+      const promptText = inline ? (await this.taskSummaryText(taskId))+'\n## 本轮用户消息\n\n'+text : text;
       if (abort.signal.aborted) throw new AbortError();
       this.turnActivity.set(taskId, { startedAt: now(), action: '正在处理任务' }); this.emitUpdated(taskId);
       rt.lastActive = now();
@@ -931,7 +983,7 @@ export class TaskService {
         }, Math.min(1000, this.noResponseNoticeMs, this.noResponseCancelMs));
         watchdog.unref?.();
       });
-      const prompt = rt.conn.prompt({ text, attachments }, abort.signal);
+      const prompt = rt.conn.prompt({ text: promptText, attachments }, abort.signal);
       let r: Awaited<typeof prompt>;
       try { r = await Promise.race([prompt, timeout]); }
       catch (error) {
@@ -951,7 +1003,8 @@ export class TaskService {
       this.setStatus(taskId, r.stopReason === 'cancelled' || timedOut ? 'paused' : r.stopReason === 'error' ? 'failed' : 'review');
     } catch (e) {
       try { await finishSnapshot(); } catch (error) { e = error; }
-      await this.refreshChanges(taskId);
+      // 尚在项目队列时取消，没有 Agent 进入副本，也没有本轮改动需要等待。
+      if (releaseProject || !abort.signal.aborted) await this.refreshChanges(taskId);
       if (rt?.redactor.active) this.flushRedactor(taskId, rt.sessionId, rt.redactor);
       // 用户点了 [停止]：不管启动阶段抛的是什么（取消、或进程被结束导致的错误），都按暂停处理
       if (snapshotFailed) {
@@ -978,6 +1031,7 @@ export class TaskService {
         this.setStatus(taskId, 'failed');
       }
     } finally {
+      this.scheduleSummary(taskId);
       if (watchdog) clearInterval(watchdog);
       releaseDemo?.(); releaseProject?.();
       this.turnActivity.delete(taskId);
@@ -1347,6 +1401,7 @@ export class TaskService {
     for (const pending of this.changeTimers.values()) { clearTimeout(pending.timer); pending.resolve(); }
     this.changeTimers.clear();
     await Promise.allSettled([...this.changeJobs]);
+    await Promise.allSettled([...this.summaryJobs.values()]);
     for (const t of this.emitTimers.values()) clearTimeout(t);
     this.emitTimers.clear();
     for (const p of [...this.pending.values()]) p.cleanup();
@@ -1360,5 +1415,5 @@ export class TaskService {
   }
 
   /** 等所有正在执行的轮次结束（测试用） */
-  async idle() { await Promise.allSettled([...this.turns]); }
+  async idle() { await Promise.allSettled([...this.turns]); await Promise.allSettled([...this.summaryJobs.values()]); }
 }

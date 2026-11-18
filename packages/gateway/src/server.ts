@@ -227,6 +227,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   const cleanupTimer = setInterval(() => { try { attachments.cleanup(); } catch (e) { log('附件清理失败：' + String(e)); } void cleanWorkspaces(); }, 60 * 60_000);
   cleanupTimer.unref?.();
   tasks.attachments = attachments;
+  tasks.savedSecrets = content => secrets.forRedaction(content);
   tasks.agentSvc = agentSvc;
   agentSvc.onQueueChange = ids => tasks.queueChanged(ids);
   tasks.recoverOnStartup();

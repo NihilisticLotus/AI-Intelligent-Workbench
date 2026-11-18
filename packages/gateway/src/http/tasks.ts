@@ -8,6 +8,7 @@ import { Errors } from '../util';
 import { parseQuery, readBody, type Env } from './app';
 import { taskUsage } from '../usage';
 import { taskFiles } from '../task-files';
+import { AddTaskConstraint } from '@aic/protocol';
 
 export function taskRoutes(s: Services) {
   const r = new Hono<Env>();
@@ -15,6 +16,15 @@ export function taskRoutes(s: Services) {
   r.get('/tasks', (c) => c.json(s.tasks.list(parseQuery(c, TasksQuery))));
   r.post('/tasks', async (c) => c.json(await s.tasks.create(await readBody(c, CreateTaskBody)), 201));
   r.get('/tasks/:id', (c) => c.json(s.tasks.get(c.req.param('id'))));
+  r.get('/tasks/:id/memory', c => c.json({items:s.tasks.memory.list(c.req.param('id'))}));
+  r.post('/tasks/:id/memory', async c => {
+    const id = c.req.param('id'), input = await readBody(c,AddTaskConstraint);
+    return c.json(await s.tasks.updateMemory(id,()=>s.tasks.memory.constrain(id,input)));
+  });
+  r.delete('/tasks/:id/memory/:itemId', async c => {
+    const id=c.req.param('id');
+    return c.json(await s.tasks.updateMemory(id,()=>s.tasks.memory.remove(id,c.req.param('itemId'))));
+  });
   r.post('/tasks/:id/queue', async c => c.json(s.tasks.moveQueuedTask(c.req.param('id'), (await readBody(c, MoveQueuedTaskBody)).position)));
   r.delete('/tasks/:id',async c=>c.json(await s.tasks.deleteTask(c.req.param('id'))));
   r.post('/tasks/:id/merge',async c=>c.json(await s.tasks.finishWorkspace(c.req.param('id'),'merge',await readBody(c,MergeWorkspaceBody))));

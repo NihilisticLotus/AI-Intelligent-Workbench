@@ -221,6 +221,26 @@ describe('发送时交接',()=>{
       expect(await readFile(path.join(targetCwd,'Level.cs'),'utf8')).toBe('原版本');
     } finally {await ws.close();}
   });
+  it('仅附件交接交给当前接收方处理',async()=>{
+    const fake=createFakeAdapter({speed:0});
+    let received:PromptInput|undefined;
+    gw=await startGw({adapters:[fake,{...fake,id:'codex',async spawn(opts){
+      const conn=await fake.spawn(opts);
+      conn.prompt=async input=>{received=input;return {stopReason:'end_turn'};};
+      return conn;
+    }}]});
+    const token=await gw.pair(),project=await makeProject(gw,token),s=gw.gw.services;
+    const task=await s.tasks.create({projectId:project.id,agent:'fake',permission:'readonly',prompt:'检查关卡说明',deferPrompt:true});
+    const file=s.attachments.upload(task.id,'level.txt',Buffer.from('关卡说明'));
+    const ws=await WsClient.connect(gw.port,token);
+    try {
+      expect((await ws.call({op:'prompt',data:{taskId:task.id,text:'',attachments:[file.id],target:{agent:'codex'}}})).ok).toBe(true);
+      await s.tasks.idle();
+      expect(received?.attachments?.map(item=>item.attachmentId)).toEqual([file.id]);
+      expect(received?.text).toContain('再继续本轮用户的任务');
+      expect(received?.text).not.toContain('等用户发送下一条消息');
+    } finally {await ws.close();}
+  });
   it('已发送环境附件的普通配置在以后的交接、历史和任务说明中继续打码',async()=>{
     const fake=createFakeAdapter({speed:0});
     let received='';

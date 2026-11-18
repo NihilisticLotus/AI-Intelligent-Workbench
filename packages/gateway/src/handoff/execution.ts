@@ -167,12 +167,13 @@ export class HandoffExecution {
     await this.s.workspaces.writeTaskArtifacts(taskId,new Map([[base+'.md',record.markdown],[base+'.json',JSON.stringify(record.document,null,2)+'\n']]));
   }
 
-  async input(taskId:string,record:HandoffRecord,summary:string,text:string,attachments:{texts:string[];values:string[]},permission:PermissionLevel,action:'redo'|'return'='return') {
+  async input(taskId:string,record:HandoffRecord,summary:string,text:string,attachments:{texts:string[];values:string[];files:PromptAttachment[]},permission:PermissionLevel,action:'redo'|'return'='return') {
     const {clean}=await outgoingRedactor(this.s,taskId,undefined,attachments.values);
     const user=await clean(text), body=await clean(summary), markdown=await clean(record.markdown);
     const instruction='请先用几句话复述目标、下一步和准备先读的文件，再继续本轮用户的任务。';
-    const parts=user || attachments.texts.length ? ['## 本轮用户消息',user,...attachments.texts,instruction] : [action==='redo'?'工作台操作：用完整转写重新交接。请复述当前目标和下一步，等用户发送下一条消息。':'工作台操作：切回原 Agent。请复述交接信息，等用户发送下一条消息。'];
-    if (record.document.meta.to.agent==='codex' && permission!=='readonly' && (user || attachments.texts.length)) {
+    const hasUserMessage=Boolean(user || attachments.texts.length || attachments.files.length);
+    const parts=hasUserMessage ? ['## 本轮用户消息',user,...attachments.texts,instruction] : [action==='redo'?'工作台操作：用完整转写重新交接。请复述当前目标和下一步，等用户发送下一条消息。':'工作台操作：切回原 Agent。请复述交接信息，等用户发送下一条消息。'];
+    if (record.document.meta.to.agent==='codex' && permission!=='readonly' && hasUserMessage) {
       parts.push('若本轮用户要求编辑文件，请在当前工作副本使用 Codex 原生 apply_patch（函数形式为 tools.apply_patch），按现有权限申请编辑。历史里的工具名属于上一会话。若只需新建文件且交接中已有所需内容，可直接新增。用户禁止命令也适用于读取文件。');
     }
     if (action==='redo') checkForcedWindow({forceH2:true},estimateTokens([body,markdown,...parts].join('\n\n')),record.quality.window);

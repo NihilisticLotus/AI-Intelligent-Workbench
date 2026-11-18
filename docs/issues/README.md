@@ -109,3 +109,4 @@
 | [ISSUE-0101](ISSUE-0101-copy-apply-unrelated-drift.md) | 非 git 项目里任何无关改动都阻止“应用结果”和撤销 | fixed | bug | 2026-11-16 | 2026-11-16 |
 | [ISSUE-0102](ISSUE-0102-git-config-per-command.md) | 每条 git 命令前都多启动一次 git config | fixed | 技术债 | 2026-11-16 | 2026-11-16 |
 | [ISSUE-0103](ISSUE-0103-read-allow-notice-noise.md) | 每次自动允许的读取都在对话里插一条提示 | fixed | bug | 2026-11-16 | 2026-11-16 |
+| [ISSUE-0104](ISSUE-0104-legacy-applied-aic.md) | 旧任务撤销应用时可能涉及项目自己的 .aic 文件 | investigating | 升级兼容 | 2026-11-18 | |

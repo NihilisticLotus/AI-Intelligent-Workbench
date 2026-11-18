@@ -2075,3 +2075,5 @@ ISSUE-0071 为部分用量合计补逐字段覆盖说明，ISSUE-0072 为无回�
 ISSUE-0131 的原生记录已定位到工具名称查找落空，接收提示已修正并经离线验证。本轮真实补验因源端 Claude 停止一次编辑而在交接前结束。修复后的 Luna 续写与原生切回仍待验证，第 1 项维持部分通过。见 [ISSUE-0132](../issues/ISSUE-0132-claude-stopped-tool-before-handoff.md)。
 
 随后从保留的源会话向 Luna 发送了一条接手消息。它正确复述后尝试命令读取，守卫取消，任务归属回到 Claude。本轮未取得真实写入及原生切回证据。见 [ISSUE-0133](../issues/ISSUE-0133-luna-handoff-read-command.md)。
+
+单条真实续验中，Luna 收到明确编辑指令和工具名，正确复述后结束回合，未创建 Result.txt。已停在 H1 前；第 12.13 节第 1 项仍为部分通过。见[验收记录](../acceptance/step-1.6.md)。

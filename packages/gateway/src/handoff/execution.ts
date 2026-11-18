@@ -3,9 +3,16 @@ import { createHash } from 'node:crypto';
 import { HandoffRecord, HandoffSettings, type HandoffTarget, type HandoffSendOptions, type HandoffProgressStep, type PromptAttachment, type EventEnvelope } from '@aic/protocol';
 import type { Services } from '../services';
 import { Errors, newId } from '../util';
+import { estimateTokens } from './budget';
 import { previewHandoff } from './preview';
 import { outgoingRedactor } from './history';
 import { environmentValues,isEnvSource } from './redact';
+
+function checkForcedWindow(options:HandoffSendOptions, required:number, available:number) {
+  if (options.forceH2 && required>available) {
+    throw Errors.invalidState('完整转写预计需要 '+required+' token，目标窗口可用 '+available+' token。已保留当前会话，请更换大窗口模型后再交接。');
+  }
+}
 
 export class HandoffExecution {
   readonly summaryLedger: IndependentRequestLedger;
@@ -120,6 +127,7 @@ export class HandoffExecution {
       if(options.markdown!==undefined && record.markdown!==options.markdown) {
         const {clean}=outgoingRedactor(this.s,taskId,undefined,environment);
         const markdown=await clean(options.markdown);
+        checkForcedWindow(options, estimateTokens(markdown), record.quality.window);
         db.run('UPDATE handoffs SET content_md=?,edited_by_user=1 WHERE task_id=? AND id=?',markdown,taskId,id);
       }
       return {record:this.get(taskId,id),pending:false};
@@ -130,7 +138,7 @@ export class HandoffExecution {
     const ordinal=used.reduce((n,row)=>Math.max(n,Number(row.ref.split('/').at(-1))),Number(db.get('SELECT MAX(ordinal) AS n FROM handoffs WHERE task_id=?',taskId)?.n??0))+1;
     try {
       const checkpoint=workspaces.get(taskId)?await workspaces.createCheckpoint(taskId,ordinal):undefined;
-      const preview=await previewHandoff(this.s,taskId,target,{checkpoint,forceH2:options.forceH2,environment,summaryModel:this.settings().summaryModel??undefined});
+      const preview=await previewHandoff(this.s,taskId,target,{checkpoint,forceH2:options.forceH2,environment,summaryModel:options.forceH2?undefined:this.settings().summaryModel??undefined});
       const {document,quality,level,markdown}=preview;
       const source=db.get('SELECT agent,model,effort,profile_id FROM tasks WHERE id=?',taskId);
       db.run(`INSERT INTO handoffs(id,task_id,from_session_id,level,content_md,document_json,quality_json,created_at,state,ordinal,request_json)
@@ -141,6 +149,7 @@ export class HandoffExecution {
       this.progress(taskId,id,'probe',quality.summaryFailure==='probe'?'failed':quality.probe?'done':'skipped');
       if(!quality.coveragePassed) throw Errors.invalidState('交接内容未覆盖任务事实，原会话可继续使用');
       const record=this.get(taskId,id);
+      checkForcedWindow(options, quality.estimatedTokens, quality.window);
       await this.publish(taskId,record);
       return {record,pending:this.settings().confirmBeforeSend || !!record.quality.windowConfirmation};
     } catch(error) {
@@ -156,11 +165,12 @@ export class HandoffExecution {
     await this.s.workspaces.writeTaskArtifacts(taskId,new Map([[base+'.md',record.markdown],[base+'.json',JSON.stringify(record.document,null,2)+'\n']]));
   }
 
-  async input(taskId:string,record:HandoffRecord,summary:string,text:string,attachments:{texts:string[];values:string[]}) {
+  async input(taskId:string,record:HandoffRecord,summary:string,text:string,attachments:{texts:string[];values:string[]},action:'redo'|'return'='return') {
     const {clean}=outgoingRedactor(this.s,taskId,undefined,attachments.values);
     const user=await clean(text), body=await clean(summary), markdown=await clean(record.markdown);
     const instruction='请先用几句话复述目标、下一步和准备先读的文件，再继续本轮用户的任务。';
-    const parts=user || attachments.texts.length ? ['## 本轮用户消息',user,...attachments.texts,instruction] : ['工作台操作：切回原 Agent。请复述交接信息，等用户发送下一条消息。'];
+    const parts=user || attachments.texts.length ? ['## 本轮用户消息',user,...attachments.texts,instruction] : [action==='redo'?'工作台操作：用完整转写重新交接。请复述当前目标和下一步，等用户发送下一条消息。':'工作台操作：切回原 Agent。请复述交接信息，等用户发送下一条消息。'];
+    if (action==='redo') checkForcedWindow({forceH2:true},estimateTokens([body,markdown,...parts].join('\n\n')),record.quality.window);
     return {text:parts.join('\n\n'),resources:[{uri:'aic://task/TASK.md',text:body},{uri:'aic://task/handoffs/'+record.ordinal+'.md',text:markdown}]};
   }
 }

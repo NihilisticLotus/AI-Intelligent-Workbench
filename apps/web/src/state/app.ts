@@ -1,7 +1,7 @@
 // 应用状态与操作：启动、配对、REST 快照、WebSocket 实时事件、各种用户操作。
 // 网页界面也只是 /api/v1 的普通客户端，这里不做任何“只有本机才能用”的捷径。
 import {
-  ErrorCode, type AgentKind, type AgentLoginBody, type AgentProfile, type ApiError, type CreateProfileBody, type Device,
+  PromptResult, type HandoffTarget, type HandoffSendOptions, ErrorCode, type AgentKind, type AgentLoginBody, type AgentProfile, type ApiError, type CreateProfileBody, type Device,
   type EventEnvelope, type Group, type Hello, type PatchAgentBody, type PatchProfileBody, type PermissionLevel,
   type Project, type Task,
 } from '@aic/protocol';
@@ -274,7 +274,8 @@ export async function loadHistory(taskId: string) {
 
 // ---------- 指令（WebSocket） ----------
 const notConnected = () => Promise.reject(new ApiRequestError({ code: 'client.offline', message: '还没有连上服务', actions: [] }));
-export const sendPrompt = (taskId: string, text: string, attachments?: string[]) => (ws ? ws.request('prompt', { taskId, text, attachments }) : notConnected());
+export const sendPrompt = (taskId: string, text: string, attachments?: string[], target?:HandoffTarget, handoff?:HandoffSendOptions) =>
+  ws ? ws.request('prompt', { taskId, text, attachments, target, handoff }, target?180_000:undefined).then(value=>PromptResult.parse(value)) : notConnected();
 export const cancelTask = (taskId: string) => (ws ? ws.request('cancel', { taskId }) : notConnected());
 export const approve = (approvalId: string, optionId: string, note?: string, alwaysAllow?:import('@aic/protocol').AlwaysAllowConfirmation) =>
   ws ? ws.request('approve',{approvalId,optionId,...(note?{note}:{}),...(alwaysAllow?{alwaysAllow}:{})}) : notConnected();

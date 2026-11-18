@@ -18,19 +18,25 @@ function ConfigDialog({ taskId, initialModelId, close }: { taskId: string; initi
   const task = useApp((s) => s.tasks[taskId]);
   const [state, setState] = useState<IndependentTaskState | null>(null), [next, setNext] = useState<IndependentTaskOptions | null>(null);
   const [busy, setBusy] = useState(false), [error, setError] = useState<ReturnType<typeof asApiError> | null>(null);
+  const [creating,setCreating] = useState(false);
   const errorRef = useRef<HTMLDivElement>(null);
-  useEffect(() => { let live = true; void api.independentTask(taskId).then((s) => { if (live) setState(s); }).catch((e) => { if (live) setError(asApiError(e)); }); return () => { live = false; }; }, [taskId]);
+  useEffect(() => { let live = true; void api.independentTask(taskId).then((s) => { if (live) setState(s); }).catch((e) => { if (!live) return;
+    const error=asApiError(e);
+    if (error.message==='任务尚未保存独立 Agent 配置') setCreating(true);
+    else setError(error);
+  }); return () => { live = false; }; }, [taskId]);
   const save = async () => {
-    if (!state || !next || busy) return; setBusy(true); setError(null);
-    try { await api.configureIndependentTask(taskId, state.revision, next); toast('已应用配置，历史请求与已占额度继续保留'); close(); }
+    if ((!state && !creating) || !next || busy) return; setBusy(true); setError(null);
+    try { if (state) await api.configureIndependentTask(taskId, state.revision, next);
+      else await api.createIndependentConfig(taskId,next); toast('已应用配置，历史请求与已占额度继续保留'); close(); }
     catch (e) { setError(asApiError(e)); } finally { setBusy(false); }
   };
   useEffect(() => { if (error) errorRef.current?.focus(); }, [error]);
   return <Dialog title="独立任务配置" onClose={close} wide footer={<><button className="btn" onClick={close}>取消</button>
-    <button className="btn primary" disabled={!task || !idle(task) || !next || !state || busy || state.recoveryRequired} aria-busy={busy} onClick={() => void save()}>应用配置</button></>}>
+    <button className="btn primary" disabled={!task || !idle(task) || !next || (!state && !creating) || busy || state?.recoveryRequired} aria-busy={busy} onClick={() => void save()}>应用配置</button></>}>
     <p>任务空闲时可以更换 API、模型、强度与预算。切换后保留完整原始记录，已发生的请求和金额预留不会清空；原模型专用续传资料不交给新模型。</p>
     {error ? <div ref={errorRef} tabIndex={-1}><ErrorNotice error={error} /><button className="btn" onClick={() => { setState(null); void api.independentTask(taskId).then(setState).catch((e) => setError(asApiError(e))); }}>重新载入并核对</button></div> : null}
-    {state ? <IndependentTaskConfig key={state.revision} initialOptions={state.options} initialModelId={initialModelId} onChange={setNext} disabled={busy || !task || !idle(task)} /> : <p role="status">正在读取任务配置…</p>}
+    {state || creating ? <IndependentTaskConfig key={state?.revision??0} initialOptions={state?.options} initialModelId={initialModelId} onChange={setNext} disabled={busy || !task || !idle(task)} /> : <p role="status">正在读取任务配置…</p>}
   </Dialog>;
 }
 

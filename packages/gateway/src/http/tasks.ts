@@ -2,7 +2,7 @@
 import { MergeWorkspaceBody, PrepareWorkspaceBody, RestoreWorkspaceFileBody, MoveQueuedTaskBody } from '@aic/protocol';
 import { Hono } from 'hono';
 import { ApprovalsQuery, CreateTaskBody, EventsQuery, PatchTaskBody, PutTaskDraftBody, TasksQuery, type TaskDraft } from '@aic/protocol';
-import { PutIndependentTaskBody, IndependentRecoveryBody, IndependentHistoryQuery, IndependentCheckpointBody } from '@aic/protocol';
+import { IndependentTaskOptions, PutIndependentTaskBody, IndependentRecoveryBody, IndependentHistoryQuery, IndependentCheckpointBody } from '@aic/protocol';
 import type { Services } from '../services';
 import { Errors } from '../util';
 import { parseQuery, readBody, type Env } from './app';
@@ -24,6 +24,7 @@ export function taskRoutes(s: Services) {
     const {restoreRevision,...confirmation}=await readBody(c,HandoffReturnBody);
     return c.json(await s.tasks.returnHandoff(c.req.param('id'),c.req.param('handoffId'),restoreRevision,confirmation));
   });
+  r.post('/tasks/:id/handoff/:handoffId/redo',async c=>c.json(await s.tasks.redoHandoff(c.req.param('id'),c.req.param('handoffId'),await readBody(c,HandoffReturnBody.omit({restoreRevision:true})))));
   r.get('/tasks/:id/memory', c => c.json({items:s.tasks.memory.list(c.req.param('id'))}));
   r.post('/tasks/:id/memory', async c => {
     const id = c.req.param('id'), input = await readBody(c,AddTaskConstraint);
@@ -47,6 +48,7 @@ export function taskRoutes(s: Services) {
   r.get('/tasks/:id/files', (c) => c.json({ items: taskFiles(s.db, c.req.param('id')), nextCursor: null }));
   r.patch('/tasks/:id', async (c) => c.json(await s.tasks.patch(c.req.param('id'), await readBody(c, PatchTaskBody))));
   r.get('/tasks/:id/independent', (c) => c.json(s.independentRuntime.state(c.req.param('id'))));
+  r.post('/tasks/:id/independent',async c=>c.json(await s.tasks.updateIndependent(c.req.param('id'),'configure',await readBody(c,IndependentTaskOptions)),201));
   r.put('/tasks/:id/independent', async (c) => {
     const body = await readBody(c, PutIndependentTaskBody);
     return c.json(await s.tasks.updateIndependent(c.req.param('id'), 'configure', body.options, body.expectedRevision));

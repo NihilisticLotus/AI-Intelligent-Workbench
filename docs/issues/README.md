@@ -123,3 +123,7 @@
 | [ISSUE-0115](ISSUE-0115-handoff-source-continuity.md) | 无原生恢复能力时交接失败会丢失来源会话状态 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0116](ISSUE-0116-return-confirmation.md) | 反向交接草稿确认请求被拒 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0117](ISSUE-0117-handoff-summary-budget.md) | 交接摘要模型与任务执行模型使用不同的请求预算绑定 | fixed | 待办 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0118](ISSUE-0118-forced-handoff-window.md) | 手动强制完整转写时可能超过目标模型的整个窗口 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0119](ISSUE-0119-handoff-live-feedback.md) | 已发送后仍可点击撤销，任务账本没有及时显示计划 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0120](ISSUE-0120-handoff-session-slots.md) | 保留原会话时模拟第三方 Agent 无法取得接收名额 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0121](ISSUE-0121-approval-watchdog-test-start.md) | 无回应计时用例在审批请求登记之前快进时间 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |

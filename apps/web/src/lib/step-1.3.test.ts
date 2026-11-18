@@ -63,7 +63,7 @@ describe('选择器与附件',()=>{
     const items=pickerItems(a,'fake',{model:'yes',effort:'enabled'},'one','task');expect(items.efforts?.[0]).toBe('enabled');expect(items.models[1]).toMatchObject({cannotSee:true,failure:'不支持'});expect(items.profiles[1]?.blocked).toBe(true);
     expect(pickerItems(a,'fake',{model:'yes',effort:null},'two','new').models[1]?.failure).toBe(null);
     expect(pickerItems(a,'codex',{model:null,effort:null},null,'task').profiles).toEqual([]);
-    expect(pickerAction('fake','codex','task')).toBe('explain');expect(pickerAction('fake','codex','new')).toBe('select');expect(effortLabel('enabled')).toBe('自动');
+    expect(pickerAction('fake','codex','task')).toBe('pending');expect(pickerAction('fake','codex','new')).toBe('select');expect(effortLabel('enabled')).toBe('自动');
   });
   it('剪贴板只取文件，截图命名与数量大小上限',()=>{
     const f={} as File;expect(clipboardFiles([{kind:'string',getAsFile:()=>f},{kind:'file',getAsFile:()=>f},{kind:'file',getAsFile:()=>null}])).toEqual([f]);

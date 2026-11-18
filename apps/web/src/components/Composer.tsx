@@ -23,6 +23,8 @@ import { AnnotationChip, clearAnnotations, draftAnnotations, onAnnotationsChange
 import { clearDraft, loadDraft, localDraft, saveDraft } from '../state/drafts';
 import { composeWithAnnotations } from '../lib/annotations';
 import { openIndependentConfig } from './independent-task-panel';
+import { selectTarget, useTarget, setHandoffSending, useHandoffSending } from '../state/handoff';
+import { confirmHandoff } from './handoff';
 import { ContextRing } from './ContextRing';
 
 const busyStatuses = new Set<Task['status']>(['running', 'waiting', 'queued']);
@@ -30,10 +32,12 @@ const busyStatuses = new Set<Task['status']>(['running', 'waiting', 'queued']);
 export function Composer({ task, pending, config, blocking }: { task: Task; pending: Approval[]; config: SessionCfg; blocking?: ApiError | null }) {
   const attachments = useAttachments(task.id);
   const attachmentInput = useAttachmentInput(attachments.add);
-  const info = useApp((s)=>s.agents.find((a)=>a.kind===task.agent));
-  const visionInfo = info ? {...info,models:pickModels(info,config)} : undefined;
+  const target = useTarget(task.id,task.agent);
+  const info = useApp((s)=>s.agents.find((a)=>a.kind===(target?.agent??task.agent)));
+  const visionConfig = target ? {...config,model:target.model??null,models:info?.models??[]} : config;
+  const visionInfo = info ? {...info,models:pickModels(info,visionConfig)} : undefined;
   const imageCount = attachments.items.filter((a)=>a.info?.kind==='image').length;
-  const warning = visionWarning(visionInfo,config.model,imageCount);
+  const warning = visionWarning(visionInfo,visionConfig.model,imageCount);
   const [blocked,setBlocked]=useState(false);
   const attachmentIds=useRef<string[]>([]);attachmentIds.current=attachments.ids;
   const now=useNow(1000);
@@ -78,16 +82,31 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
 
   const working = busyStatuses.has(task.status);
   const finished=['merged','discarded'].includes(task.status);
-  const canSend = !finished && online && draftReady && !working && !sending && (text.trim().length > 0 || annos.length > 0 || attachments.ids.length>0) && !attachments.uploading && !attachments.failed;
+  const handoffSending=useHandoffSending(task.id);
+  const canSend = !handoffSending && !finished && online && draftReady && (!working || !!target) && !sending && (text.trim().length > 0 || annos.length > 0 || attachments.ids.length>0) && !attachments.uploading && !attachments.failed;
 
   const send = async (force = false) => {
     if (!canSend) return;
     if(imageCount && (warning.vision===false || (warning.vision===null&&!force))){setBlocked(true);toast(warning.text,'attn');setTimeout(()=>document.querySelector<HTMLElement>('.attachment-warning button')?.focus(),0);setTimeout(()=>setBlocked(false),700);return;}
     const body = composeWithAnnotations(text, annos);
     setSending(true);
+    if (target) setHandoffSending(task.id,true);
     setSendErr(null);
     try {
-      await sendPrompt(task.id, body, attachments.ids);
+      if (working && target) {
+        const choice = await choiceDialog({title:'当前 Agent 仍在工作',body:<p>当前回合结束后会发送这条消息。</p>,
+          choices:[{value:'wait',label:'等当前回合结束',primary:true},{value:'stop',label:'立即中断当前回合',danger:true}]});
+        if (!choice) return;
+        if (choice==='stop') await cancelTask(task.id);
+        await waitForIdle(task.id);
+      }
+      const result = await sendPrompt(task.id, body, attachments.ids,target);
+      if (result.pendingHandoffId) {
+        const confirmation = await confirmHandoff(task.id,result.pendingHandoffId);
+        if (!confirmation) return;
+        await sendPrompt(task.id,body,attachments.ids,target,confirmation);
+      }
+      selectTarget(task.id,task.agent);
       attachments.clear();
       setText('');
       clearAnnotations(task.id);
@@ -96,6 +115,7 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
       setSendErr(withDefaultActions(asApiError(e), { taskId: task.id, kind: task.agent })); // 发送失败时保留输入内容，错误连同按钮显示在输入框上方
     } finally {
       setSending(false);
+      if (target) setHandoffSending(task.id,false);
       ta.current?.focus();
     }
   };
@@ -103,6 +123,7 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
     try { await cancelTask(task.id); toast('已请求停止，Agent 会在当前步骤结束后停下'); } catch (e) { toastErrorOf(e, { taskId: task.id, kind: task.agent }); }
   };
   const chooseImageModel = async (model:string) => {
+    if (target) {selectTarget(task.id,task.agent,{...target,model});return;}
     if (task.agent === 'independent') { openIndependentConfig(task.id, model); return; }
     try {
       if(switchNeedsTurnEnd(task.status,'model',modelSwitchKind(info?.caps))){
@@ -147,19 +168,19 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
         ) : null}
         <div className={'compose-box'+(attachmentInput.dragging?' dragging':'')+(blocked?' attachment-blocked':'')} {...attachmentInput.handlers}>
           {working&&idleNotice?<div className="attachment-warning" role="status">正在处理 · {Math.max(0,Math.floor((now-(lastUser?.ts??now))/1000))} 秒，Agent 暂时没有回应。<button type="button" className="btn sm" onClick={stop}>停止</button></div>:null}
-          <Attachments state={attachments} taskId={task.id} info={visionInfo} model={config.model} onModel={(model)=>void chooseImageModel(model)} onBlocked={()=>void send(true)}/>
+          <Attachments state={attachments} taskId={task.id} info={visionInfo} model={visionConfig.model} onModel={(model)=>void chooseImageModel(model)} onBlocked={()=>void send(true)}/>
           <input type="file" multiple hidden ref={attachmentInput.input} onChange={(e)=>{attachments.add(Array.from(e.target.files??[]));e.target.value='';}}/>
           <AnnotationChip taskId={task.id} />
           <label htmlFor="prompt" className="sr-only">给 Agent 发消息</label>
-          <textarea id="prompt" ref={ta} value={text} disabled={finished} placeholder={finished?'任务已结束，请新建任务继续。':placeholder} maxLength={100_000}
+          <textarea id="prompt" ref={ta} value={text} disabled={finished || sending} placeholder={finished?'任务已结束，请新建任务继续。':placeholder} maxLength={100_000}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={(e) => {
               // 输入法组字时的回车不算发送
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); }
             }} />
           <div className="compose-bar">
-            <button type="button" className="btn ghost icon sm" aria-label="添加附件" title="选择文件或粘贴、拖入图片" onClick={()=>attachmentInput.input.current?.click()}><Icon name="clip" /></button>
-            <Switcher task={task} config={config} online={online} />
+            <button type="button" className="btn ghost icon sm" aria-label="添加附件" title="选择文件或粘贴、拖入图片" disabled={sending} onClick={()=>attachmentInput.input.current?.click()}><Icon name="clip" /></button>
+            <Switcher task={task} config={config} online={online && !sending && !handoffSending} />
             <span className="grow" />
             <PermChip task={task} online={online} />
             {working ? (
@@ -211,6 +232,19 @@ function cancelPendingSwitch(taskId: string) {
   pendingSwitchStore.set((m) => { if (!m[taskId]) return m; const n = { ...m }; delete n[taskId]; return n; });
 }
 
+function waitForIdle(taskId:string) {
+  return new Promise<void>((resolve,reject)=>{
+    const check=()=>{
+      const state=appStore.get(), task=state.tasks[taskId];
+      if (!task || !['online','replaying'].includes(state.conn) || ['merged','discarded'].includes(task.status)) {
+        off(); reject(new Error('等待已结束，请核对任务后重新发送。'));
+      } else if (!busyStatuses.has(task.status)) {off();resolve();}
+    };
+    const off=appStore.subscribe(check);
+    check();
+  });
+}
+
 function Switcher({ task, config, online }: { task: Task; config: SessionCfg; online: boolean }) {
   const agents = useApp((s) => s.agents);
   const info = agents.find((a) => a.kind === task.agent);
@@ -228,10 +262,21 @@ function Switcher({ task, config, online }: { task: Task; config: SessionCfg; on
     setBusy(kind);try{await switchConfig(task.id,patch);}catch(e){setSwErr(withDefaultActions(asApiError(e),{taskId:task.id,kind:task.agent}));}finally{setBusy(null);}
   };
   const profileId=config.profileId??task.profileId??info?.profiles?.find((p)=>p.isDefault)?.id??null;
-  if (task.agent === 'independent') return <button type="button" className="picker-trigger independent-runtime-trigger" aria-label="AI Console 独立 Agent 独立 Agent · 模型与运行配置" title="独立 Agent · 模型与运行配置" disabled={!online || busyStatuses.has(task.status)} onClick={() => openIndependentConfig(task.id)}><AgentBadge kind="independent" size="sm"/>独立配置<Icon name="down"/></button>;
-  return <div>
-    <AgentPicker agents={agents} agent={task.agent} config={config} profileId={profileId} mode="task" disabled={!online||!!busy} requestKey={requestKey} taskPreset={{projectId:task.projectId,prompt:task.prompt}}
-      onPick={(p)=>void doSwitch(p.profileId?'profile':p.model!==undefined?'model':'effort',{...(p.model?{model:p.model}:{}),...(p.effort?{effort:p.effort}:{}),...(p.profileId?{profileId:p.profileId}:{})})}/>
+  const enabled = useApp(s=>!!s.hello?.features[FeatureKey.Handoff]);
+  const target = useTarget(task.id, task.agent);
+  const selected = target?.agent??task.agent;
+  const selectedConfig = target ? {...config,model:target.model??null,effort:target.effort??null,models:agents.find(a=>a.kind===selected)?.models??[],efforts:[]} : config;
+  return <div className="switcher-controls">
+    <AgentPicker agents={enabled?agents:agents.filter(a=>a.kind===task.agent)} agent={selected} config={selectedConfig} profileId={target?null:profileId} mode="task" disabled={!online||!!busy} requestKey={requestKey}
+      onPick={pick=>{
+        if (pick.agent!==task.agent) {
+          const previous=target?.agent===pick.agent?target:undefined;
+          selectTarget(task.id,task.agent,{agent:pick.agent,...(pick.model?{model:pick.model}:previous?.model?{model:previous.model}:{}),...(pick.effort?{effort:pick.effort}:previous?.effort?{effort:previous.effort}:{})});
+        } else if (target) selectTarget(task.id,task.agent);
+        else if (task.agent==='independent') openIndependentConfig(task.id,pick.model);
+        else void doSwitch(pick.profileId?'profile':pick.model!==undefined?'model':'effort',{...(pick.model?{model:pick.model}:{}),...(pick.effort?{effort:pick.effort}:{}),...(pick.profileId?{profileId:pick.profileId}:{})});
+      }}/>
+    {selected==='independent'?<button type="button" className="btn sm" disabled={!online||busyStatuses.has(task.status)} onClick={()=>openIndependentConfig(task.id,target?.model)}>独立配置</button>:null}
     {swErr?<ErrorNotice error={swErr} ctx={{taskId:task.id,kind:task.agent}} onDismiss={()=>setSwErr(null)}/>:null}
     {pendingSw?<div className="hint" role="status">这一轮结束后会{pendingSw.label}。<button type="button" className="linkish" onClick={()=>cancelPendingSwitch(task.id)}>不换了</button></div>:null}
   </div>;

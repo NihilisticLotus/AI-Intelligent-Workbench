@@ -29,7 +29,7 @@ export function systemRoutes(s: Services) {
         [FeatureKey.Groups]: true,
         [FeatureKey.FsBrowse]: true,
         [FeatureKey.Worktrees]: false,
-        [FeatureKey.Handoff]: false,
+        [FeatureKey.Handoff]: true,
         [FeatureKey.TaskMemory]: true,
         [FeatureKey.Lan]: false,
         [FeatureKey.SideChat]: false,

@@ -405,9 +405,9 @@ export class AgentService {
   // ---------- 并发上限 ----------
 
   /** 第三方占会话名额；演示占当前回合名额，等待者可按任务调序。 */
-  async acquire(kind: AgentKind, onQueued?: () => void, signal?: AbortSignal, opts: { wait?: boolean; taskId?: string } = {}): Promise<(() => void) | null> {
+  async acquire(kind: AgentKind, onQueued?: () => void, signal?: AbortSignal, opts: { wait?: boolean; taskId?: string; parkedSource?: boolean } = {}): Promise<(() => void) | null> {
     if (!this.registry.get(kind)) return () => {};
-    return this.pool.acquire(kind, opts.taskId ?? newId('slot'), onQueued, signal, opts.wait !== false);
+    return this.pool.acquire(kind, opts.taskId ?? newId('slot'), onQueued, signal, opts.wait !== false, opts.parkedSource);
   }
   private drain(kind: AgentKind) { this.pool.drain(kind); }
   queuePosition(taskId: string) { return this.pool.position(taskId); }

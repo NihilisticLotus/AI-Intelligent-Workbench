@@ -10,7 +10,7 @@ import {
   type AgentKind, type AgentLoginBody, type CreateProfileBody, type DeviceKind, type PatchAgentBody, type PatchProfileBody, type PutTaskDraftBody,
 } from '@aic/protocol';
 import { z } from 'zod';
-import { TaskMemoryList } from '@aic/protocol';
+import { CheckpointRestorePreview, HandoffActionResult, HandoffRecord, HandoffSettings, HandoffSummaryUsage, type HandoffReturnBody, TaskMemoryList } from '@aic/protocol';
 import { TaskUsage, TaskFile, SavedEnvironment, type CreateEnvironmentBody } from '@aic/protocol';
 import {
   IndependentService, IndependentModel, IndependentDefault, IndependentNetworkSettings, IndependentDiscoveryState, ImportIndependentModelsResult,
@@ -217,6 +217,18 @@ export class HttpClient {
   workspaceRetention() {return this.request('GET','/settings/workspaces',{parse:oneOf(WorkspaceRetention)});}
   setWorkspaceRetention(body:WorkspaceRetention) {return this.request('PUT','/settings/workspaces',{body,parse:oneOf(WorkspaceRetention)});}
   taskFiles(id: string) { return this.request('GET', `/tasks/${encodeURIComponent(id)}/files`, { parse: listOf(TaskFile) }).then((r) => r.items); }
+  handoffSettings() {return this.request('GET','/settings/handoff',{parse:HandoffSettings});}
+  saveHandoffSettings(body:HandoffSettings) {return this.request('PUT','/settings/handoff',{body,parse:HandoffSettings});}
+  summaryUsage() {return this.request('GET','/settings/handoff/usage',{parse:HandoffSummaryUsage});}
+  private handoffPath(taskId:string,id:string) {return '/tasks/'+encodeURIComponent(taskId)+'/handoff/'+encodeURIComponent(id);}
+  handoff(taskId:string,id:string) {return this.request('GET',this.handoffPath(taskId,id),{parse:HandoffRecord});}
+  restorePreview(taskId:string,id:string) {return this.request('GET',this.handoffPath(taskId,id)+'/restore',{parse:CheckpointRestorePreview});}
+  handoffAction(taskId:string,id:string,action:'return'|'redo',body:HandoffReturnBody) {
+    return this.request('POST',this.handoffPath(taskId,id)+'/'+action,{body,parse:HandoffActionResult});
+  }
+  createIndependentConfig(id:string,body:IndependentTaskOptions) {
+    return this.request('POST','/tasks/'+encodeURIComponent(id)+'/independent',{body,parse:IndependentTaskState});
+  }
   taskMemory(id: string) { return this.request('GET', `/tasks/${encodeURIComponent(id)}/memory`, { parse:oneOf(TaskMemoryList) }); }
   markConstraint(id: string, sourceSeq: number) {
     return this.request('POST', `/tasks/${encodeURIComponent(id)}/memory`, { body:{kind:'constraint',sourceSeq}, parse:oneOf(TaskMemoryList) });

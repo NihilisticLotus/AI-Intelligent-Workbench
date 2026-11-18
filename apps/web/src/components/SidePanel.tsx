@@ -15,6 +15,7 @@ import { formatTokens } from '../lib/tokens';
 import { lastSeq } from '../lib/details';
 import { EnvironmentDetails } from './details/environment';
 import { PlanDetails } from './details/plan';
+import { TaskMemoryDetails } from './details/task-memory';
 import { ContextDetails } from './details/context';
 import { UsageDetails } from './details/usage';
 import { ConnectionDetails } from './details/connection';
@@ -51,6 +52,12 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
   const project = useApp((s) => s.projects.find((p) => p.id === task.projectId));
   const agent = useApp((s) => s.agents.find((a) => a.kind === task.agent));
   const conn = useApp((s) => s.conn);
+  const historyAvailable=useApp(s=>{
+    const events=s.logs[task.id];
+    const session=events?.findLast(e=>e.type==='session.started');
+    return !!session && session.data.agent!=='independent' && !!events?.some(e=>e.type==='session.handoff'&&e.data.toSession===session.sessionId)
+      && !events.some(e=>e.type==='session.ended'&&e.sessionId===session.sessionId&&e.seq>session.seq);
+  });
   // 每次收到事件都会重算选择器；从末尾找，避免长任务里反复复制整段历史（ISSUE-0076）。
   const usageRevision = useApp((s) => lastSeq(s.logs[task.id], 'turn.usage'));
   const changesRevision = useApp((s) => lastSeq(s.logs[task.id], 'task.changes_updated'));
@@ -84,9 +91,9 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
   const sections: Array<{ key: DetailSection; title: string; summary: string; body: ReactNode }> = [
     { key: 'environment', title: '环境', summary: project?.name ?? '未报告', body: <EnvironmentDetails project={project} task={task} profileName={profileName} /> },
     { key: 'plan', title: '计划', summary: plan ? `${plan.data.items.filter((x) => x.status === 'completed').length} / ${plan.data.items.length}` : '未报告', body: <PlanDetails plan={plan} /> },
-    { key: 'context', title: '上下文', summary: contextSummary(value, agentName, modelName), body: <><ContextDetails value={value} agent={agentName} model={modelName} config={config} />{independentError ? <p className="d-note" role="alert">{independentError}</p> : null}</> },
+    { key: 'context', title: '上下文', summary: contextSummary(value, agentName, modelName), body: <><ContextDetails value={value} agent={agentName} model={modelName} config={config} /><TaskMemoryDetails key={task.id} id={task.id}/>{independentError ? <p className="d-note" role="alert">{independentError}</p> : null}</> },
     { key: 'usage', title: '会话 token 用量', summary: usage ? `${formatTokens(usage.total.totalTokens)} · ${usage.turns} 轮` : usageError ? '读取失败' : '正在读取', body: <UsageDetails usage={usage} independent={independent} config={config} error={usageError} /> },
-    { key: 'connection', title: '连接', summary: '未报告', body: <ConnectionDetails agent={agent} /> },
+    { key: 'connection', title: '连接', summary: '未报告', body: <ConnectionDetails agent={agent} historyAvailable={historyAvailable} /> },
     { key: 'output', title: '输出', summary: isolated ? changes ? `${changes.files.length} 个文件` : changesError ? '读取失败' : '正在读取' : files ? `${files.length} 个文件` : fileError ? '读取失败' : '正在读取', body: <OutputDetails files={files} error={isolated ? changesError : fileError} changes={isolated ? changes : undefined} isolated={isolated} /> },
   ];
   const tabs: Array<[SideTab, string]> = [['plan', '详细'], ['diff', '改动']];

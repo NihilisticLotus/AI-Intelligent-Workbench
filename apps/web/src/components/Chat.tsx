@@ -4,6 +4,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode }
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { ApiError, Approval, Task, AttachmentInfo, TurnUsage } from '@aic/protocol';
+import { HandoffDivider, PendingHandoff } from './handoff';
 import { FeatureKey } from '@aic/protocol';
 import { groupTurns, type PlanEntry, type ResolvedInfo, type TimelineItem, type ToolItem, type TurnItem, type TurnStep, type ViewItem } from '../state/core';
 import { platform } from '../platform';
@@ -84,6 +85,7 @@ export function Stream({ task, items, loading, onOpenPlan, active = true }: { ta
           const seq=it.kind==='user' && memoryAvailable ? messageSeqs.get(it.id) : undefined;
           return <Item key={it.key} it={it} task={task} onOpenPlan={onOpenPlan} live={i > lastUserIdx} sourceSeq={seq} marked={seq!==undefined && constraints.has(seq)} />;
         })}
+        <PendingHandoff task={task} />
       </div>
       <AnnotationLayer container={ref} taskId={task.id} />
     </div>
@@ -95,6 +97,7 @@ export function Stream({ task, items, loading, onOpenPlan, active = true }: { ta
 function Item({ it, task, onOpenPlan, live, sourceSeq, marked }: { it: ViewItem; task: Task; onOpenPlan: () => void; live: boolean; sourceSeq: number | undefined; marked: boolean }) {
   switch (it.kind) {
     case 'user': return <UserMsg usage={it.usage} anchor={it.key} text={it.text} ts={it.ts} taskId={task.id} attachments={it.attachments} sourceSeq={sourceSeq} marked={marked} />;
+    case 'handoff': return <HandoffDivider item={it} task={task} />;
     case 'turn': return <Turn it={it} task={task} />;
     case 'plan': return <PlanInline items={it.items} onOpen={onOpenPlan} />;
     case 'approval': return <ApprovalCard approval={it.approval} resolvedInLog={it.resolved} task={task} />;

@@ -169,7 +169,13 @@ export interface ToolItem {
   startTs: number; endTs: number | null;
 }
 export interface PlanEntry { text: string; status: 'pending' | 'in_progress' | 'completed' }
+export interface HandoffItem {
+  kind: 'handoff'; key: string; id: string;
+  steps: Partial<Record<EventOf<'handoff.progress'>['data']['step'], EventOf<'handoff.progress'>['data']['status']>>;
+  receipt?: EventOf<'session.handoff'>['data'];
+}
 export type TimelineItem =
+  | HandoffItem
   | { kind: 'user'; key: string; id: string; text: string; ts: number; attachments?: AttachmentInfo[] }
   | {
       kind: 'agent'; key: string; id: string; text: string; thought: string;
@@ -193,6 +199,7 @@ export function buildTimeline(events: readonly EventEnvelope[]): TimelineItem[] 
   const items: TimelineItem[] = [];
   const agentMsgs = new Map<string, AgentItem>();
   const tools = new Map<string, ToolItem>();
+  const handoffs = new Map<string, HandoffItem>();
   const notices = new Map<string, Extract<TimelineItem,{kind:'note'}>>();
   const approvals = new Map<string, Extract<TimelineItem, { kind: 'approval' }>>();
   let lastGroup: Extract<TimelineItem, { kind: 'tools' }> | null = null;
@@ -227,6 +234,19 @@ export function buildTimeline(events: readonly EventEnvelope[]): TimelineItem[] 
 
   for (const ev of events) {
     switch (ev.type) {
+      case 'handoff.progress':
+      case 'session.handoff': {
+        const id = ev.data.handoffId;
+        let item = handoffs.get(id);
+        if (!item) {
+          item = {kind:'handoff', key:'handoff-'+id, id, steps:{}};
+          handoffs.set(id,item);
+          push(item);
+        }
+        if (ev.type === 'session.handoff') item.receipt = ev.data;
+        else item.steps[ev.data.step] = ev.data.status;
+        break;
+      }
       case 'task.updated':
         // 回合失败或停止时可能没有 message.done；结束进度显示，不把片段当作正式会话记录。
         if (['review', 'paused', 'interrupted', 'failed', 'merged', 'discarded'].includes(ev.data.task.status)) closeOpen(ev.ts);

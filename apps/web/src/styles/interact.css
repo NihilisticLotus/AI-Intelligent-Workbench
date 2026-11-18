@@ -122,3 +122,17 @@ dialog.dlg[open] { display: flex; flex-direction: column; animation: toast-in va
 .perm-chip[data-level="ws"] svg.i { color: var(--ok); }
 .perm-chip[data-level="full"] { box-shadow: inset 0 0 0 1px var(--attn); color: var(--attn); }
 .perm-chip[data-level="full"] svg.i { color: var(--attn); }
+
+/* 待发送和已交接分别位于对话末尾与实际交接发生的位置。 */
+.handoff-pending,.handoff-divider { color:var(--fg-2); border:1px solid var(--line); border-radius:8px; padding:10px 14px; margin:12px 0; overflow-wrap:anywhere; }
+.handoff-pending { border:1px dashed currentColor; display:flex; align-items:center; gap:12px; }
+.handoff-title { display:flex; flex-wrap:wrap; align-items:center; gap:10px; width:100%; color:var(--fg-1); text-align:left; background:transparent; border:0; cursor:pointer; padding:4px 0; }
+.handoff-title span:last-child { margin-left:auto; }
+.handoff-steps,.handoff-actions,.handoff-tabs,.switcher-controls { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+.handoff-steps { list-style:none; padding:0; font-size:var(--fs-12); }
+.handoff-steps li {padding:3px 6px; border-bottom:1px solid currentColor;}
+.handoff-editor { width:100%; }
+.handoff-text,.handoff-divider pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+.handoff-tabs button[aria-pressed=true] { font-weight:bold; color:var(--accent); }
+.set-sec:has(#summary-model) fieldset { margin:0; padding:0; border:0; }
+.handoff-pending button { flex:none; white-space:nowrap; }

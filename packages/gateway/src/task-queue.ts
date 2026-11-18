@@ -2,11 +2,11 @@
 import { AbortError, Errors } from './util';
 
 export class TaskQueue {
-  private active = new Map<string, Set<string>>();
+  private active = new Map<string, string[]>();
   private waiting = new Map<string, Array<{ id: string; start(): void; cancel(): void }>>();
   constructor(private limit: (key: string) => number, private changed: (key: string, ids: string[]) => void = () => {}) {}
 
-  running(key: string) { return this.active.get(key)?.size ?? 0; }
+  running(key: string) { return this.active.get(key)?.length ?? 0; }
   queued(key: string) { return this.waiting.get(key)?.length ?? 0; }
   position(id: string) {
     for (const [key, items] of this.waiting) {
@@ -27,14 +27,18 @@ export class TaskQueue {
     this.changed(key, [...new Set([...extra, ...(this.active.get(key) ?? []), ...(this.waiting.get(key)?.map(item => item.id) ?? [])])]);
   }
   private reserve(key: string, id: string) {
-    const ids = this.active.get(key) ?? new Set<string>(); ids.add(id); this.active.set(key, ids);
+    const ids = this.active.get(key) ?? []; ids.push(id); this.active.set(key, ids);
   }
   private release(key: string, id: string) {
     let released = false;
     return () => {
       if (released) return; released = true;
-      this.active.get(key)?.delete(id);
-      if (!this.active.get(key)?.size) this.active.delete(key);
+      const ids = this.active.get(key);
+      if (ids) {
+        const index = ids.indexOf(id);
+        if (index >= 0) ids.splice(index,1);
+        if (!ids.length) this.active.delete(key);
+      }
       this.drain(key); this.notify(key, [id]);
     };
   }
@@ -46,9 +50,9 @@ export class TaskQueue {
     if (!items?.length) this.waiting.delete(key);
     this.notify(key);
   }
-  async acquire(key: string, id: string, onQueued?: () => void, signal?: AbortSignal, wait = true): Promise<(() => void) | null> {
+  async acquire(key: string, id: string, onQueued?: () => void, signal?: AbortSignal, wait = true, parkedSource = false): Promise<(() => void) | null> {
     if (signal?.aborted) throw new AbortError();
-    if (this.position(id) || [...this.active.values()].some(ids => ids.has(id))) throw Errors.conflict('任务已经占用或等待名额');
+    if (this.position(id) || (!parkedSource && [...this.active.values()].some(ids => ids.includes(id)))) throw Errors.conflict('任务已经占用或等待名额');
     if (this.running(key) < this.limit(key)) { this.reserve(key, id); this.notify(key); return this.release(key, id); }
     if (!wait) return null;
     await new Promise<void>((resolve, reject) => {

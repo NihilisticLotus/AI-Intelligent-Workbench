@@ -118,9 +118,9 @@ export class WsClient {
   }
 
   /** 发一条指令，等 ack。ack.ok=false 或超时时抛 ApiRequestError */
-  request<N extends Exclude<OpName, 'subscribe'>>(op: N, data: OpData<N>): Promise<unknown> {
+  request<N extends Exclude<OpName, 'subscribe'>>(op: N, data: OpData<N>, timeoutMs?:number): Promise<unknown> {
     if (!this.canSend) return Promise.reject(new ApiRequestError(offlineError()));
-    return this.enqueue(op, data);
+    return this.enqueue(op, data,undefined,timeoutMs);
   }
 
   // ---------- 内部 ----------

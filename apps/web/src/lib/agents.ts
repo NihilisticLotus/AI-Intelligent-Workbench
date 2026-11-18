@@ -120,7 +120,7 @@ export function profileSwitchKind(from: Pick<ProfileSummary, 'sessionStore'> | n
 }
 export const profileSwitchText: Record<ProfileSwitchKind, string> = {
   resume: '恢复会话',
-  handoff: '需要交接，之后的版本提供',
+  handoff: '需要交接，请沿用软件自身的账号配置',
 };
 
 /**

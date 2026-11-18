@@ -116,7 +116,14 @@ describe('无回应计时', () => {
     const fake=createFakeAdapter({speed:0});
     const {task,s}=await setup({ adapters:[{...fake,spawn:async(o)=>{const c=await fake.spawn(o);c.prompt=async(_,signal)=>{await o.host.requestPermission({toolId:'tc',title:'审批',reason:'测试',detail:'',cwd:null,options:[{id:'yes',label:'允许',kind:'allow_once'}]},signal);return {stopReason:'end_turn'};};return c;}}] });
     s.db.run('UPDATE tasks SET workspace_kind=NULL WHERE id=?',task.id);
-    await s.tasks.patch(task.id,{permission:'ask'});vi.useFakeTimers();await s.tasks.prompt(task.id,'审批');await vi.advanceTimersByTimeAsync(0);await vi.advanceTimersByTimeAsync(700_000);
+    await s.tasks.patch(task.id,{permission:'ask'});
+    const requested=new Promise<void>(resolve=>{
+      const off=s.events.bus.on(event=>{
+        if(event.type==='approval.requested' && event.taskId===task.id){off();resolve();}
+      });
+    });
+    vi.useFakeTimers();await s.tasks.prompt(task.id,'审批');await vi.advanceTimersByTimeAsync(0);
+    await requested;await vi.advanceTimersByTimeAsync(700_000);
     expect(s.tasks.get(task.id).status).toBe('waiting');expect(s.events.read({after:0,taskId:task.id,limit:1000}).some((e)=>e.type==='error')).toBe(false);await s.tasks.cancel(task.id);await vi.advanceTimersByTimeAsync(0);
   });
 });

@@ -8,6 +8,8 @@ import { ErrorNotice, asApiError, confirmDialog, toastErrorOf } from '../compone
 import { Icon } from '../components/Icon';
 import { toast } from '../state/ui';
 import { NetworkSettingsSection } from './network-settings';
+import { FeatureKey } from '@aic/protocol';
+import { HandoffSettingsSection } from './handoff-settings';
 import { WorkspaceSettingsSection } from './workspace-settings';
 
 export function SettingsPage() {
@@ -78,6 +80,7 @@ export function SettingsPage() {
 
           <NetworkSettingsSection />
           <WorkspaceSettingsSection />
+          {hello?.features[FeatureKey.Handoff]?<HandoffSettingsSection/>:null}
 
           {hello ? (
             <section className="set-sec" aria-labelledby="s-about">

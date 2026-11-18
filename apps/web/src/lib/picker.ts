@@ -37,4 +37,4 @@ export function pickerItems(info: AgentInfo, current: AgentKind, cfg: SessionCfg
   })) : [];
   return { models, efforts, profiles };
 }
-export const pickerAction = (current: AgentKind, selected: AgentKind, mode: 'task' | 'new') => current === selected ? 'switch' : mode === 'new' ? 'select' : 'explain';
+export const pickerAction = (current: AgentKind, selected: AgentKind, mode: 'task' | 'new') => current === selected ? 'switch' : mode === 'new' ? 'select' : 'pending';

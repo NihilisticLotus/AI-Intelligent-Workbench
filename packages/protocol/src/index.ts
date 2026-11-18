@@ -399,6 +399,9 @@ export const HandoffSendOptions = z.object({
 export type HandoffSendOptions = z.infer<typeof HandoffSendOptions>;
 export const CheckpointRestorePreview = z.object({files:z.array(z.string()),skipped:z.array(z.string()),revision:z.string()}).strict();
 export const HandoffReturnBody = HandoffSendOptions.pick({confirmedId:true,markdown:true}).extend({restoreRevision:z.string().optional()}).strict();
+export type HandoffReturnBody = z.infer<typeof HandoffReturnBody>;
+export const HandoffActionResult = z.union([z.object({taskId:Id,level:z.literal('H1')}),
+  z.object({taskId:Id,messageId:Id,pendingHandoffId:Id.optional()})]);
 export const HandoffRecord = HandoffPreview.extend({
   id:Id,ordinal:z.number().int().positive(),createdAt:Ts,edited:z.boolean(),state:z.enum(['prepared','sent','failed','returned']),
 }).strict();

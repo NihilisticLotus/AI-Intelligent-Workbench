@@ -862,7 +862,8 @@ export class TaskService {
     // 并发上限：超出时任务进入“排队中”，有进程空出来就按顺序启动。不是回合的启动（换账号）不排队
     let release: () => void = () => {};
     if (svc) {
-      const r = await svc.acquire(row.agent, () => this.setStatus(taskId, 'queued'), signal, { wait: !opts.noQueue, taskId });
+      const r = await svc.acquire(row.agent, () => this.setStatus(taskId, 'queued'), signal, { wait: !opts.noQueue, taskId, parkedSource:this.parkedSources.has(taskId) });
+      if (!r && (opts.handoff || opts.returnTo)) throw Errors.invalidState('目标 Agent 的并发名额已满，请等其他会话结束，或在 Agent 设置中调整并发上限。');
       if (!r) throw new SlotBusyError();
       release = r;
     }
@@ -994,7 +995,7 @@ export class TaskService {
     try {
       releaseProject = await this.acquireProject(taskId, abort.signal);
       if (this.getRow(taskId).agent === 'fake' && this.agentSvc) {
-        releaseDemo = (await this.agentSvc.acquire('fake', () => this.setStatus(taskId, 'queued'), abort.signal, { taskId }))!;
+        releaseDemo = (await this.agentSvc.acquire('fake', () => this.setStatus(taskId, 'queued'), abort.signal, { taskId, parkedSource:this.parkedSources.has(taskId) }))!;
         if (abort.signal.aborted) throw new AbortError();
         this.setStatus(taskId, 'running');
       }
@@ -1143,16 +1144,30 @@ export class TaskService {
     }
   }
 
+  private async releaseForHandoff(taskId:string,agent:AgentKind) {
+    const source=this.runtimes.get(taskId);
+    const capabilities=source && this.db.get<{caps_json:string|null}>('SELECT caps_json FROM sessions WHERE task_id=? AND id=?',taskId,source.sessionId);
+    const caps=capabilities?.caps_json ? JSON.parse(capabilities.caps_json) : null;
+    if(source && agent!=='independent' && !source.conn.isClosed?.() && !caps?.resume && !caps?.loadSession) {
+      this.parkedSources.set(taskId,source);
+      this.runtimes.delete(taskId);
+    } else await this.dropRuntime(taskId,'handoff');
+  }
+
+  private reconnectSource(taskId:string) {
+    const source=this.parkedSources.get(taskId);
+    if(source) {
+      this.parkedSources.delete(taskId);
+      if(!source.conn.isClosed?.()) {
+        source.lastActive=now();this.runtimes.set(taskId,source);this.secretsOf.set(taskId,source.secrets);
+      } else {source.release();this.endSession(taskId,source.sessionId,'closed');}
+    }
+  }
+
   private async failedHandoff(taskId:string,record:HandoffRecord,original:TaskRow) {
     try { if(this.runtimes.get(taskId)?.sessionId!==record.document.meta.from.sessionId) await this.dropRuntime(taskId,'handoff_failed'); }
     finally {
-      const source=this.parkedSources.get(taskId);
-      if(source) {
-        this.parkedSources.delete(taskId);
-        if(!source.conn.isClosed?.()) {
-          source.lastActive=now();this.runtimes.set(taskId,source);this.secretsOf.set(taskId,source.secrets);
-        } else {source.release();this.endSession(taskId,source.sessionId,'closed');}
-      }
+      this.reconnectSource(taskId);
       this.db.run('UPDATE tasks SET agent=?,model=?,effort=?,profile_id=? WHERE id=?',original.agent,original.model,original.effort,original.profile_id,taskId);
       this.db.run("UPDATE handoffs SET state='failed' WHERE task_id=? AND id=?",taskId,record.id);
       this.handoffs!.progress(taskId,record.id,'send','failed');
@@ -1167,11 +1182,15 @@ export class TaskService {
     if (this.db.get('SELECT task_id FROM workspace_preparations WHERE task_id=?', taskId)) throw Errors.invalidState('工作副本尚未准备好，请先处理准备提示');
     if (this.isBusy(taskId)) throw Errors.invalidState('任务正在执行', '请等这一轮结束，或先点 [停止]', [{ label: '停止', action: 'task.cancel', args: { taskId } }]);
     const destination=target?.agent??row.agent;
-    const switching=!!target && (destination!==row.agent || !!options.forceH2);
+    const switching=!!target && (destination!==row.agent || !!options.forceH2 || !!reverseOf);
     if (destination === 'independent') {
       if(!this.db.get('SELECT 1 FROM independent_task_settings WHERE task_id=?',taskId))throw Errors.invalidState('请先填写这个任务的独立 Agent 服务、模型与预算');
       this.independentRuntime?.assertReady(taskId);
-      if(switching && target) target={agent:destination,model:this.independentRuntime!.reference(taskId).modelId};
+      if(switching && target) {
+        const configured=this.independentRuntime!.reference(taskId).modelId;
+        if(target.model && target.model!==configured) throw Errors.invalidState('所选模型与本任务的独立配置不同，请先应用模型与预算配置');
+        target={agent:destination,model:configured};
+      }
     }
     const a = this.attachments?.resolve(taskId, attachmentIds) ?? { infos: [], inputs: [] };
     const agent = this.agents.get(destination);
@@ -1194,15 +1213,9 @@ export class TaskService {
       try {
         if(record.edited) await this.handoffs.publish(taskId,record);
         const summary=await this.taskSummaryText(taskId);
-        const content=await this.handoffs.input(taskId,record,summary,text,outgoing);
+        const content=await this.handoffs.input(taskId,record,summary,text,outgoing,options.forceH2 && !reverseOf ? 'redo':'return');
         this.handoffs.progress(taskId,record.id,'send','running');
-        const source=this.runtimes.get(taskId);
-        const capabilities=source && this.db.get<{caps_json:string|null}>('SELECT caps_json FROM sessions WHERE task_id=? AND id=?',taskId,source.sessionId);
-        const caps=capabilities?.caps_json ? JSON.parse(capabilities.caps_json) : null;
-        if(source && row.agent!=='independent' && !source.conn.isClosed?.() && !caps?.resume && !caps?.loadSession) {
-          this.parkedSources.set(taskId,source);
-          this.runtimes.delete(taskId);
-        } else await this.dropRuntime(taskId,'handoff');
+        await this.releaseForHandoff(taskId,row.agent);
         replacing=true;
         const rt=await this.startHandoffRuntime(taskId,record.id,target);
         const input=rt.conn.caps?.prompt.embeddedContext ? content : {text:[...content.resources.map(resource=>resource.text),content.text].join('\n\n')};
@@ -1232,6 +1245,12 @@ export class TaskService {
     return record;
   }
 
+  async redoHandoff(taskId:string,id:string,confirmation:HandoffSendOptions={}) {
+    const record=this.returnRecord(taskId,id);
+    return this.prompt(taskId,'',[],{agent:record.document.meta.to.agent,...(this.get(taskId).model ? {model:this.get(taskId).model!} : {})},
+      {...confirmation,forceH2:true});
+  }
+
   async previewReturn(taskId:string,id:string) {
     const ref=this.returnRecord(taskId,id).document.meta.checkpoint;
     if(!ref || !this.workspaces)throw Errors.invalidState('这个任务没有可恢复的工作副本检查点');
@@ -1254,15 +1273,18 @@ export class TaskService {
         await this.refreshChanges(taskId);
       }
       if(!confirmation.confirmedId && original && from.sessionId && (from.agent==='independent'||caps?.resume||caps?.loadSession)) {
-        await this.dropRuntime(taskId,'handoff_return');
+        await this.releaseForHandoff(taskId,this.get(taskId).agent);
         try {
           const rt=await this.startRuntime(taskId,undefined,{noQueue:true,returnTo:{sessionId:from.sessionId,target,profileId:original.profile_id}});
           this.db.run('UPDATE tasks SET agent=?,model=?,effort=?,profile_id=? WHERE id=?',from.agent,rt.conn.config?.().model??original.model,rt.conn.config?.().effort??null,rt.profileId,taskId);
+          const parked=this.parkedSources.get(taskId);
+          if(parked){await this.closeRuntime(taskId,parked,'handoff_return');this.parkedSources.delete(taskId);}
           this.db.run("UPDATE handoffs SET state='returned' WHERE task_id=? AND id=?",taskId,id);
           this.emitUpdated(taskId);
           this.events.append({type:'session.notice',taskId,sessionId:rt.sessionId,data:{level:'info',text:'已切回原 Agent，原生会话已恢复（H1）。'}});
           return {taskId,level:'H1' as const};
         } catch(error) {
+          this.reconnectSource(taskId);
           if(!(error instanceof AppError && error.body.code===ErrorCode.SessionNotRecoverable))throw error;
         }
       }

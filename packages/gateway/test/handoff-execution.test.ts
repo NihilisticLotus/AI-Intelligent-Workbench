@@ -10,6 +10,28 @@ let gw:TestGw | undefined;
 afterEach(async()=>{await gw?.stop();gw=undefined;});
 
 describe('发送时交接',()=>{
+  it.each([
+    ['ask', 'codex', true], ['readonly', 'codex', false], ['ask', 'claude', false],
+  ] as const)('%s 权限交给 %s 时按接收方提供编辑工具提示',async (permission,agent,expectsHint)=>{
+    const fake=createFakeAdapter({speed:0});
+    let received='';
+    gw=await startGw({adapters:[{...fake,async spawn(opts){
+      const conn=await fake.spawn(opts);
+      conn.prompt=async()=>({stopReason:'end_turn'});
+      return conn;
+    }},{...fake,id:agent,async spawn(opts){
+      const conn=await fake.spawn(opts);
+      conn.prompt=async input=>{received=input.text;return {stopReason:'end_turn'};};
+      return conn;
+    }}]});
+    const token=await gw.pair(),project=await makeProject(gw,token),s=gw.gw.services;
+    const task=await s.tasks.create({projectId:project.id,agent:'fake',permission,prompt:'验收关卡',deferPrompt:true});
+    await s.tasks.prompt(task.id,'记录当前目标');await s.tasks.idle();
+    await s.tasks.prompt(task.id,'仅新增 Result.txt',[],{agent});await s.tasks.idle();
+    expect(received).toContain('仅新增 Result.txt');
+    expect(received.includes('tools.apply_patch')).toBe(expectsHint);
+    if (expectsHint) expect(received).toContain('禁止命令也适用于读取文件');
+  });
   it('两次交接后原生切回，较早的分隔条重新成为可操作记录',async()=>{
     const fake=createFakeAdapter({speed:0});
     const resumable:typeof fake={...fake,

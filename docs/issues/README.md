@@ -137,3 +137,5 @@
 | [ISSUE-0129](ISSUE-0129-idle-watchdog-test-start.md) | 无回应提醒用例提前开始计时 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0130](ISSUE-0130-handoff-acceptance-streamed-reply.md) | 真实交接验收漏读流式回复 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0131](ISSUE-0131-luna-handoff-result-missing.md) | Luna 接收真实 Claude 交接后未创建成果文件 | open | 验收未通过 | 2026-11-18 | |
+| [ISSUE-0132](ISSUE-0132-claude-stopped-tool-before-handoff.md) | Claude 首轮撤回一次编辑，完整交接验收提前停止 | open | 验收未通过 | 2026-11-18 | |
+| [ISSUE-0133](ISSUE-0133-luna-handoff-read-command.md) | Luna 接手仅新增文件的任务时尝试用命令读取旧文件 | open | 验收未通过 | 2026-11-18 | |

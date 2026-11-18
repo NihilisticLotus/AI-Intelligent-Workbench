@@ -24,7 +24,7 @@ const rules = '保留已有成果';
 const models = { claude: 'haiku', codex: 'gpt-6-luna' } as const;
 const prompts = [
   '在本工作副本用 Write 创建 Level.txt 和 Rules.txt，分别只写一行“' + marker + '”和“' + rules + '”。下一步交给接手者创建 Result.txt。记住识别词，完成后用一句话回复识别词和两个文件名。不要运行命令、启动其他 Agent 或读取其他目录。',
-  '接手续做。先用一句话说明目标、已完成的两个文件和下一步，再用文件编辑工具直接新增 Result.txt。只写一行：上轮的识别词，加一个空格，再加“验收通过”。不用运行命令，不改已有文件。',
+  '接手续做。先用一句话说明目标、已完成的两个文件和下一步，再用文件编辑工具直接新增 Result.txt。只写一行：上轮的识别词，加一个空格，再加“验收通过”。识别词请取自交接内容。禁止运行任何命令，包括用 PowerShell 读取文件。保留已有文件。',
   '只回复你在切出前记住的关卡识别词。不要调用工具。',
 ];
 const stages = ['claude', 'codex', 'claude'] as const;
@@ -37,6 +37,8 @@ let nativeSource: string | undefined;
 let resumed = false;
 let issued = false;
 let approvals = 0;
+let codexEdits = 0;
+let codexApprovals = 0;
 const calls = { claude: 0, codex: 0 };
 const observations: Record<string, unknown> = {};
 const git = (...args: string[]) => execFileSync('git', ['-C', project, ...args], { encoding: 'utf8' }).trim();
@@ -131,11 +133,13 @@ try {
     if (e.type === 'error') fail('工作台报告 ' + e.data.error.code);
     if (e.type === 'tool.end' && !e.data.ok) fail('工具未成功完成');
     if (e.type === 'tool.start' && (stage === 2 || ['execute','delete','fetch'].includes(e.data.kind))) fail('出现计划外工具');
+    if (stage === 1 && e.type === 'tool.start' && e.data.kind === 'edit') codexEdits++;
     if (e.type === 'approval.requested') {
       const a = e.data.approval;
       const once = a.options.find(o => o.kind === 'allow_once');
       if (!once || stopping) { fail('无法单次审批'); return; }
       approvals++;
+      if (stage === 1) codexApprovals++;
       void ws!.call({ op:'approve', data:{approvalId:a.id,optionId:once.id} }).then(ack => {
         if (!ack.ok) fail('单次审批未生效');
       }).catch(() => fail('单次审批未完成'));
@@ -170,11 +174,15 @@ try {
   const next = await turn(1);
   const receipt = s.db.get<{id:string;state:string;level:string;quality_json:string}>('SELECT id,state,level,quality_json FROM handoffs WHERE task_id=? ORDER BY ordinal DESC LIMIT 1', taskId);
   check(receipt?.state === 'sent' && JSON.parse(receipt.quality_json).coveragePassed, '缺少覆盖通过的成功收据');
+  observations.codexHandoff = receipt.level;
+  check(receipt.level === 'H2', '未取得预期的 H2 完整转写收据');
   check(next.includes('Level.txt') && next.includes('Rules.txt') && next.includes('Result.txt'),'Codex 复述未核实');
+  observations.codexRestatement = true;
+  check(existsSync(join(writable,'Result.txt')), 'Luna 未创建 Result.txt');
+  check(codexEdits > 0 && codexApprovals > 0, '缺少 Luna 实际编辑或单次文件审批');
   check(readFileSync(join(writable,'Result.txt'),'utf8').trim() === marker+' 验收通过','接手成果内容不符');
   check(sourceHashes[0] === hash('Level.txt') && sourceHashes[1] === hash('Rules.txt'),'交接后原成果发生变化');
   checkChanges(['Level.txt','Rules.txt','Result.txt']);
-  observations.codexHandoff = receipt.level;
   observations.sourceHashesPreserved = true;
   const resultHash = hash('Result.txt');
   issued = true; // 恢复本身不得再发模型请求。
@@ -203,6 +211,6 @@ try {
       FROM events e JOIN sessions s ON s.id=e.session_id WHERE e.task_id=? AND e.type='session.usage' AND e.replay=0 AND json_extract(e.payload,'$.cost') IS NOT NULL ORDER BY e.seq`,taskId);
     const originalClean = git('status','--porcelain') === '';
     if (!originalClean) { stopping ||= '临时原项目发生变化'; process.exitCode = 1; }
-    console.log(JSON.stringify({临时目录:root,提示词:calls,单次操作审批:approvals,核对:observations,原项目干净:originalClean,用量:usage,原生费用报告:costs,停止原因:stopping || null}));
+    console.log(JSON.stringify({临时目录:root,提示词:calls,单次操作审批:approvals,Luna编辑:codexEdits,Luna单次审批:codexApprovals,核对:observations,原项目干净:originalClean,用量:usage,原生费用报告:costs,停止原因:stopping || null}));
   } finally { await ws?.close(); await gateway.gw.close(); }
 }

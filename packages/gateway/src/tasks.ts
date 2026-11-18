@@ -1222,7 +1222,7 @@ export class TaskService {
         if(record.edited) await this.handoffs.publish(taskId,record);
         const summary=await this.taskSummaryText(taskId,outgoing.values);
         if(outgoing.values.length && this.workspaces?.get(taskId)) await this.workspaces.writeTaskArtifacts(taskId,new Map([['.aic/TASK.md',summary]]));
-        const content=await this.handoffs.input(taskId,record,summary,text,outgoing,options.forceH2 && !reverseOf ? 'redo':'return');
+        const content=await this.handoffs.input(taskId,record,summary,text,outgoing,row.permission_level,options.forceH2 && !reverseOf ? 'redo':'return');
         this.handoffs.progress(taskId,record.id,'send','running');
         await this.releaseForHandoff(taskId,row.agent,destination);
         replacing=true;

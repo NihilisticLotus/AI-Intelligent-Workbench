@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
-import { openDb, type Db } from '../src/db';
+import { SCHEMA_VERSION, openDb, type Db } from '../src/db';
 import { IndependentToolJournal } from '../src/independent/tool-journal';
 import { independentCommandEnv } from '../src/independent/commands';
 import { intent, seed, success } from './fixtures/independent-journal';
@@ -110,7 +110,7 @@ describe('独立工具持久意图', () => {
       const current = openDb(file);
       expect(current.get('SELECT text FROM task_drafts')).toEqual({ text: '原草稿' });
       expect(current.get('SELECT id FROM sessions')).toEqual({ id: 'session' });
-      expect(current.get('PRAGMA user_version')).toEqual({ user_version: 18 });
+      expect(current.get('PRAGMA user_version')).toEqual({ user_version: SCHEMA_VERSION });
       expect(current.all('SELECT * FROM independent_tool_calls')).toEqual([]); current.close();
     }
   });

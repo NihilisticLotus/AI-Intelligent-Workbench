@@ -2,6 +2,8 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, writeFile, readFile, rm, access, link, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
+import { DatabaseSync } from 'node:sqlite';
 import { WorkspaceRequest } from '@aic/protocol';
 import { Git, GitError } from '../src/git';
 import { openDb, type Db } from '../src/db';
@@ -27,6 +29,50 @@ async function copyWorkspace() {
 }
 // 每个完整应用 / 撤销用例包含六次真实 Windows 句柄宿主启动，单独预留执行预算。
 describe('非 git 应用与回滚保护',{timeout:60000},()=>{
+  it('从 v18 升级后只按已应用的旧清单整批撤销（ISSUE-0104）', async () => {
+    const record = await copyWorkspace();
+    await manager.applyCopy(record.taskId);
+    const operation = manager.operation(record.taskId)!;
+    // v18 中任务新增的项目文件也在已应用清单内，撤销时应删除。
+    const name = '.aic/旧规则.txt';
+    const content = '旧任务创建的项目规则';
+    await mkdir(path.join(record.projectPath, '.aic'));
+    await put(record.projectPath, name, content);
+    operation.changedFiles.push(name);
+    operation.appliedFiles.push({ path: name, size: Buffer.byteLength(content), mtimeMs: 1, hash: createHash('sha256').update(content).digest('hex') });
+    db.run('UPDATE workspace_operations SET record_json=? WHERE task_id=?', JSON.stringify(operation), record.taskId);
+    db.close();
+    const file = path.join(data, 'test.db');
+    const old = new DatabaseSync(file);
+    old.exec('ALTER TABLE workspace_operations DROP COLUMN legacy_applied; PRAGMA user_version=18;');
+    old.close();
+    db = openDb(file);
+    manager = new WorkspaceManager(db, git, data);
+    await put(record.projectPath, name, '应用之后用户修改');
+    expect(await manager.rollbackCopy(record.taskId)).toEqual({status:'source_changed', files:[name]});
+    expect(await readFile(path.join(record.projectPath,'notes.txt'),'utf8')).toBe('修改\n');
+    await put(record.projectPath, name, content);
+    await put(record.projectPath, '.aic/另一个文件', '不在旧清单中');
+    expect((await manager.rollbackCopy(record.taskId)).status).toBe('rolled_back');
+    await expect(access(path.join(record.projectPath, name))).rejects.toMatchObject({code:'ENOENT'});
+    expect(await readFile(path.join(record.projectPath,'.aic/另一个文件'),'utf8')).toBe('不在旧清单中');
+    expect(await readFile(path.join(record.projectPath,'notes.txt'),'utf8')).toBe('初始\n');
+  });
+  it('工作台说明不进入影子快照、改动、应用与回滚', async () => {
+    const record = await copyWorkspace();
+    await mkdir(path.join(record.path, '.aic'));
+    await put(record.path, '.aic/TASK.md', '任务说明');
+    const snapshot = await manager.snapshot(record.taskId, '交接前');
+    const names = await git.checked(['ls-tree', '-r', '--name-only', snapshot], { cwd: record.path, gitDir: record.gitDir });
+    expect(names.toString().split('\n')).not.toContain('.aic/TASK.md');
+    expect((await manager.diff(record.taskId)).files.map(f => f.path)).toEqual(['delete.txt','new/added.bin','notes.txt']);
+    await expect(manager.fileDiff(record.taskId, '.aic/TASK.md')).rejects.toMatchObject({ code: 'workspace.file' });
+    expect((await manager.applyCopy(record.taskId)).status).toBe('applied');
+    await expect(access(path.join(record.projectPath, '.aic'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await manager.rollbackCopy(record.taskId)).status).toBe('rolled_back');
+    expect(await readFile(path.join(record.path, '.aic/TASK.md'), 'utf8')).toBe('任务说明');
+    await expect(access(path.join(record.projectPath, '.aic'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
   it('应用新增修改删除及二进制，撤销应用恢复原文件',async()=>{
     const record=await copyWorkspace();expect(await manager.applyCopy(record.taskId)).toMatchObject({status:'applied',files:['delete.txt','new/added.bin','notes.txt']});
     expect(await readFile(path.join(record.projectPath,'notes.txt'),'utf8')).toBe('修改\n');expect(await readFile(path.join(record.projectPath,'new/added.bin'),'utf8')).toBe('\0新增');await expect(access(path.join(record.projectPath,'delete.txt'))).rejects.toMatchObject({code:'ENOENT'});
@@ -80,6 +126,33 @@ describe('非 git 应用与回滚保护',{timeout:60000},()=>{
 afterEach(async()=>{await manager?.settle();vi.restoreAllMocks();db?.close();if(!isInside(tmpdir(),base)||!path.basename(base).startsWith('aic-workspace-ops-'))throw Error('清理范围错误');await rm(base,{recursive:true,force:true});},60000);
 
 describe('临时仓库合并与撤销',()=>{
+  it('保留历史合并不能引入中途已删除的任务说明', async () => {
+    const record = await workspace();
+    await mkdir(path.join(record.path, '.aic'));
+    await put(record.path, '.aic/TASK.md', '工作台任务说明');
+    await run(record.path, 'add', '.aic');
+    await run(record.path, 'commit', '-m', '提交说明的夹具');
+    await run(record.path, 'rm', '.aic/TASK.md');
+    await put(record.path, 'notes.txt', '项目成果');
+    await run(record.path, 'add', 'notes.txt');
+    await run(record.path, 'commit', '-m', '移除说明');
+    const before = await run(project, 'rev-parse', 'HEAD');
+    await expect(merge(record.taskId, 'merge')).rejects.toMatchObject({code:'workspace.private_history'});
+    expect(await run(project, 'rev-parse', 'HEAD')).toBe(before);
+  });
+  it.each(['squash','merge'] as const)('%s 合并只发布项目文件，即使任务说明已暂存', async strategy => {
+    const record = await workspace();
+    await mkdir(path.join(record.path, '.aic'));
+    await put(record.path, '.aic/TASK.md', '任务说明');
+    await put(record.path, 'notes.txt', '项目改动\n');
+    await run(record.path, 'add', '.aic/TASK.md');
+    expect((await manager.diff(record.taskId)).files.map(f => f.path)).toEqual(['notes.txt']);
+    await expect(manager.fileDiff(record.taskId, '.aic/TASK.md')).rejects.toMatchObject({ code: 'workspace.file' });
+    expect((await merge(record.taskId, strategy)).status).toBe('merged');
+    expect(await run(project, 'log', '--all', '--format=', '--name-only')).not.toContain('.aic/');
+    await expect(access(path.join(project, '.aic'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readFile(path.join(record.path, '.aic/TASK.md'), 'utf8')).toBe('任务说明');
+  });
   it.each(['squash','merge'] as const)('%s 合并生成正确父提交，撤销保留历史并恢复文件',async strategy=>{
     const record=await workspace(),before=await run(project,'rev-parse','HEAD');
     await put(record.path,'notes.txt','任务修改\n');await put(record.path,'new.txt','新增\n');

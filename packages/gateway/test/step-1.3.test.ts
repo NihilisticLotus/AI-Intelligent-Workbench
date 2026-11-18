@@ -20,7 +20,7 @@ async function upload(token: string, taskId: string, b: Buffer, name = '../截�
 }
 describe('附件接口和迁移 v5', () => {
   it('迁移只追加，并能重新打开已有数据库', async () => {
-    const { s,task } = await setup(); expect(SCHEMA_VERSION).toBe(18); expect(s.db.get<{user_version:number}>('PRAGMA user_version')?.user_version).toBe(SCHEMA_VERSION);
+    const { s,task } = await setup(); expect(SCHEMA_VERSION).toBe(19); expect(s.db.get<{user_version:number}>('PRAGMA user_version')?.user_version).toBe(SCHEMA_VERSION);
     expect(s.db.all('PRAGMA table_info(attachments)').length).toBe(11);
     const file=path.join(t!.dataDir,'migration.db');const db = openDb(file);
     const oldTask=s.db.get<Record<string,SqlValue>>('SELECT * FROM tasks WHERE id = ?',task.id)!;

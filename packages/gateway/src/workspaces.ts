@@ -21,6 +21,12 @@ export class WorkspaceError extends Error {
 }
 function fail(code: string, message: string): never { throw new WorkspaceError(code, message); }
 const samePath = (a: string, b: string) => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
+// 只保留副本根的工作台目录，子目录中的同名文件仍属于项目。
+function consolePath(relative: string): boolean {
+  return samePath(relative.split('/')[0]!, '.aic');
+}
+const consoleSpec = process.platform === 'win32' ? ':(top,icase,literal).aic' : ':(top,literal).aic';
+const excludeConsole = process.platform === 'win32' ? ':(top,exclude,icase,literal).aic' : ':(top,exclude,literal).aic';
 export function isInside(root: string, target: string): boolean {
   const rel = path.relative(root, target);
   return rel !== '' && !rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel);
@@ -75,14 +81,14 @@ async function fileInfo(root: string, relative: string, cache?: HashCache): Prom
   if (cache && Date.now() - before.mtimeMs > 2000) cache.set(file, { size: before.size, mtimeMs: before.mtimeMs, ino: before.ino, hash: digest });
   return { path: relative, size: before.size, mtimeMs: before.mtimeMs, hash: digest };
 }
-async function enumerate(root: string, ignores: string[], builtins: boolean): Promise<WorkspaceFile[]> {
+async function enumerate(root: string, ignores: string[], builtins: boolean, legacyFiles: readonly string[] = []): Promise<WorkspaceFile[]> {
   // 先校验规则，空目录也不能绕过非法规则校验。
   for (const glob of ignores) matches('aic-validation', [glob]);
   const result: WorkspaceFile[] = [];
   const visit = async (dir: string) => {
     for (const entry of await readdir(dir, { withFileTypes: true })) {
       const rel = path.relative(root, path.join(dir, entry.name)).split(path.sep).join('/');
-      if (entry.name.toLowerCase() === '.git' || (builtins && IGNORED.has(entry.name.toLowerCase())) || matches(rel, ignores)) continue;
+      if (consolePath(rel) || entry.name.toLowerCase() === '.git' || (builtins && IGNORED.has(entry.name.toLowerCase())) || matches(rel, ignores)) continue;
       const file = await safePath(root, rel);
       if (entry.isDirectory()) await visit(file);
       else if (entry.isFile()) result.push(await fileInfo(root, rel));
@@ -90,6 +96,11 @@ async function enumerate(root: string, ignores: string[], builtins: boolean): Pr
     }
   };
   await visit(root);
+  // 旧应用凭据只授权核对列出的路径，不遍历项目自己的 .aic。
+  for (const name of legacyFiles) {
+    try { result.push(await fileInfo(root, name)); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+  }
   return result.sort((a,b) => a.path.localeCompare(b.path));
 }
 function equivalent(a: WorkspaceFile[], b: WorkspaceFile[]) {
@@ -183,7 +194,7 @@ export class WorkspaceManager {
         const allUntracked = request.carryGlobs.length ? await this.git.checked(['ls-files','--others','-z'], cwd) : Buffer.alloc(0);
         sourceFiles = [];
         for (const rel of allUntracked.toString().split('\0').filter(Boolean)) {
-          if (matches(rel, request.carryGlobs)) sourceFiles.push(await fileInfo(source, rel));
+          if (!consolePath(rel) && matches(rel, request.carryGlobs)) sourceFiles.push(await fileInfo(source, rel));
         }
       } else sourceFiles = await enumerate(source, request.ignoreGlobs, true);
       const bytes = sourceFiles.reduce((sum,f) => sum + f.size, 0);
@@ -245,6 +256,7 @@ export class WorkspaceManager {
     if (record.baseRef) names.push(...(await this.git.checked(['ls-tree','-r','--name-only','-z',record.baseRef],this.options(record))).toString().split('\0').filter(Boolean));
     const result: WorkspaceFile[] = [];
     for (const file of [...new Set(names)]) {
+      if (consolePath(file)) continue;
       let cache = this.hashCaches.get(record.taskId); if (!cache) { cache = new Map(); this.hashCaches.set(record.taskId, cache); }
       try { result.push(await fileInfo(record.path, file, cache)); }
       catch (e) { if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e; }
@@ -306,7 +318,7 @@ export class WorkspaceManager {
   async sourceChanges(taskId: string): Promise<string[]> {
     const record = await this.checkedRecord(taskId);
     const current = await enumerate(record.projectPath, record.ignoreGlobs, true);
-    const before = new Map(record.sourceFiles.map(f => [f.path, f.hash]));
+    const before = new Map(record.sourceFiles.filter(f => !consolePath(f.path)).map(f => [f.path, f.hash]));
     const after = new Map(current.map(f => [f.path, f.hash]));
     return [...new Set([...before.keys(), ...after.keys()])].filter(p => before.get(p) !== after.get(p));
   }
@@ -314,7 +326,7 @@ export class WorkspaceManager {
   private async changes(record: WorkspaceRecord): Promise<{ result: WorkspaceChanges; tree: string }> {
     if (!record.baseRef) return fail('workspace.base', '工作副本没有可比较的基准。');
     const opts = this.options(record);
-    const current = record.kind === 'copy' ? record.snapshotFiles : await this.currentFiles(record);
+    const current = record.kind === 'copy' ? record.snapshotFiles.filter(f => !consolePath(f.path)) : await this.currentFiles(record);
     // git 内容指纹让外部编辑立即失效；copy 以最新快照为准，快照完成即失效。
     const fingerprint = JSON.stringify([record.baseRef, record.snapshotAfter, current.map(f => [f.path, f.hash, f.size])]);
     const cached = this.changesCache.get(record.taskId);
@@ -328,8 +340,8 @@ export class WorkspaceManager {
     }
     const afterSizes = new Map(current.map(f => [f.path, f.size]));
     const common = ['diff','--no-ext-diff','--no-textconv','--find-renames',record.baseRef,tree];
-    const status = (await this.git.checked([...common, '--name-status','-z'],opts)).toString().split('\0');
-    const stats = (await this.git.checked([...common, '--numstat','-z'],opts)).toString().split('\0');
+    const status = (await this.git.checked([...common, '--name-status','-z','--','.',excludeConsole],opts)).toString().split('\0');
+    const stats = (await this.git.checked([...common, '--numstat','-z','--','.',excludeConsole],opts)).toString().split('\0');
     const counts = new Map<string, { added: number; removed: number; binary: boolean }>();
     for (let i = 0; i < stats.length && stats[i]; i++) {
       const m = /^(\d+|-)\t(\d+|-)\t([\s\S]*)$/.exec(stats[i]!);
@@ -363,7 +375,7 @@ export class WorkspaceManager {
       const change: WorkspaceChange = { path: f.path, status: initial || baseSizes.has(f.path) ? 'M' : 'A', added: 0, removed: 0, binary: true, tooLarge: true, beforeSize: initial?.size ?? baseSizes.get(f.path) ?? 0, afterSize: f.size };
       if (at >= 0) files[at] = change; else files.push(change);
     }
-    for (const initial of record.largeFiles) if (!afterSizes.has(initial.path) && !files.some(f => f.path === initial.path)) {
+    for (const initial of record.largeFiles) if (!consolePath(initial.path) && !afterSizes.has(initial.path) && !files.some(f => f.path === initial.path)) {
       files.push({ path: initial.path, status: 'D', added: 0, removed: 0, binary: true, tooLarge: true, beforeSize: initial.size, afterSize: 0 });
     }
     const value = { tree, result: { files, revision: createHash('sha256').update(fingerprint).digest('hex'), added: files.reduce((n,f) => n+f.added,0), removed: files.reduce((n,f) => n+f.removed,0) } };
@@ -524,12 +536,12 @@ export class WorkspaceManager {
     if(reply.files.length!==files.length)fail('workspace.recovery','文件宿主返回的清单不完整，已保留恢复材料。');
   }
   /** 备份与候选内容先放在数据目录；校验整批后才写目标，异常时仅恢复本次已写入的文件。 */
-  private async transferFiles(record: WorkspaceRecord, targetRoot: string, expected: WorkspaceFile[], names: string[], source: (name: string) => Promise<Buffer | string | null>, done: () => Promise<void>) {
+  private async transferFiles(record: WorkspaceRecord, targetRoot: string, expected: WorkspaceFile[], names: string[], source: (name: string) => Promise<Buffer | string | null>, done: () => Promise<void>, legacyFiles: readonly string[] = []) {
     const privateRoot=await this.root(); const transfers=await safePath(privateRoot,'workspace-transfers',true);await mkdir(transfers,{recursive:true});
     const temporary=await mkdtemp(path.join(transfers,record.taskId+'-'));
     const saved=new Map<string,{backup:string|null; prepared:string|null; expected:string|null; result:string|null}>();
     const written: string[]=[]; const createdDirs: string[]=[]; let keep=false;
-    const inspect=()=>enumerate(targetRoot,record.ignoreGlobs,true);
+    const inspect=()=>enumerate(targetRoot,record.ignoreGlobs,true,legacyFiles);
     const check=async(name:string,hash:string|null)=>{
       try { const info=await fileInfo(targetRoot,name); if(info.hash!==hash) fail('workspace.changed','目标文件已变化，停止操作。'); }
       catch(e) { if((e as NodeJS.ErrnoException).code==='ENOENT' && hash===null) return; throw e; }
@@ -576,8 +588,8 @@ export class WorkspaceManager {
       if(['applied','merged','discarded','rolled_back'].includes(this.operation(taskId)?.state??''))return fail('workspace.finished','此任务已结束。');
       const original=await enumerate(record.projectPath,record.ignoreGlobs,true);
       const current=await this.currentFiles(record);
-      if(!equivalent(record.snapshotFiles,current))return fail('workspace.changed','副本在最新快照后发生变化，请先完成一轮任务更新快照再应用。');
-      const names=this.changedPaths(record.sourceFiles,current);if(!names.length)return {status:'no_changes'};
+      if(!equivalent(record.snapshotFiles.filter(f=>!consolePath(f.path)),current))return fail('workspace.changed','副本在最新快照后发生变化，请先完成一轮任务更新快照再应用。');
+      const names=this.changedPaths(record.sourceFiles,current).filter(name=>!consolePath(name));if(!names.length)return {status:'no_changes'};
       // 只有任务要写的文件在项目里也被改过才算冲突；用户对其他文件的改动不阻止应用，也不会被覆盖（ISSUE-0101）。
       const touched=new Set(names);
       const drift=this.changedPaths(record.sourceFiles,original).filter(name=>touched.has(name));if(drift.length)return {status:'source_changed',files:drift};
@@ -606,11 +618,13 @@ export class WorkspaceManager {
       if(record.kind!=='copy')return fail('workspace.kind','此操作只用于非 git 独立副本。');
       const operation=this.operation(taskId), applied=operation?.state==='applied';
       if(operation && ['discarded','rolled_back','merged'].includes(operation.state))return fail('workspace.finished','没有可以回滚的副本或应用。');
-      const root=applied?record.projectPath:record.path, current=await enumerate(root,record.ignoreGlobs,true);
+      const legacy = applied && this.db.get('SELECT 1 FROM workspace_operations WHERE task_id=? AND legacy_applied=1', taskId);
+      const legacyFiles = legacy ? operation.changedFiles.filter(consolePath) : [];
+      const root=applied?record.projectPath:record.path, current=await enumerate(root,record.ignoreGlobs,true,legacyFiles);
       // 撤销应用只处理当初应用的文件；用户之后对其他文件的改动保留，不算冲突（ISSUE-0101）。
       const appliedNames=applied?new Set(operation.changedFiles):null;
       if(applied) { const drift=this.changedPaths(operation.appliedFiles,current).filter(name=>appliedNames!.has(name));if(drift.length)return {status:'source_changed',files:drift}; }
-      const names=this.changedPaths(record.sourceFiles,current).filter(name=>!appliedNames||appliedNames.has(name));
+      const names=this.changedPaths(record.sourceFiles,current).filter(name=>(!consolePath(name)||legacyFiles.includes(name))&&(!appliedNames||appliedNames.has(name)));
       const skipped=names.filter(name=>[...record.sourceFiles,...current].some(f=>f.path===name&&f.size>SNAPSHOT_FILE_LIMIT));
       const small=names.filter(name=>!skipped.includes(name));const originals=new Map(record.sourceFiles.map(f=>[f.path,f]));
       const previous=structuredClone(record);
@@ -621,7 +635,7 @@ export class WorkspaceManager {
       },async()=>{
         if(!applied)await this.takeSnapshot(record,'回滚副本到任务开始前');
         this.saveOperation({...operation??this.operationRecord(taskId,'restored'),taskId,state:applied?'rolled_back':'restored',changedFiles:names,skippedLargeFiles:skipped,finishedAt:Date.now()});
-      });}catch(e){if(!applied){await this.git.checked(['update-ref','refs/heads/aic/snapshots',previous.snapshotAfter!],this.options(previous));this.save(previous);}throw e;}
+      },legacyFiles);}catch(e){if(!applied){await this.git.checked(['update-ref','refs/heads/aic/snapshots',previous.snapshotAfter!],this.options(previous));this.save(previous);}throw e;}
       return {status:'rolled_back',skippedLargeFiles:skipped};
     });
   }
@@ -633,8 +647,13 @@ export class WorkspaceManager {
       if (!record.branch || await this.currentBranch(record.path)!==record.branch) return fail('workspace.branch','任务分支发生变化，不能合并。');
       const blocked=await this.originalReady(record); if(blocked) return blocked;
       const before=await this.head(record.projectPath), opts={cwd:record.path};
+      // 即使最终树已删掉说明，中间提交也会随“保留提交记录”进入项目历史。
+      const internalCommit = await this.git.checked(['rev-list','--full-history','-1',before+'..HEAD','--',consoleSpec],opts);
+      if (internalCommit.length) return fail('workspace.private_history','任务提交包含工作台专用目录 .aic，不能将该历史合并进项目。');
       if ((await this.dirtyFiles(record.path)).length) {
-        await this.git.checked(['add','--all','--','.'],opts);
+        await this.git.checked(['add','--all','--','.',excludeConsole],opts);
+        // 只排除 add 无法移除其他进程先前放入暂存区的任务说明。
+        await this.git.checked(['reset','-q','HEAD','--',consoleSpec],opts);
         // 从项目带入的本地文件只供副本运行使用，不能进入任务提交和用户仓库历史（ISSUE-0099）。
         const carried=record.sourceFiles.map(f=>workspaceRelative(f.path));
         if(carried.length)await this.git.checked(['reset','-q','--pathspec-from-file=-','--pathspec-file-nul'],{...opts,input:carried.join('\0')+'\0',env:{GIT_LITERAL_PATHSPECS:'1'}});
@@ -659,6 +678,7 @@ export class WorkspaceManager {
       if(same.code===0) return {status:'no_changes'};
       if(same.code!==1) throw new GitError('failed','diff',same.code);
       const changed=(await this.git.checked(['diff','--name-only','-z',before,taskHead],opts)).toString().split('\0').filter(Boolean).map(workspaceRelative);
+      if (changed.some(consolePath)) return fail('workspace.private_history','合并结果涉及工作台专用目录 .aic，已停止合并。');
       const lfs = await this.lfsFiles(record.path, changed); if (lfs.length) return { status: 'manual_required', reason: 'lfs', files: lfs };
       const hooks = await this.hookFiles(record.projectPath, changed); if (hooks.length) return { status: 'manual_required', reason: 'hooks', files: hooks };
       // 被忽略的本地文件也不能因新增受跟踪文件而被静默覆盖。

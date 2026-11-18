@@ -7,7 +7,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { IndependentTaskState, type IndependentTaskOptions } from '@aic/protocol';
 import { startGw, type TestGw } from './helpers';
-import { openDb } from '../src/db';
+import { SCHEMA_VERSION, openDb } from '../src/db';
 import { MemorySecretStore } from '../src/secrets';
 
 let gateway: TestGw | undefined, server: Server | undefined;
@@ -334,7 +334,7 @@ describe('正式独立任务的离线接口与闭环', () => {
     const file = path.join(temporary(), 'old.sqlite'); f.s.db.run('VACUUM INTO ?', file);
     const old = new DatabaseSync(file); old.exec('DROP TABLE permission_rules; DROP TABLE permission_rule_sets; DROP TABLE workspace_operations; DROP TABLE workspace_preparations; ALTER TABLE projects DROP COLUMN carry_globs; DROP TABLE workspace_records; ALTER TABLE tasks DROP COLUMN workspace_large_files; DROP TABLE saved_environments; DROP TABLE turn_usage; DROP TABLE independent_task_settings; ALTER TABLE independent_request_attempts DROP COLUMN binding_json; ALTER TABLE independent_request_attempts DROP COLUMN currency; ALTER TABLE independent_request_budgets DROP COLUMN revision; PRAGMA user_version=11;'); old.close();
     for (let i = 0; i < 2; i++) { const migrated = openDb(file); try {
-      expect(migrated.get('PRAGMA user_version')).toEqual({ user_version: 18 });
+      expect(migrated.get('PRAGMA user_version')).toEqual({ user_version: SCHEMA_VERSION });
       const row = migrated.get('SELECT binding_json,currency FROM independent_request_attempts')!;
       expect(JSON.parse(String(row.binding_json))).toEqual(f.state().binding); expect(row.currency).toBe(null);
     } finally { migrated.close(); } }

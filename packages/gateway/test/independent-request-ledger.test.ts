@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import type { IndependentApiProtocol, IndependentModelDriverConfig, IndependentModelRequest, IndependentRequestBudget } from '@aic/protocol';
-import { openDb, type Db } from '../src/db';
+import { SCHEMA_VERSION, openDb, type Db } from '../src/db';
 import { EventStore, EventBus } from '../src/events';
 import { MemorySecretStore, SecretService } from '../src/secrets';
 import { IndependentCatalog } from '../src/independent/catalog';
@@ -159,7 +159,7 @@ describe('持久请求预算', () => {
     databases.splice(databases.indexOf(db), 1); db.close();
     const old = new DatabaseSync(file); old.exec('DROP TABLE permission_rules; DROP TABLE permission_rule_sets; DROP TABLE workspace_operations; DROP TABLE workspace_preparations; ALTER TABLE projects DROP COLUMN carry_globs; DROP TABLE workspace_records; ALTER TABLE tasks DROP COLUMN workspace_large_files; DROP TABLE saved_environments; DROP TABLE turn_usage; DROP TABLE independent_task_settings; DROP TABLE independent_request_attempts; DROP TABLE independent_request_budgets; PRAGMA user_version=10;'); old.close();
     for (let i = 0; i < 2; i++) { const migrated = openDb(file);
-      expect(migrated.get('PRAGMA user_version')).toEqual({ user_version: 18 }); expect(migrated.get('SELECT text FROM task_drafts')).toEqual({ text: '原草稿' });
+      expect(migrated.get('PRAGMA user_version')).toEqual({ user_version: SCHEMA_VERSION }); expect(migrated.get('SELECT text FROM task_drafts')).toEqual({ text: '原草稿' });
       expect(migrated.get('SELECT id FROM sessions')).toEqual({ id: 'session' }); expect(migrated.all('SELECT * FROM independent_request_attempts')).toEqual([]); migrated.close(); }
   });
   it('预留后子进程崩溃，重开数据库仍耗尽额度，不产生重发', async () => {

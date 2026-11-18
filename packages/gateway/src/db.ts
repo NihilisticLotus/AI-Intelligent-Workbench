@@ -265,6 +265,9 @@ const MIGRATIONS: string[] = [
    CREATE TABLE permission_rules (id TEXT PRIMARY KEY, project_id TEXT NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
      ord INTEGER NOT NULL, action TEXT NOT NULL, tool TEXT NOT NULL, match TEXT, path TEXT, source TEXT NOT NULL, created_at INTEGER NOT NULL);
    CREATE INDEX idx_permission_rules_project ON permission_rules(project_id,ord);`,
+  // v19：只有升级时已经应用的凭据能够撤销旧清单里的项目 .aic 文件。
+  `ALTER TABLE workspace_operations ADD COLUMN legacy_applied INTEGER NOT NULL DEFAULT 0;
+   UPDATE workspace_operations SET legacy_applied=1 WHERE json_extract(record_json,'$.state')='applied';`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

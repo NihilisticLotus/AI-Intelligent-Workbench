@@ -28,7 +28,7 @@
 
 | 文档 | 说明 |
 |---|---|
-| [plans/phase-1.md](plans/phase-1.md) | 第一阶段：本机浏览器版，7 步，1.1～1.4 已完成；第 2 节是接口规则，第 10.16 节是 1.4 结论 |
+| [plans/phase-1.md](plans/phase-1.md) | 第一阶段：本机浏览器版，7 步，进度见第 1 节；第 2 节是接口规则，第 12.14 节是 1.6 验收结论 |
 
 ## 过程记录
 
@@ -66,3 +66,7 @@
 - [无回应计时用例的起点](issues/ISSUE-0129-idle-watchdog-test-start.md)
 - [真实交接验收的流式回复](issues/ISSUE-0130-handoff-acceptance-streamed-reply.md)
 - [真实交接后缺少成果文件](issues/ISSUE-0131-luna-handoff-result-missing.md)
+- [工具记录归并不完整影响转写脱敏与已读清单](issues/ISSUE-0134-handoff-tool-records.md)
+- [仅发送附件换 Agent 时接收方误收切回等待指令](issues/ISSUE-0135-handoff-attachment-only.md)
+- [ACP 首轮请求把历史资料放在本轮用户指令之后](issues/ISSUE-0136-acp-handoff-resource-order.md)
+- [切回原 Agent 或强制重新交接丢失模型选择或思考强度](issues/ISSUE-0137-handoff-return-model-effort.md)

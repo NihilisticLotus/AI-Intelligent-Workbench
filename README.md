@@ -27,6 +27,7 @@
 |---|---|
 | 文档总目录 | [docs/README.md](docs/README.md) |
 | 1.5 任务与工作区（按批准范围完成，含补验缺口） | [验收与当前进度](docs/acceptance/step-1.5.md) |
+| 1.6 上下文与交接（六项完成标准通过） | [验收与审查记录](docs/acceptance/step-1.6.md) |
 | 问题总表 | [docs/issues/README.md](docs/issues/README.md) |
 | 架构设计 | [docs/design/design.md](docs/design/design.md) |
 | 界面设计 | [docs/design/ui-design.md](docs/design/ui-design.md) |

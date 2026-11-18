@@ -139,3 +139,7 @@
 | [ISSUE-0131](ISSUE-0131-luna-handoff-result-missing.md) | Luna 接收真实 Claude 交接后未创建成果文件 | open | 验收未通过 | 2026-11-18 | |
 | [ISSUE-0132](ISSUE-0132-claude-stopped-tool-before-handoff.md) | Claude 首轮撤回一次编辑，完整交接验收提前停止 | open | 验收未通过 | 2026-11-18 | |
 | [ISSUE-0133](ISSUE-0133-luna-handoff-read-command.md) | Luna 接手仅新增文件的任务时尝试用命令读取旧文件 | open | 验收未通过 | 2026-11-18 | |
+| [ISSUE-0134](ISSUE-0134-handoff-tool-records.md) | 工具记录归并不完整影响转写脱敏与已读清单 | fixed | bug | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0135](ISSUE-0135-handoff-attachment-only.md) | 仅发送附件换 Agent 时接收方误收切回等待指令 | fixed | bug | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0136](ISSUE-0136-acp-handoff-resource-order.md) | ACP 首轮请求把历史资料放在本轮用户指令之后 | fixed | bug | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0137](ISSUE-0137-handoff-return-model-effort.md) | 切回原 Agent 或强制重新交接丢失模型选择或思考强度 | fixed | bug | 2026-11-18 | 2026-11-18 |

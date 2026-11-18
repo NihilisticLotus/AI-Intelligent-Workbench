@@ -95,6 +95,16 @@ describe('1.3 适配器', () => {
     expect(host.of('tool_update')[0]).toMatchObject({ title: '写入 hello.txt' });
     await expect(c.prompt({ text: 'x' }, new AbortController().signal)).rejects.toMatchObject({ body: { code: 'agent.failed' } });
   });
+  it.each([true,false])('交接资源先于当前请求发送（资源嵌入 %s）',async embeddedContext=>{
+    const {s,c}=await open({promptCapabilities:{embeddedContext}});
+    const resources=[{uri:'aic://task/TASK.md',text:'任务说明'},{uri:'aic://task/handoffs/1.md',text:'前一轮记录'}];
+    await c.prompt({text:'执行本轮要求',resources},new AbortController().signal);
+    const blocks=s.log().find(x=>x.method==='session/prompt')!.params.prompt;
+    expect(blocks).toEqual([
+      ...resources.map(resource=>embeddedContext ? {type:'resource',resource:{...resource,mimeType:'text/markdown'}} : {type:'text',text:resource.text}),
+      {type:'text',text:'执行本轮要求'},
+    ]);
+  });
   it('ACP 内容数组：文字、图片 base64、资源链接和小文本资源', async () => {
     const { s, c } = await open({ promptCapabilities: { image: true, embeddedContext: true } });
     const path = join(s.dir, 'content'); writeFileSync(path, Buffer.from('hello'));

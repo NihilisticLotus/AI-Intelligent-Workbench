@@ -38,6 +38,12 @@ describe('在当前 Agent 重新交接',()=>{
     expect(services.db.all("SELECT id FROM handoffs WHERE task_id=? AND state='sent' AND level='H2'",id)).toHaveLength(2);
     expect(services.db.all("SELECT seq FROM events WHERE task_id=? AND type='message.user'",id)).toHaveLength(1);
   });
+  it('强制 H2 保留当前会话的思考强度',async()=>{
+    const {id,services,redo}=await setup();
+    await services.tasks.switch(id,{effort:'高'});
+    expect((await redo()).status).toBe(200);await services.tasks.idle();
+    expect(services.tasks.get(id).effort).toBe('高');
+  });
   it('启动恢复识别刚建立的接收会话，保留只预览的交接',async()=>{
     const {id,services:s,first}=await setup();
     const pending=await s.tasks.handoffs!.prepare(id,{agent:'fake'},'仅预览',[],{},[]);

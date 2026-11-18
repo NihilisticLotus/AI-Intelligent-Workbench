@@ -1255,7 +1255,8 @@ export class TaskService {
 
   async redoHandoff(taskId:string,id:string,confirmation:HandoffSendOptions={}) {
     const record=this.returnRecord(taskId,id);
-    return this.prompt(taskId,'',[],{agent:record.document.meta.to.agent,...(this.get(taskId).model ? {model:this.get(taskId).model!} : {})},
+    const {model,effort}=this.get(taskId);
+    return this.prompt(taskId,'',[],{agent:record.document.meta.to.agent,...(model?{model}:{}),...(effort?{effort}:{})},
       {...confirmation,forceH2:true});
   }
 
@@ -1268,9 +1269,14 @@ export class TaskService {
   async returnHandoff(taskId:string,id:string,restoreRevision?:string,confirmation:HandoffSendOptions={}) {
     const record=this.returnRecord(taskId,id);
     const {from,checkpoint}=record.document.meta;
-    const original=from.sessionId ? this.db.get<{model:string|null;profile_id:string|null;caps_json:string|null}>('SELECT model,profile_id,caps_json FROM sessions WHERE id=? AND task_id=? AND agent_id=?',from.sessionId,taskId,from.agent) : undefined;
-    const target:HandoffTarget={agent:from.agent,...(original?.model?{model:original.model}:{})};
-    const caps=original?.caps_json?JSON.parse(original.caps_json):null;
+    // 会话行保存启动时的模型；切出前用户可能已在同一会话换过模型或思考强度。
+    const original=this.db.get<{model:string|null;effort:string|null;profile_id:string|null;caps_json:string|null}>(`
+      SELECT COALESCE(json_extract(h.request_json,'$.source.model'),s.model) AS model,
+             json_extract(h.request_json,'$.source.effort') AS effort,s.profile_id,s.caps_json
+      FROM handoffs h LEFT JOIN sessions s ON s.id=h.from_session_id AND s.task_id=h.task_id AND s.agent_id=?
+      WHERE h.id=? AND h.task_id=?`,from.agent,id,taskId)!;
+    const target:HandoffTarget={agent:from.agent,...(original.model?{model:original.model}:{}),...(original.effort?{effort:original.effort}:{})};
+    const caps=original.caps_json?JSON.parse(original.caps_json):null;
     this.configuring.add(taskId);
     try {
       this.checkTaskPermission(from.agent,this.getRow(taskId).permission_level,!!this.workspaces?.get(taskId));
@@ -1280,11 +1286,12 @@ export class TaskService {
         await this.workspaces.checkpointRestore(taskId,checkpoint,restoreRevision);
         await this.refreshChanges(taskId);
       }
-      if(!confirmation.confirmedId && original && from.sessionId && (from.agent==='independent'||caps?.resume||caps?.loadSession)) {
+      if(!confirmation.confirmedId && from.sessionId && (from.agent==='independent'||caps?.resume||caps?.loadSession)) {
         await this.releaseForHandoff(taskId,this.get(taskId).agent,from.agent);
         try {
           const rt=await this.startRuntime(taskId,undefined,{noQueue:true,returnTo:{sessionId:from.sessionId,target,profileId:original.profile_id}});
-          this.db.run('UPDATE tasks SET agent=?,model=?,effort=?,profile_id=? WHERE id=?',from.agent,rt.conn.config?.().model??original.model,rt.conn.config?.().effort??null,rt.profileId,taskId);
+          const actual=rt.conn.config?.();
+          this.db.run('UPDATE tasks SET agent=?,model=?,effort=?,profile_id=? WHERE id=?',from.agent,actual?.model??original.model,actual?actual.effort:original.effort,rt.profileId,taskId);
           const parked=this.parkedSources.get(taskId);
           if(parked){await this.closeRuntime(taskId,parked,'handoff_return');this.parkedSources.delete(taskId);}
           this.db.run("UPDATE handoffs SET state='returned' WHERE task_id=? AND id=?",taskId,id);

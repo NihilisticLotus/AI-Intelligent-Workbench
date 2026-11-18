@@ -32,6 +32,29 @@ describe('发送时交接',()=>{
     expect(received.includes('tools.apply_patch')).toBe(expectsHint);
     if (expectsHint) expect(received).toContain('禁止命令也适用于读取文件');
   });
+  it.each([true,false])('切回时使用交出前最后选中的模型与思考强度（原生恢复 %s）',async resume=>{
+    const fake=createFakeAdapter({speed:0});
+    const starts:{model:string|null;effort:string|null}[]=[];
+    const adapter:typeof fake={...fake,
+      async probeCapabilities(conn){return {...await fake.probeCapabilities(conn),resume,loadSession:false};},
+      async spawn(opts){
+        starts.push({model:opts.model,effort:opts.effort});
+        const conn=await fake.spawn(opts);
+        if(opts.resume) Object.assign(conn,{resumed:resume,agentSessionId:opts.resume.agentSessionId});
+        conn.prompt=async()=>({stopReason:'end_turn'});return conn;
+      },
+    };
+    gw=await startGw({adapters:[adapter,{...adapter,id:'codex'}]});
+    const token=await gw.pair(),project=await makeProject(gw,token),s=gw.gw.services;
+    const task=await s.tasks.create({projectId:project.id,agent:'fake',permission:'readonly',model:'demo-fast',effort:'低',prompt:'核对关卡',deferPrompt:true});
+    await s.tasks.prompt(task.id,'开始');await s.tasks.idle();
+    await s.tasks.switch(task.id,{model:'demo-deep',effort:'高'});
+    await s.tasks.prompt(task.id,'接手',[],{agent:'codex',model:'demo-fast',effort:'低'});await s.tasks.idle();
+    const handoff=s.db.get<{id:string}>('SELECT id FROM handoffs WHERE task_id=?',task.id)!;
+    await s.tasks.returnHandoff(task.id,handoff.id);await s.tasks.idle();
+    expect.soft(starts.at(-1)).toEqual({model:'demo-deep',effort:'高'});
+    expect(s.tasks.get(task.id)).toMatchObject({agent:'fake',model:'demo-deep',effort:'高'});
+  });
   it('两次交接后原生切回，较早的分隔条重新成为可操作记录',async()=>{
     const fake=createFakeAdapter({speed:0});
     const resumable:typeof fake={...fake,

@@ -135,4 +135,5 @@
 | [ISSUE-0127](ISSUE-0127-handoff-environment-attachment-history.md) | 已发送环境附件的值未持续用于后续交接脱敏 | fixed | bug | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0128](ISSUE-0128-workspace-deleted-owned-artifact.md) | 副本中已删除的项目自有说明被工作台重新创建 | fixed | bug | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0129](ISSUE-0129-idle-watchdog-test-start.md) | 无回应提醒用例提前开始计时 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
-| [ISSUE-0130](ISSUE-0130-handoff-acceptance-streamed-reply.md) | 真实交接验收漏读流式回复 | investigating | 验收未通过 | 2026-11-18 | |
+| [ISSUE-0130](ISSUE-0130-handoff-acceptance-streamed-reply.md) | 真实交接验收漏读流式回复 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0131](ISSUE-0131-luna-handoff-result-missing.md) | Luna 接收真实 Claude 交接后未创建成果文件 | open | 验收未通过 | 2026-11-18 | |

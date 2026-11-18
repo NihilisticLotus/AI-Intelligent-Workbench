@@ -2069,3 +2069,5 @@ ISSUE-0071 为部分用量合计补逐字段覆盖说明，ISSUE-0072 为无回�
 审查后默认离线 1128 通过、3 跳过，类型检查与构建通过。两套主题中接收首轮失败后均在原会话完成下一轮，详情见上述审查记录。
 
 用户随后授权 5 元补验 Claude，采用其原生目录的 claude-haiku-5-5。一次真实提示词验证 H2 接收、实际历史搜索和正确复述。第 12.13 节第 1 项中的真实 Claude → Codex 及原生切回仍待验证。见 [Claude 补验记录](../acceptance/step-1.6.md)。
+
+双客户端补验追加：真实 Claude Haiku 写好两个文件，真实 Codex GPT-6 Luna 收到 H2 并正确复述，但未创建 Result.txt。按约停止，未验证原生切回。第 12.13 节第 1 项仍为部分通过。见 [ISSUE-0131](../issues/ISSUE-0131-luna-handoff-result-missing.md) 和[实测记录](../acceptance/step-1.6.md)。

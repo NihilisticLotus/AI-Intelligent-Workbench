@@ -5,6 +5,7 @@ import { copyFile, lstat, mkdir, readFile, readdir, realpath, rm, writeFile, chm
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { Errors } from './util';
 import { WorkspaceRetention, WorkspaceOperationRecord, WorkspaceRecord, WorkspaceRequest, type MergeWorkspaceBody, type WorkspaceOperationResult, type WorkspaceChange, type WorkspaceChanges, type WorkspaceFile, type WorkspaceFileDiff } from '@aic/protocol';
 import type { Db } from './db';
 import { Git, GitError } from './git';
@@ -437,6 +438,26 @@ export class WorkspaceManager {
   diff(taskId: string): Promise<WorkspaceChanges> {
     return this.exclusive(taskId, async () => (await this.changes(await this.checkedRecord(taskId))).result);
   }
+  async checkpointFile(taskId:string,checkpoint:string,name:string):Promise<string> {
+    const relative=workspaceRelative(name), parts=relative.toLowerCase().split('/');
+    if(parts.some(p=>['.git','.aic','.claude','.codex','.codebuddy','.workbuddy','.zcode'].includes(p))) throw Errors.forbidden('历史查询只读取项目文件');
+    if(!checkpoint.startsWith('refs/aic/checkpoints/'+taskId+'/') || !/^[1-9]\d*$/.test(checkpoint.slice(('refs/aic/checkpoints/'+taskId+'/').length))) throw Errors.forbidden('检查点不属于这个任务');
+    return this.exclusive(taskId,async()=>{
+      const record=await this.checkedRecord(taskId);
+      const opts=this.options(record);
+      // 只查固化的树，普通文件才能读取，绝不打开当前磁盘路径或跟随仓库链接。
+      const entry=await this.git.checked(['ls-tree','-lz',checkpoint,'--',':(literal)'+relative],opts);
+      const match=/^(100644|100755) blob ([a-f0-9]{40,64}) +(\d+)\t([\s\S]+)\0$/.exec(entry.toString());
+      if(!match || match[4]!==relative) throw Errors.notFound('检查点内没有这个普通文件');
+      if(parts.some(p=>p==='.env'||p.startsWith('.env.'))) return '（环境文件内容已打码）';
+      const size=Number(match[3]);
+      if(size>SNAPSHOT_FILE_LIMIT) throw Errors.tooLarge('文件超过工作副本的快照上限');
+      const data=await this.git.checked(['cat-file','blob',match[2]!],{...opts,maxOutput:size+1});
+      if(data.includes(0))throw Errors.badRequest('历史查询只支持文本文件');
+      return data.toString('utf8');
+    });
+  }
+
   handoffChanges(taskId: string) {
     return this.exclusive(taskId,async()=>{
       const record=await this.checkedRecord(taskId);

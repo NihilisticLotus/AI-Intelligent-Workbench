@@ -27,6 +27,7 @@ import { IndependentDiscovery } from './independent/discovery';
 import { IndependentTaskRuntime } from './independent/task-runtime';
 import type { readMetadataJson } from './independent/metadata-http';
 import { TaskService } from './tasks';
+import { HistoryAccess } from './handoff/history-access';
 import { Git } from './git';
 import { WorkspaceManager } from './workspaces';
 import { newId } from './util';
@@ -226,6 +227,8 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   attachments.cleanup();
   const cleanupTimer = setInterval(() => { try { attachments.cleanup(); } catch (e) { log('附件清理失败：' + String(e)); } void cleanWorkspaces(); }, 60 * 60_000);
   cleanupTimer.unref?.();
+  const history = new HistoryAccess(db, () => port, events.bus);
+  tasks.history = history;
   tasks.attachments = attachments;
   tasks.savedSecrets = content => secrets.forRedaction(content);
   tasks.agentSvc = agentSvc;
@@ -254,7 +257,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
 
   const services: Services = {
     db, attachments, independent, independentDiscovery, independentRuntime, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks, workspaces,
-    port: () => port,
+    history, port: () => port,
     machine: { id: machineId, name: hostname(), os: process.platform === 'win32' ? 'windows' : process.platform },
     version: VERSION,
     bootId,

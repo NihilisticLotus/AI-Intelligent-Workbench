@@ -64,6 +64,9 @@ describe('交接预览',()=>{
     s.events.append({...base,type:'tool.end',data:{toolId:'cmd-x',ok:false,summary:'断言失败'}});
     const replay=s.events.append({...base,type:'message.user',data:{messageId:'replay',text:'不得出现在预览的回放'}});
     s.db.run('UPDATE events SET replay=1 WHERE seq=?',replay.seq);
+    s.events.append({...base,type:'tool.start',data:{toolId:'env',kind:'read',title:'配置',target:'.env.local'}});
+    s.events.append({...base,type:'tool.output',data:{toolId:'env',text:'仅用于验收的自由文本'}});
+    s.events.append({...base,type:'message.user',data:{messageId:'echo-env',text:'引用：仅用于验收的自由文本'}});
     const w=s.workspaces.get(task.id)!;
     writeFileSync(path.join(w.path,'level.txt'),'关卡甲\n');
     const preview=()=>gw!.api('POST','/tasks/'+task.id+'/handoff/preview',{token,body:{agent:'codex'}});
@@ -76,6 +79,7 @@ describe('交接预览',()=>{
     expect(d.commands.items).toContainEqual(expect.objectContaining({command:'npm test',ok:false}));
     expect(d.tasks).toContainEqual({text:'核对音轨',status:'pending'}); expect(d.decisions).toBeUndefined();
     expect(p.quality.redactions).toBeGreaterThan(0);
+    expect(JSON.stringify(p)).not.toContain('仅用于验收的自由文本');
     expect(JSON.stringify(p)).not.toContain(secret); expect(JSON.stringify(p)).not.toContain('不得出现在预览的回放');
     const missing=structuredClone(d);missing.files.changed=[];missing.commands.items=[];missing.intent.constraints=[];missing.corrections=[];missing.tasks=[];
     expect(coverageComplete(missing,d)).toBe(false);

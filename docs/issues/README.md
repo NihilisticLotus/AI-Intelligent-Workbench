@@ -116,4 +116,5 @@
 | [ISSUE-0108](ISSUE-0108-tracked-task-file.md) | 项目已跟踪同名任务说明时，副本文件与工作台目标不同 | fixed | 升级兼容 | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0109](ISSUE-0109-preview-live-copy.md) | 非 git 副本的交接预览遗漏最后一次快照之后的文件 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0110](ISSUE-0110-await-workspace-approval.md) | 等待审批时拒绝还原的用例依赖启动速度 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
-| [ISSUE-0111](ISSUE-0111-environment-quoted-line.md) | 后续对话引用环境文件中的无赋值文本时未打码 | investigating | 验收未通过 | 2026-11-18 | |
+| [ISSUE-0111](ISSUE-0111-environment-quoted-line.md) | 后续对话引用环境文件中的无赋值文本时未打码 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0112](ISSUE-0112-handoff-path-redaction.md) | 环境配置的值与真实改动路径重合时显示错误文件名 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |

@@ -353,7 +353,31 @@ export const HandoffDocument = HandoffNarrative.extend({
   env: z.object({ workspace: z.string().nullable(), branch: z.string().nullable() }),
 }).strict();
 export type HandoffDocument = z.infer<typeof HandoffDocument>;
+export interface TranscriptLine {
+  session: string | null;
+  agent: AgentKind;
+  at: number;
+  role: '用户' | '助手' | '工具';
+  text: string;
+  output?: string;
+  failed?: boolean;
+  env?: boolean;
+}
+
+export const HistoryQuery = z.discriminatedUnion('name', [
+  z.object({ name: z.literal('search'), arguments: z.object({query: z.string().trim().min(1).max(500)}).strict() }).strict(),
+  z.object({ name: z.literal('get_events'), arguments: z.object({
+    fromSeq: z.number().int().nonnegative(), toSeq: z.number().int().nonnegative(),
+  }).strict().refine(range => range.toSeq >= range.fromSeq, '结束序号不能早于开始序号') }).strict(),
+  z.object({ name: z.literal('get_file_at'), arguments: z.object({
+    checkpoint: z.string().min(1).max(200), path: z.string().min(1).max(1024),
+  }).strict() }).strict(),
+  z.object({ name: z.literal('list_decisions'), arguments: z.object({}).strict() }).strict(),
+]);
+export type HistoryQuery = z.infer<typeof HistoryQuery>;
+export interface HistoryGrant { taskId: string; sessionId: string; handoffId: string }
 export const HandoffQuality = z.object({
+  historyCalls: z.number().int().nonnegative().optional(),
   added: z.array(z.string()), inconsistent: z.array(z.string()), redactions: z.number().int().nonnegative(),
   coveragePassed: z.boolean(), consistencyPassed: z.boolean(), window: z.number().positive(), estimatedTokens: z.number().nonnegative(),
   probe: z.object({passed:z.number().int(),total:z.number().int()}).optional(),

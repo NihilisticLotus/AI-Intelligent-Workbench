@@ -15,6 +15,8 @@ import { taskRoutes } from './tasks';
 import { agentRoutes } from './agents';
 import { independentRoutes } from './independent';
 import { staticHandler } from './static';
+import { isLoopback } from '../auth';
+import { historyRoutes } from './history';
 import { errorLogText } from '../error-log';
 
 export type Env = { Bindings: HttpBindings; Variables: { device: DeviceRow; ip: string } };
@@ -74,7 +76,14 @@ export function createApp(s: Services, opts: { webDist: string }) {
     }
     const ip = ipOf(c);
     c.set('ip', ip);
-    if (!PUBLIC_API.has(c.req.path)) {
+    if (c.req.path === API_BASE + '/internal/history/read' && c.req.method === 'POST') {
+      const headers = c.req.raw.headers;
+      if (!isLoopback(ip) || headers.has('origin') || headers.has('cookie') ||
+          Array.from(headers.keys()).some(name => name.startsWith('sec-fetch-'))) {
+        return fail(c, Errors.forbidden('历史查询只接受本机会话进程'));
+      }
+      s.history.authenticate(c.req.header('authorization'));
+    } else if (!PUBLIC_API.has(c.req.path)) {
       const device = auth.authenticate(credsOf(c), ip);
       if (!device) {
         return fail(c, Errors.unauthorized('还没有连接到 AI Console', '请从 AI Console 启动脚本打开，或重新生成配对码', [
@@ -97,6 +106,7 @@ export function createApp(s: Services, opts: { webDist: string }) {
   app.route(API_BASE, systemRoutes(s));
   app.route(API_BASE, projectRoutes(s));
   app.route(API_BASE, taskRoutes(s));
+  app.route(API_BASE, historyRoutes(s));
   app.route(API_BASE, agentRoutes(s));
   app.route(API_BASE, independentRoutes(s));
 

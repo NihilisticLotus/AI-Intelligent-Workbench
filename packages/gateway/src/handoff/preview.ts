@@ -1,11 +1,12 @@
 import { HandoffPreview, type HandoffDocument, type HandoffTarget, type HandoffNarrative } from '@aic/protocol';
 import type { Services } from '../services';
 import { readHandoffState } from './state';
-import { HandoffRedactor } from './redact';
+import { environmentValues, HandoffRedactor } from './redact';
 import { estimateTokens, handoffLevel, recentWithin, sectionBudgets } from './budget';
 import { transcriptBlocks } from './transcript';
 import { checkNarrative, coverageComplete, restoreCoverage } from './checks';
 import { renderHandoff } from './render';
+import { pathAliases } from './path-aliases';
 
 function sanitizeDocument(source:HandoffDocument,r:HandoffRedactor):HandoffDocument {
   const d=structuredClone(source);
@@ -34,15 +35,11 @@ export async function previewHandoff(s:Services,id:string,target:HandoffTarget,o
   for(const l of lines) values.push(l.text,l.output??'');
   if(options.narrative) values.push(...Object.values(options.narrative).flat());
   const keys=await s.secrets.forRedaction(values.join('\n'));
-  // 同一段环境文件内容也可能被助手引述；已观察到的值在所有出口一并打码。
-  const envValues:string[]=[];
-  for (const line of lines) if (line.env && line.output) {
-    for (const match of line.output.matchAll(/^\s*(?:export\s+)?[\w.-]+\s*=\s*([^\r\n]+)/gm)) {
-      const value=match[1]!.trim().replace(/^["']|["']$/g,'');
-      if (value) envValues.push(value);
-    }
-  }
-  const redactor=new HandoffRedactor([...keys,...s.tasks.sessionSecrets(id),...envValues]);
+  const envValues=environmentValues(lines.flatMap(line=>line.env && line.output ? [line.output] : []));
+  const paths=raw.files.changed.flatMap(file=>file.oldPath?[file.path,file.oldPath]:[file.path]);
+  paths.push(...raw.files.read.map(file=>file.path));
+  const aliases=pathAliases(s.db,id,envValues,paths);
+  const redactor=new HandoffRedactor([...keys,...s.tasks.sessionSecrets(id)],envValues,aliases);
   const source=sanitizeDocument(raw,redactor);
   let blocks=transcriptBlocks(lines,redactor);
   const fullTokens=estimateTokens(JSON.stringify(source)+'\n'+blocks.join('\n'));
@@ -79,5 +76,6 @@ export async function previewHandoff(s:Services,id:string,target:HandoffTarget,o
   const inline=!s.workspaces.get(id) || await s.workspaces.artifactConflicts(id,'.aic/TASK.md');
   const markdown=renderHandoff(doc,blocks,inline);
   return HandoffPreview.parse({document:doc,markdown,level,quality:{added,inconsistent:rejected,redactions:redactor.count,
-    coveragePassed:coverageComplete(doc,source),consistencyPassed:!rejected.length,window,estimatedTokens:estimateTokens(markdown)}});
+    coveragePassed:coverageComplete(raw,raw) && new Set(source.vcs.changed.map(file=>file.path)).size===new Set(raw.vcs.changed.map(file=>file.path)).size
+      && coverageComplete(doc,source),consistencyPassed:!rejected.length,window,estimatedTokens:estimateTokens(markdown)}});
 }

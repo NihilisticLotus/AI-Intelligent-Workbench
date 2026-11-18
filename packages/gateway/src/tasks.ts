@@ -20,6 +20,8 @@ import { WorkspaceManager, WorkspaceError } from './workspaces';
 import { GitError } from './git';
 import { PermissionBroker } from './permission-rules';
 import { TaskMemory } from './task-memory';
+import type { HandoffTarget } from '@aic/protocol';
+import type { HistoryAccess } from './handoff/history-access';
 import { taskSummaryBody, limitTaskSummary } from './task-summary';
 import type { PermissionOperation, PermissionContext, AlwaysAllowConfirmation, PermissionRulePreview } from '@aic/protocol';
 import { validateProjectDir } from './fsbrowse';
@@ -91,6 +93,7 @@ class SlotBusyError extends Error {
 
 export class TaskService {
   readonly memory: TaskMemory;
+  history?: HistoryAccess;
   private summaryJobs = new Map<string, Promise<void>>();
   private dirtySummaries = new Set<string>();
   savedSecrets: (content: string) => Promise<string[]> = async () => [];
@@ -796,8 +799,21 @@ export class TaskService {
     try { return await p; } finally { this.starting.delete(taskId); }
   }
 
-  private async startRuntime(taskId: string, signal?: AbortSignal, opts: { strictResume?: boolean; noQueue?: boolean } = {}): Promise<Runtime> {
-    const row = this.getRow(taskId);
+  async startHandoffRuntime(taskId: string, handoffId: string, target: HandoffTarget, signal?: AbortSignal) {
+    const handoff = this.db.get<{from_session_id: string | null}>(
+      'SELECT from_session_id FROM handoffs WHERE id=? AND task_id=? AND to_session_id IS NULL', handoffId, taskId);
+    if (!handoff || !this.history) throw Errors.invalidState('交接记录不可用');
+    const task = this.get(taskId);
+    this.checkTaskPermission(target.agent, task.permission, !!this.workspaces?.get(taskId) && ['worktree','copy'].includes(task.workspace?.kind ?? ''));
+    return this.startRuntime(taskId, signal, { noQueue: true, handoff: { id: handoffId, parent: handoff.from_session_id, target } });
+  }
+
+  private async startRuntime(taskId: string, signal?: AbortSignal, opts: {
+    strictResume?: boolean; noQueue?: boolean; handoff?: {id: string; parent: string | null; target: HandoffTarget};
+  } = {}): Promise<Runtime> {
+    const task = this.getRow(taskId);
+    const next = opts.handoff?.target;
+    const row = next ? { ...task, agent: next.agent, profile_id: null, model: next.model ?? null, effort: next.effort ?? null } : task;
     if (row.agent === 'independent') {
       if (!this.independentRuntime) throw Errors.invalidState('独立 Agent 尚未装配');
       const project = this.db.get<{ path: string }>('SELECT path FROM projects WHERE id=?', row.project_id);
@@ -817,7 +833,7 @@ export class TaskService {
     const svc = a.real ? this.agentSvc : null;
     const profile = svc ? svc.profiles.resolve(row.agent, row.profile_id) : null;
     const spawnEnv = svc && profile ? await svc.profiles.envFor(a, profile) : null;
-    const secrets = spawnEnv?.redact ?? [];
+    const secrets = [...(spawnEnv?.redact ?? [])];
     this.secretsOf.set(taskId, secrets);
     // 前面的 await 期间用户可能已经点了 [停止]：不要再去排队
     if (signal?.aborted) throw new AbortError();
@@ -828,12 +844,14 @@ export class TaskService {
       if (!r) throw new SlotBusyError();
       release = r;
     }
+    const sessionId = newId('s');
+    let opening: AgentConnection | undefined;
     try {
       if (signal?.aborted) throw new AbortError();
       if (this.getRow(taskId).status === 'queued' && this.turnAborts.has(taskId)) this.setStatus(taskId, 'running');
       // 上一个会话：同一个任务、同一个 Agent，有 agent_session_id → 恢复（H1）。不限定账号：换账号后也先试着恢复，
       // 恢复不了时适配器会新建会话并提示“Agent 不记得之前的对话”，不会悄悄丢掉上下文
-      const prev = this.db.get<{ id: string; agent_session_id: string; profile_id: string | null; caps_json: string | null }>(
+      const prev = opts.handoff ? undefined : this.db.get<{ id: string; agent_session_id: string; profile_id: string | null; caps_json: string | null }>(
         `SELECT id, agent_session_id, profile_id, caps_json FROM sessions WHERE task_id = ? AND agent_id = ? AND agent_session_id IS NOT NULL
          ORDER BY started_at DESC LIMIT 1`,
         taskId, row.agent,
@@ -844,28 +862,30 @@ export class TaskService {
       const resume = a.real && prev ? { agentSessionId: prev.agent_session_id } : undefined;
       // H1：上次的会话不能在会话里换模型时，启动时就指定模型
       const launchModel = !!(a.real && a.launchModel && row.model && this.modelSwitchOf(prev?.caps_json ?? null, row.agent, profile?.id ?? null) === 'none');
-      const sessionId = newId('s');
+      const history = opts.handoff && this.history?.serverFor({ taskId, sessionId, handoffId: opts.handoff.id });
+      if (history) secrets.push(...history.env.filter(entry => entry.name === 'AIC_HISTORY_TOKEN').map(entry => entry.value));
       const redactor = new StreamRedactor(secrets);
       const conn = await a.spawn({
         cwd: await this.runtimePath(taskId), model: row.model, effort: row.effort, permission: row.permission_level,
         host: this.host(taskId, sessionId, secrets, redactor), sessionLabel: sessionId,
-        ...(spawnEnv ? { env: spawnEnv.env, redact: spawnEnv.redact, profile: spawnEnv.account } : {}),
+        ...(spawnEnv ? { env: spawnEnv.env, profile: spawnEnv.account } : {}),
+        ...(secrets.length ? { redact: secrets } : {}), ...(history ? { mcpServers: [history] } : {}),
         ...(resume ? { resume } : {}), ...(signal ? { signal } : {}), ...(launchModel ? { launchModel: true } : {}),
       });
+      opening = conn;
       if (opts.strictResume && resume && !conn.resumed) {
-        await conn.close().catch(() => {});
         throw Errors.notRecoverable('换账号后原来的会话找不到了', '同一个 Agent 换账号需要交接，会在之后的版本提供；现在可以换回原来的账号');
       }
-      if (signal?.aborted) { await conn.close().catch(() => {}); throw new AbortError(); }
+      if (signal?.aborted) throw new AbortError();
       const caps = await a.probeCapabilities(conn);
       // Agent 实际用的模型和任务记录不一致（例如没能下发保存的模型）：以 Agent 为准写回，界面不再显示一个没生效的模型
       const actual = a.real ? conn.config?.() ?? null : null;
-      if (actual && row.model !== null && actual.model !== row.model) {
+      if (!opts.handoff && actual && row.model !== null && actual.model !== row.model) {
         this.db.run('UPDATE tasks SET model = ?, updated_at = ? WHERE id = ?', actual.model, now(), taskId);
       }
       this.db.run(
-        "INSERT INTO sessions (id, task_id, agent_id, profile_id, model, agent_session_id, parent_session_id, caps_json, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)",
-        sessionId, taskId, row.agent, profile?.id ?? null, actual?.model ?? row.model, conn.agentSessionId, prev?.id ?? null, JSON.stringify(caps), now(),
+        "INSERT INTO sessions (id, task_id, agent_id, profile_id, model, agent_session_id, parent_session_id, handoff_id, caps_json, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)",
+        sessionId, taskId, row.agent, profile?.id ?? null, actual?.model ?? row.model, conn.agentSessionId, opts.handoff?.parent ?? prev?.id ?? null, opts.handoff?.id ?? null, JSON.stringify(caps), now(),
       );
       this.events.append({
         type: 'session.started', taskId, sessionId,
@@ -882,6 +902,8 @@ export class TaskService {
       }
       return rt;
     } catch (e) {
+      if (opts.handoff) this.history?.revoke(sessionId);
+      await opening?.close().catch(() => {});
       release();
       throw e;
     }

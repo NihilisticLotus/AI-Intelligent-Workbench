@@ -11,6 +11,7 @@ import type { ProfileService } from './profiles';
 import type { SecretService } from './secrets';
 import type { ProcessRegistry } from './processes';
 import type { Db } from './db';
+import type { HistoryAccess } from './handoff/history-access';
 import type { EventStore } from './events';
 import type { GroupService, ProjectService } from './projects';
 import type { TaskService } from './tasks';
@@ -18,6 +19,7 @@ import type { WorkspaceManager } from './workspaces';
 
 export interface Services {
   db: Db;
+  history: HistoryAccess;
   attachments: AttachmentService;
   independent: IndependentCatalog;
   independentDiscovery: IndependentDiscovery;

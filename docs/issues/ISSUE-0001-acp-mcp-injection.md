@@ -41,3 +41,4 @@ ACP 的 `session/new` 允许客户端传入 `mcpServers`。社区有报告称：
   - 仍未验证：模型能否真正调用注入的工具；Claude 和 CodeBuddy 是否连上了全局 MCP。这两项放进第 1.2 步的真实 Agent 冒烟测试（plans/phase-1.md 6.8、6.9），通过后关闭本单。
 - 2026-11-06 第 1.2 步真实冒烟（docs/acceptance/step-1.2.md）：Claude Code 和 Codex 在 `session/new` 时都拉起了注入的 `aic-echo`（`mcpStarted: true`），与探测结论一致。为控制费用，冒烟测试不再让模型调用 `aic-echo`（计划 6.8 已同步修改），“模型能否真正调用注入的工具”仍未验证，放到第 1.4 步注入 `aic_history` 时一起验证。CodeBuddy 未登录，未测（ISSUE-0010）。状态保持 investigating。
 - 2026-11-08 重新规划（plans/phase-1.md 第 1 节）：目标步改为 1.6（原 1.4），随注入 `aic_history` 一起验证模型能否调用注入的工具。
+- 2026-11-18 阶段 3 离线验证：演示适配器收到交接会话的服务配置，在一个正常消息回合中通过 stdio 列出四个工具并调用一次搜索。Gateway 记录了成功调用；普通任务没有收到历史服务。真实模型是否实际调用仍待阶段 7 补验。

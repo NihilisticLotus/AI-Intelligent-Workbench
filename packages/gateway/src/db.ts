@@ -283,6 +283,10 @@ const MIGRATIONS: string[] = [
      document_json TEXT NOT NULL, quality_json TEXT NOT NULL, edited_by_user INTEGER NOT NULL DEFAULT 0,
      created_at INTEGER NOT NULL);
    CREATE INDEX idx_handoffs_task ON handoffs(task_id,created_at);`,
+  // v22：路径代号只登记任务内序号和摘要，不复制环境配置或原始路径。
+  `CREATE TABLE handoff_path_aliases (
+     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, digest TEXT NOT NULL, ordinal INTEGER NOT NULL,
+     PRIMARY KEY(task_id,digest), UNIQUE(task_id,ordinal));`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

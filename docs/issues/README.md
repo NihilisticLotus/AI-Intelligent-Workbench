@@ -127,3 +127,4 @@
 | [ISSUE-0119](ISSUE-0119-handoff-live-feedback.md) | 已发送后仍可点击撤销，任务账本没有及时显示计划 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0120](ISSUE-0120-handoff-session-slots.md) | 保留原会话时模拟第三方 Agent 无法取得接收名额 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0121](ISSUE-0121-approval-watchdog-test-start.md) | 无回应计时用例在审批请求登记之前快进时间 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0122](ISSUE-0122-handoff-without-history-tools.md) | 接收模型禁用工具时，交接正文和分隔条仍称可以查历史 | investigating | 验收未通过 | 2026-11-18 | |

@@ -118,3 +118,7 @@
 | [ISSUE-0110](ISSUE-0110-await-workspace-approval.md) | 等待审批时拒绝还原的用例依赖启动速度 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0111](ISSUE-0111-environment-quoted-line.md) | 后续对话引用环境文件中的无赋值文本时未打码 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0112](ISSUE-0112-handoff-path-redaction.md) | 环境配置的值与真实改动路径重合时显示错误文件名 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0113](ISSUE-0113-checkpoint-shared-objects.md) | 私有索引仍会把副本内容写进原项目的 Git 对象库 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0114](ISSUE-0114-handoff-binary-attachment.md) | 新消息中的二进制附件会绕过交接正文打码 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0115](ISSUE-0115-handoff-source-continuity.md) | 无原生恢复能力时交接失败会丢失来源会话状态 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0116](ISSUE-0116-return-confirmation.md) | 反向交接草稿确认请求被拒 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |

@@ -116,7 +116,7 @@ export class IndependentTaskRuntime {
         this.ledger.create(this.catalog.bind(taskId, options.selection), options.requestBudget);
         this.db.run('INSERT INTO independent_task_settings(task_id,revision,options_json,updated_at) VALUES (?,1,?,?)', taskId, JSON.stringify(options), now());
       }
-      this.db.run('UPDATE tasks SET model=?,effort=?,updated_at=? WHERE id=?', options.selection.modelId, options.generation.effort ?? null, now(), taskId);
+      this.db.run("UPDATE tasks SET model=?,effort=?,updated_at=? WHERE id=? AND agent='independent'", options.selection.modelId, options.generation.effort ?? null, now(), taskId);
       this.changed(taskId); return this.state(taskId);
     });
   }

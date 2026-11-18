@@ -28,6 +28,9 @@ function consolePath(relative: string): boolean {
 }
 const consoleSpec = process.platform === 'win32' ? ':(top,icase,literal).aic' : ':(top,literal).aic';
 const excludeConsole = process.platform === 'win32' ? ':(top,exclude,icase,literal).aic' : ':(top,exclude,literal).aic';
+function environmentPath(name: string) {
+  return name.toLowerCase().split('/').some(part => part === '.env' || part.startsWith('.env.'));
+}
 export function isInside(root: string, target: string): boolean {
   const rel = path.relative(root, target);
   return rel !== '' && !rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel);
@@ -316,9 +319,9 @@ export class WorkspaceManager {
     return result;
   }
 
-  private async buildTree(record: WorkspaceRecord, files: WorkspaceFile[]): Promise<string> {
+  private async buildTree(record: WorkspaceRecord, files: WorkspaceFile[], objectEnv: NodeJS.ProcessEnv = {}): Promise<string> {
     const index = path.join(await this.root(), `workspace-index-${randomUUID()}`);
-    const opts = { ...this.options(record), env: { GIT_INDEX_FILE: index } };
+    const opts = { ...this.options(record), env: { ...objectEnv, GIT_INDEX_FILE: index } };
     try {
       await this.git.checked(['read-tree','--empty'], opts);
       const small = files.filter(f => f.size <= SNAPSHOT_FILE_LIMIT);
@@ -375,16 +378,31 @@ export class WorkspaceManager {
     return [...new Set([...before.keys(), ...after.keys()])].filter(p => before.get(p) !== after.get(p));
   }
 
-  private async changes(record: WorkspaceRecord, liveCopy = false): Promise<{ result: WorkspaceChanges; tree: string }> {
+  /** git 工作树共享原仓库的对象库，计算差异所需的新对象只临时写入工作台。 */
+  private async comparisonObjects<T>(record: WorkspaceRecord, read: (env:NodeJS.ProcessEnv)=>Promise<T>) {
+    if (record.kind!=='worktree') return read({});
+    const objects=(await this.git.checked(['rev-parse','--path-format=absolute','--git-path','objects'],this.options(record))).toString().trimEnd();
+    if (!path.isAbsolute(objects)) return fail('workspace.path','找不到登记工作树对应的 Git 对象目录。');
+    const root=await this.root();
+    const temporary=await mkdtemp(path.join(root,'comparison-'));
+    try {
+      return await read({GIT_OBJECT_DIRECTORY:temporary,GIT_ALTERNATE_OBJECT_DIRECTORIES:JSON.stringify(objects.split(path.sep).join('/'))});
+    } finally {
+      if(path.dirname(temporary)!==root) fail('workspace.path','临时对象目录登记有误。');
+      await rm(temporary,{recursive:true,force:true});
+    }
+  }
+  private async changes(record: WorkspaceRecord, liveCopy = false, env?:NodeJS.ProcessEnv, needTree=false): Promise<{ result: WorkspaceChanges; tree: string }> {
     if (!record.baseRef) return fail('workspace.base', '工作副本没有可比较的基准。');
-    const opts = this.options(record);
+    const opts = {...this.options(record),env};
     const useSnapshot = record.kind === 'copy' && !liveCopy;
     const current = useSnapshot ? record.snapshotFiles.filter(f => !consolePath(f.path)) : await this.currentFiles(record);
     // git 内容指纹让外部编辑立即失效；copy 以最新快照为准，快照完成即失效。
     const fingerprint = JSON.stringify([record.baseRef, record.snapshotAfter, current.map(f => [f.path, f.hash, f.size])]);
     const cached = this.changesCache.get(record.taskId);
-    if (cached && cached.until > Date.now() && cached.fingerprint === fingerprint) return cached.value;
-    const tree = useSnapshot ? record.snapshotAfter! : await this.buildTree(record, current);
+    if (!needTree && cached && cached.until > Date.now() && cached.fingerprint === fingerprint) return cached.value;
+    if(record.kind==='worktree' && !env) return this.comparisonObjects(record, objects=>this.changes(record,liveCopy,objects));
+    const tree = useSnapshot ? record.snapshotAfter! : await this.buildTree(record, current,env);
     const baseEntries = (await this.git.checked(['ls-tree','-rlz', record.baseRef], opts)).toString().split('\0').filter(Boolean);
     const baseSizes = new Map<string, number>();
     for (const entry of baseEntries) {
@@ -438,6 +456,96 @@ export class WorkspaceManager {
   diff(taskId: string): Promise<WorkspaceChanges> {
     return this.exclusive(taskId, async () => (await this.changes(await this.checkedRecord(taskId))).result);
   }
+  /** 检查点单独核对原始字节，包括 git 忽略的环境文件；不复用显示改动的哈希缓存。 */
+  private async checkpointFiles(record: WorkspaceRecord, previous: readonly WorkspaceFile[] = []) {
+    this.hashCaches.delete(record.taskId);
+    const files = await this.currentFiles(record);
+    const seen = new Set(files.map(file => file.path));
+    const names = previous.map(file => file.path);
+    if (record.kind === 'worktree') {
+      const ignored = await this.git.checked(['ls-files','--others','--ignored','--exclude-standard','-z','--',':(icase,glob)**/.env',':(icase,glob)**/.env.*'], this.options(record));
+      names.push(...ignored.toString().split('\0').filter(Boolean));
+    }
+    for (const name of new Set(names)) {
+      if (seen.has(name) || consolePath(name)) continue;
+      try { files.push(await fileInfo(record.path, name)); }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
+    }
+    return files.sort((a,b) => a.path.localeCompare(b.path));
+  }
+
+  createCheckpoint(taskId: string, ordinal: number) {
+    return this.exclusive(taskId, async () => {
+      if (!Number.isSafeInteger(ordinal) || ordinal < 1) throw Errors.badRequest('检查点序号无效');
+      const record = await this.checkedRecord(taskId);
+      if (record.state !== 'ready') throw Errors.invalidState('工作副本尚未准备好');
+      const files = await this.checkpointFiles(record);
+      const ref = 'refs/aic/checkpoints/' + taskId + '/' + ordinal;
+      const index = path.join(await this.root(), 'workspace-index-' + randomUUID());
+      const opts = { ...this.options(record), env: { GIT_INDEX_FILE: index, GIT_AUTHOR_NAME: 'AI Console',
+        GIT_AUTHOR_EMAIL: 'snapshot@ai-console.local', GIT_COMMITTER_NAME: 'AI Console', GIT_COMMITTER_EMAIL: 'snapshot@ai-console.local' } };
+      try {
+        await this.git.checked(['read-tree','--empty'], opts);
+        const entries: string[] = [];
+        for (const file of files) {
+          if (environmentPath(file.path) || file.size > SNAPSHOT_FILE_LIMIT) continue;
+          const local = await safePath(record.path, file.path);
+          const data = await readFile(local);
+          if (createHash('sha256').update(data).digest('hex') !== file.hash) fail('workspace.changed','生成检查点期间文件已变化。');
+          const oid = (await this.git.checked(['hash-object','-w','--stdin','--no-filters'], { ...opts, input: data })).toString().trim();
+          const mode = (await lstat(local)).mode & 0o111 ? '100755' : '100644';
+          entries.push(mode + ' ' + oid + '\t' + workspaceRelative(file.path) + '\0');
+        }
+        if (entries.length) await this.git.checked(['update-index','-z','--index-info'], { ...opts, input: entries.join('') });
+        const tree = (await this.git.checked(['write-tree'], opts)).toString().trim();
+        const oid = (await this.git.checked(['commit-tree', tree, '-m','交接检查点 ' + ordinal],opts)).toString().trim();
+        if (!equivalent(files, await this.checkpointFiles(record))) fail('workspace.changed','生成检查点期间文件已变化。');
+        await this.git.checked(['update-ref',ref,oid,'0'.repeat(oid.length)],opts);
+        try { this.db.run('INSERT INTO handoff_checkpoints(task_id,ref,oid,manifest_json) VALUES(?,?,?,?)',taskId,ref,oid,JSON.stringify(files)); }
+        catch (error) { await this.git.checked(['update-ref','-d',ref,oid],opts); throw error; }
+        return ref;
+      } finally {
+        await rm(index,{force:true}); await rm(index + '.lock',{force:true});
+      }
+    });
+  }
+
+  private async registeredCheckpoint(record: WorkspaceRecord, ref: string) {
+    const row = this.db.get<{oid:string; manifest_json:string}>('SELECT oid,manifest_json FROM handoff_checkpoints WHERE task_id=? AND ref=?',record.taskId,ref);
+    if (!row) throw Errors.notFound('找不到这个任务的检查点');
+    const oid = (await this.git.checked(['rev-parse','--verify',ref],this.options(record))).toString().trim();
+    if (oid !== row.oid) throw Errors.invalidState('检查点引用已经变化');
+    return {oid, files:JSON.parse(row.manifest_json) as WorkspaceFile[]};
+  }
+
+  /** 不传修订标识只生成确认清单；实际恢复前重新计算，确保按用户看到的版本操作。 */
+  checkpointRestore(taskId: string, ref: string, confirmedRevision?: string) {
+    return this.exclusive(taskId, async () => {
+      const record = await this.checkedRecord(taskId);
+      const snapshot = await this.registeredCheckpoint(record,ref);
+      const inspect = () => this.checkpointFiles(record,snapshot.files);
+      const current = await inspect();
+      const changed = this.changedPaths(snapshot.files,current);
+      const before = new Map(snapshot.files.map(file => [file.path,file]));
+      const after = new Map(current.map(file => [file.path,file]));
+      const skipped = changed.filter(name => environmentPath(name) || Math.max(before.get(name)?.size ?? 0, after.get(name)?.size ?? 0) > SNAPSHOT_FILE_LIMIT);
+      const excluded = new Set(skipped);
+      const files = changed.filter(name => !excluded.has(name));
+      const revision = createHash('sha256').update(JSON.stringify([ref,snapshot.oid,changed.map(name => [name,after.get(name)?.hash ?? null])])).digest('hex');
+      if (confirmedRevision !== undefined) {
+        if (revision !== confirmedRevision) throw Errors.invalidState('工作副本已变化，请重新查看恢复清单');
+        if (files.length) await this.transferFiles(record,record.path,current,files,async name => {
+          const file = before.get(name);
+          if (!file) return null;
+          const data = await this.git.checked(['cat-file','blob',snapshot.oid + ':' + workspaceRelative(name)],{...this.options(record),maxOutput:file.size + 1});
+          if (createHash('sha256').update(data).digest('hex') !== file.hash) fail('workspace.changed','检查点内容与清单不符。');
+          return data;
+        },async () => { this.invalidate(taskId); },[],inspect);
+      }
+      return {files,skipped,revision};
+    });
+  }
+
   async checkpointFile(taskId:string,checkpoint:string,name:string):Promise<string> {
     const relative=workspaceRelative(name), parts=relative.toLowerCase().split('/');
     if(parts.some(p=>['.git','.aic','.claude','.codex','.codebuddy','.workbuddy','.zcode'].includes(p))) throw Errors.forbidden('历史查询只读取项目文件');
@@ -445,8 +553,10 @@ export class WorkspaceManager {
     return this.exclusive(taskId,async()=>{
       const record=await this.checkedRecord(taskId);
       const opts=this.options(record);
+      const snapshot=await this.registeredCheckpoint(record,checkpoint);
+      if(environmentPath(relative) && snapshot.files.some(file=>file.path===relative)) return '（环境文件内容已打码）';
       // 只查固化的树，普通文件才能读取，绝不打开当前磁盘路径或跟随仓库链接。
-      const entry=await this.git.checked(['ls-tree','-lz',checkpoint,'--',':(literal)'+relative],opts);
+      const entry=await this.git.checked(['ls-tree','-lz',snapshot.oid,'--',':(literal)'+relative],opts);
       const match=/^(100644|100755) blob ([a-f0-9]{40,64}) +(\d+)\t([\s\S]+)\0$/.exec(entry.toString());
       if(!match || match[4]!==relative) throw Errors.notFound('检查点内没有这个普通文件');
       if(parts.some(p=>p==='.env'||p.startsWith('.env.'))) return '（环境文件内容已打码）';
@@ -477,20 +587,23 @@ export class WorkspaceManager {
     workspaceRelative(relative);
     return this.exclusive(taskId, async () => {
       const record = await this.checkedRecord(taskId);
-      const { result, tree } = await this.changes(record);
+      return this.comparisonObjects(record,env=>this.patchFor(record,relative,env));
+    });
+  }
+  private async patchFor(record:WorkspaceRecord, relative:string, env:NodeJS.ProcessEnv):Promise<WorkspaceFileDiff> {
+      const { result, tree } = await this.changes(record,false,env,record.kind==='worktree');
       const file = result.files.find(f => f.path === relative);
       if (!file) return fail('workspace.file', '该文件不在任务改动列表中。');
       if (file.binary || file.tooLarge) return { file, patch: null };
       try {
         const patch = await this.git.checked(['diff','--no-ext-diff','--no-textconv','--find-renames',record.baseRef!,tree,'--', ...(file.oldPath ? [file.oldPath] : []), file.path], {
-          ...this.options(record), maxOutput: FILE_DIFF_LIMIT, env: { GIT_LITERAL_PATHSPECS: '1' },
+          ...this.options(record), maxOutput: FILE_DIFF_LIMIT, env: { ...env,GIT_LITERAL_PATHSPECS: '1' },
         });
         return { file, patch: patch.toString('utf8') };
       } catch (e) {
         if (e instanceof GitError && e.kind === 'output_limit') return { file: { ...file, tooLarge: true }, patch: null };
         throw e;
       }
-    });
   }
 
   restoreFile(taskId: string, relative: string): Promise<WorkspaceChanges> {
@@ -624,12 +737,11 @@ export class WorkspaceManager {
     if(reply.files.length!==files.length)fail('workspace.recovery','文件宿主返回的清单不完整，已保留恢复材料。');
   }
   /** 备份与候选内容先放在数据目录；校验整批后才写目标，异常时仅恢复本次已写入的文件。 */
-  private async transferFiles(record: WorkspaceRecord, targetRoot: string, expected: WorkspaceFile[], names: string[], source: (name: string) => Promise<Buffer | string | null>, done: () => Promise<void>, legacyFiles: readonly string[] = []) {
+  private async transferFiles(record: WorkspaceRecord, targetRoot: string, expected: WorkspaceFile[], names: string[], source: (name: string) => Promise<Buffer | string | null>, done: () => Promise<void>, legacyFiles: readonly string[] = [], inspect = () => enumerate(targetRoot,record.ignoreGlobs,true,legacyFiles)) {
     const privateRoot=await this.root(); const transfers=await safePath(privateRoot,'workspace-transfers',true);await mkdir(transfers,{recursive:true});
     const temporary=await mkdtemp(path.join(transfers,record.taskId+'-'));
     const saved=new Map<string,{backup:string|null; prepared:string|null; expected:string|null; result:string|null}>();
     const written: string[]=[]; const createdDirs: string[]=[]; let keep=false;
-    const inspect=()=>enumerate(targetRoot,record.ignoreGlobs,true,legacyFiles);
     const check=async(name:string,hash:string|null)=>{
       try { const info=await fileInfo(targetRoot,name); if(info.hash!==hash) fail('workspace.changed','目标文件已变化，停止操作。'); }
       catch(e) { if((e as NodeJS.ErrnoException).code==='ENOENT' && hash===null) return; throw e; }
@@ -921,6 +1033,10 @@ export class WorkspaceManager {
         const block = list.split('\0\0').find(x => x.startsWith(`worktree ${record.path.split(path.sep).join('/')}\0`) || x.startsWith(`worktree ${record.path}\0`));
         if (!block?.split('\0').includes(`branch refs/heads/${record.branch}`)) fail('workspace.registration', 'git 工作副本登记不匹配，已停止删除。');
         record.removalRef=(await this.git.checked(['rev-parse','--verify',`refs/heads/${record.branch}`],{cwd:record.projectPath})).toString().trim();
+        for (const item of this.db.all<{ref:string;oid:string}>('SELECT ref,oid FROM handoff_checkpoints WHERE task_id=?',taskId)) {
+          await this.git.checked(['update-ref','-d',item.ref,item.oid],this.options(record));
+          this.db.run('DELETE FROM handoff_checkpoints WHERE task_id=? AND ref=?',taskId,item.ref);
+        }
         record.state = 'removing'; this.save(record);
         await this.git.checked(['worktree','remove','--force',record.path], { cwd: record.projectPath });
         await this.git.checked(['update-ref','-d',`refs/heads/${record.branch}`,record.removalRef], { cwd: record.projectPath });

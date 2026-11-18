@@ -287,6 +287,14 @@ const MIGRATIONS: string[] = [
   `CREATE TABLE handoff_path_aliases (
      task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, digest TEXT NOT NULL, ordinal INTEGER NOT NULL,
      PRIMARY KEY(task_id,digest), UNIQUE(task_id,ordinal));`,
+  // v23：检查点只登记本任务引用与文件摘要；交接草稿保留实际发送版本。
+  `CREATE TABLE handoff_checkpoints (
+     task_id TEXT NOT NULL REFERENCES workspace_records(task_id) ON DELETE CASCADE, ref TEXT PRIMARY KEY,
+     oid TEXT NOT NULL, manifest_json TEXT NOT NULL);
+   ALTER TABLE handoffs ADD COLUMN state TEXT NOT NULL DEFAULT 'sent';
+   ALTER TABLE handoffs ADD COLUMN ordinal INTEGER;
+   ALTER TABLE handoffs ADD COLUMN request_json TEXT;
+   CREATE UNIQUE INDEX idx_handoffs_ordinal ON handoffs(task_id,ordinal);`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

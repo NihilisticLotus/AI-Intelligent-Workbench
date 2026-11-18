@@ -20,7 +20,8 @@ import { WorkspaceManager, WorkspaceError } from './workspaces';
 import { GitError } from './git';
 import { PermissionBroker } from './permission-rules';
 import { TaskMemory } from './task-memory';
-import type { HandoffTarget } from '@aic/protocol';
+import type { HandoffRecord, HandoffSendOptions, HandoffTarget, PromptInput } from '@aic/protocol';
+import type { HandoffExecution } from './handoff/execution';
 import type { HistoryAccess } from './handoff/history-access';
 import { taskSummaryBody, limitTaskSummary } from './task-summary';
 import type { PermissionOperation, PermissionContext, AlwaysAllowConfirmation, PermissionRulePreview } from '@aic/protocol';
@@ -94,11 +95,13 @@ class SlotBusyError extends Error {
 export class TaskService {
   readonly memory: TaskMemory;
   history?: HistoryAccess;
+  handoffs?: HandoffExecution;
   private summaryJobs = new Map<string, Promise<void>>();
   private dirtySummaries = new Set<string>();
   savedSecrets: (content: string) => Promise<string[]> = async () => [];
   readonly permissions: PermissionBroker;
   private runtimes = new Map<string, Runtime>();
+  private parkedSources = new Map<string, Runtime>();
   private starting = new Map<string, Promise<Runtime>>();
   /**
    * 每个任务当前回合的 AbortController：startTurn 时同步写入、回合结束时删除。
@@ -199,6 +202,15 @@ export class TaskService {
     this.lastActivity = maxAct;
     const stale = this.db.all<{ id: string }>("SELECT id FROM tasks WHERE status IN ('running', 'waiting', 'queued')");
     const approvals = this.db.all<{ id: string }>("SELECT id FROM approvals WHERE status = 'pending'");
+    // Gateway 在目标首轮中退出：恢复任务选择，不自动重发用户消息或再次占用预算。
+    this.db.tx(()=>{
+      const interrupted=this.db.all<{id:string;task_id:string;request_json:string}>("SELECT id,task_id,request_json FROM handoffs WHERE state='prepared' AND to_session_id IS NOT NULL");
+      for(const item of interrupted) {
+        const source=JSON.parse(item.request_json).source as Pick<TaskRow,'agent'|'model'|'effort'|'profile_id'> | undefined;
+        if(source)this.db.run("UPDATE tasks SET agent=?,model=?,effort=?,profile_id=?,status='interrupted' WHERE id=?",source.agent,source.model,source.effort,source.profile_id,item.task_id);
+        this.db.run("UPDATE handoffs SET state='failed' WHERE id=?",item.id);
+      }
+    });
     for (const a of approvals) this.finishApproval(a.id, 'expired', null, null);
     for (const t of stale) this.setStatus(t.id, 'interrupted');
     this.db.run("UPDATE sessions SET status = 'ended', ended_at = ? WHERE status = 'active'", now());
@@ -622,8 +634,8 @@ export class TaskService {
 
   private host(taskId: string, sessionId: string, secrets: string[] = [], redactor = new StreamRedactor(secrets)): SessionHost {
     return {
-      update: (u) => this.onUpdate(taskId, sessionId, u, secrets, redactor),
-      requestPermission: (req, signal) => this.onPermission(taskId, sessionId, secrets.length ? {
+      update: (u) => { if(this.parkedSources.get(taskId)?.sessionId!==sessionId)this.onUpdate(taskId, sessionId, u, secrets, redactor); },
+      requestPermission: (req, signal) => this.parkedSources.get(taskId)?.sessionId===sessionId ? Promise.resolve({outcome:'cancelled'}) : this.onPermission(taskId, sessionId, secrets.length ? {
         ...req, title: redactExact(req.title, secrets), reason: redactExact(req.reason, secrets), detail: redactExact(req.detail, secrets),
         ...(req.operation?{operation:{...req.operation,command:req.operation.command===null?null:redactExact(req.operation.command,secrets),paths:req.operation.paths.map(p=>redactExact(p,secrets)),complete:req.operation.complete&&!secrets.some(secret=>JSON.stringify(req.operation).includes(secret))}}:{}),
       } : req, signal),
@@ -746,14 +758,18 @@ export class TaskService {
   private async dropRuntime(taskId: string, reason: string) {
     const rt = this.runtimes.get(taskId);
     if (!rt) return;
+    await this.closeRuntime(taskId,rt,reason);
+    if(this.runtimes.get(taskId)===rt)this.runtimes.delete(taskId);
+  }
+
+  private async closeRuntime(taskId:string,rt:Runtime,reason:string) {
     rt.closing = true;
     try { await rt.conn.close(); } catch {
-      if (this.getRow(taskId).agent === 'independent') {
+      if (this.db.get("SELECT 1 FROM sessions WHERE id=? AND agent_id='independent'",rt.sessionId)) {
         rt.closing = false; this.independentRuntime?.requireReview(taskId);
         throw Errors.invalidState('独立会话未可靠收尾，请先核对中断记录');
       }
     }
-    this.runtimes.delete(taskId);
     rt.release();
     this.endSession(taskId, rt.sessionId, reason);
   }
@@ -768,8 +784,10 @@ export class TaskService {
    * 回合进行中 → 由 runTurn 决定状态；空闲 → 状态不变。立即释放并发名额，未决审批一律作废
    */
   private onExit(taskId: string, rt: Runtime, killed = false) {
-    if (rt.closing || this.runtimes.get(taskId) !== rt) return;
-    this.runtimes.delete(taskId);
+    if (rt.closing) return;
+    if(this.parkedSources.get(taskId)===rt)this.parkedSources.delete(taskId);
+    else if(this.runtimes.get(taskId)===rt)this.runtimes.delete(taskId);
+    else return;
     rt.release();
     for (const p of [...this.pending.values()]) {
       if (p.approval.sessionId !== rt.sessionId) continue;
@@ -809,19 +827,23 @@ export class TaskService {
   }
 
   private async startRuntime(taskId: string, signal?: AbortSignal, opts: {
-    strictResume?: boolean; noQueue?: boolean; handoff?: {id: string; parent: string | null; target: HandoffTarget};
+    strictResume?: boolean; noQueue?: boolean; returnTo?:{sessionId:string;target:HandoffTarget;profileId:string|null}; handoff?: {id: string; parent: string | null; target: HandoffTarget};
   } = {}): Promise<Runtime> {
     const task = this.getRow(taskId);
-    const next = opts.handoff?.target;
-    const row = next ? { ...task, agent: next.agent, profile_id: null, model: next.model ?? null, effort: next.effort ?? null } : task;
+    const next = opts.handoff?.target??opts.returnTo?.target;
+    const row = next ? { ...task, agent: next.agent, profile_id: opts.returnTo?.profileId??null, model: next.model ?? null, effort: next.effort ?? null } : task;
     if (row.agent === 'independent') {
       if (!this.independentRuntime) throw Errors.invalidState('独立 Agent 尚未装配');
       const project = this.db.get<{ path: string }>('SELECT path FROM projects WHERE id=?', row.project_id);
       if (!project) throw Errors.notFound('找不到任务的项目');
-      const previous = this.db.get<{ id: string }>('SELECT id FROM sessions WHERE task_id=? AND agent_id=? ORDER BY started_at DESC LIMIT 1', taskId, row.agent);
+      const previous = opts.handoff ? undefined : this.db.get<{ id: string }>('SELECT id FROM sessions WHERE task_id=? AND agent_id=? AND (? IS NULL OR id=?) ORDER BY started_at DESC,rowid DESC LIMIT 1', taskId, row.agent,opts.returnTo?.sessionId??null,opts.returnTo?.sessionId??null);
+      if(opts.returnTo && !previous)throw Errors.notRecoverable('原独立会话不存在');
       const sessionId = previous?.id ?? newId('s');
-      if (!previous) this.db.run("INSERT INTO sessions(id,task_id,agent_id,model,agent_session_id,status,started_at) VALUES (?,?,'independent',?,?,'active',?)", sessionId, taskId, row.model, sessionId, now());
-      const conn = await this.independentRuntime.open(taskId, sessionId, await this.runtimePath(taskId), row.permission_level, this.host(taskId, sessionId), row.workspace_kind === 'worktree' || row.workspace_kind === 'copy');
+      if (!previous) this.db.run("INSERT INTO sessions(id,task_id,agent_id,model,agent_session_id,parent_session_id,handoff_id,status,started_at) VALUES (?,?,'independent',?,?,?,?,'active',?)", sessionId, taskId, row.model, sessionId,opts.handoff?.parent??null,opts.handoff?.id??null, now());
+      const conn = await this.independentRuntime.open(taskId, sessionId, await this.runtimePath(taskId), row.permission_level, this.host(taskId, sessionId), row.workspace_kind === 'worktree' || row.workspace_kind === 'copy').catch(error=>{
+        if(!previous)this.endSession(taskId,sessionId,'failed');
+        throw error;
+      });
       if (signal?.aborted) { await conn.close(); throw new AbortError(); }
       this.db.run("UPDATE sessions SET status='active',ended_at=NULL,model=? WHERE id=?", row.model, sessionId);
       this.events.append({ type: 'session.started', taskId, sessionId, data: { agent: row.agent, model: row.model, resumed: !!previous } });
@@ -853,13 +875,14 @@ export class TaskService {
       // 恢复不了时适配器会新建会话并提示“Agent 不记得之前的对话”，不会悄悄丢掉上下文
       const prev = opts.handoff ? undefined : this.db.get<{ id: string; agent_session_id: string; profile_id: string | null; caps_json: string | null }>(
         `SELECT id, agent_session_id, profile_id, caps_json FROM sessions WHERE task_id = ? AND agent_id = ? AND agent_session_id IS NOT NULL
-         ORDER BY started_at DESC LIMIT 1`,
-        taskId, row.agent,
+         AND (? IS NULL OR id=?) ORDER BY started_at DESC,rowid DESC LIMIT 1`,
+        taskId, row.agent,opts.returnTo?.sessionId??null,opts.returnTo?.sessionId??null,
       );
       if (a.usesNativeConfig && prev?.profile_id && prev.profile_id !== profile?.id) {
         throw Errors.nativeConfiguration('这个旧任务曾使用工作台替换的认证，已停止继续调用', '请保留历史并用该软件自身配置新建任务；不会自动改用其他账号计费');
       }
-      const resume = a.real && prev ? { agentSessionId: prev.agent_session_id } : undefined;
+      if(opts.returnTo && !prev)throw Errors.notRecoverable('原会话没有原生恢复标识');
+      const resume = (a.real || opts.returnTo) && prev ? { agentSessionId: prev.agent_session_id } : undefined;
       // H1：上次的会话不能在会话里换模型时，启动时就指定模型
       const launchModel = !!(a.real && a.launchModel && row.model && this.modelSwitchOf(prev?.caps_json ?? null, row.agent, profile?.id ?? null) === 'none');
       const history = opts.handoff && this.history?.serverFor({ taskId, sessionId, handoffId: opts.handoff.id });
@@ -873,6 +896,7 @@ export class TaskService {
         ...(resume ? { resume } : {}), ...(signal ? { signal } : {}), ...(launchModel ? { launchModel: true } : {}),
       });
       opening = conn;
+      if(opts.returnTo && !conn.resumed)throw Errors.notRecoverable('原会话无法原生恢复');
       if (opts.strictResume && resume && !conn.resumed) {
         throw Errors.notRecoverable('换账号后原来的会话找不到了', '同一个 Agent 换账号需要交接，会在之后的版本提供；现在可以换回原来的账号');
       }
@@ -880,7 +904,7 @@ export class TaskService {
       const caps = await a.probeCapabilities(conn);
       // Agent 实际用的模型和任务记录不一致（例如没能下发保存的模型）：以 Agent 为准写回，界面不再显示一个没生效的模型
       const actual = a.real ? conn.config?.() ?? null : null;
-      if (!opts.handoff && actual && row.model !== null && actual.model !== row.model) {
+      if (!next && actual && row.model !== null && actual.model !== row.model) {
         this.db.run('UPDATE tasks SET model = ?, updated_at = ? WHERE id = ?', actual.model, now(), taskId);
       }
       this.db.run(
@@ -922,17 +946,17 @@ export class TaskService {
   }
 
   /** 发一条用户消息并在后台跑一轮 */
-  private startTurn(taskId: string, text: string, attachments: AttachmentInfo[] = [], inputs: PromptAttachment[] = []): string {
+  private startTurn(taskId: string, text: string, attachments: AttachmentInfo[] = [], inputs: PromptAttachment[] = [], handoff?: {record:HandoffRecord;original:TaskRow;input:PromptInput}): string {
     const messageId = newId('m');
     this.touch(taskId, true);
-    this.events.append({ type: 'message.user', taskId, sessionId: this.runtimes.get(taskId)?.sessionId ?? null, data: { messageId, text, ...(attachments.length ? { attachments } : {}) } });
+    if(text || attachments.length)this.events.append({ type: 'message.user', taskId, sessionId: this.runtimes.get(taskId)?.sessionId ?? null, data: { messageId, text, ...(attachments.length ? { attachments } : {}) } });
     // 同步占住“忙碌”状态：避免两条 prompt 同时进来，也让会话启动期间的 cancel 能找到这个回合
     this.attachments?.markUsed(taskId, attachments.map((a) => a.id));
     const abort = new AbortController();
     this.turnAborts.set(taskId, abort);
     this.turnActivity.set(taskId, { startedAt: now(), action: '正在准备运行' });
     this.setStatus(taskId, 'running');
-    const turn = this.runTurn(taskId, messageId, text, abort, inputs);
+    const turn = this.runTurn(taskId, messageId, text, abort, inputs,handoff);
     this.turns.add(turn);
     void turn.finally(() => this.turns.delete(turn));
     return messageId;
@@ -948,7 +972,7 @@ export class TaskService {
     this.events.append({ type: 'error', taskId, sessionId, data: { error } });
   }
 
-  private async runTurn(taskId: string, messageId: string, text: string, abort: AbortController, attachments: PromptAttachment[]) {
+  private async runTurn(taskId: string, messageId: string, text: string, abort: AbortController, attachments: PromptAttachment[], handoff?: {record:HandoffRecord;original:TaskRow;input:PromptInput}) {
     let rt: Runtime | undefined;
     const source = this.getRow(taskId).agent === 'independent' ? 'independent' : 'agent';
     let usage = emptyUsage(source);
@@ -958,6 +982,7 @@ export class TaskService {
     let releaseDemo: (() => void) | undefined;
     let snapshotStarted = false;
     let snapshotFailed = false;
+    let sent = false;
     const finishSnapshot = async () => {
       if (watchdog) clearInterval(watchdog);
       if (!snapshotStarted || !this.workspaces) return;
@@ -978,7 +1003,7 @@ export class TaskService {
         await this.workspaces.snapshot(taskId, '回合开始前'); this.syncWorkspace(taskId); snapshotStarted = true; void this.refreshChanges(taskId);
       }
       rt = await this.ensureRuntime(taskId, abort.signal);
-      const inline = await this.workspaces?.artifactConflicts(taskId,'.aic/TASK.md');
+      const inline = !handoff && await this.workspaces?.artifactConflicts(taskId,'.aic/TASK.md');
       const promptText = inline ? (await this.taskSummaryText(taskId))+'\n## 本轮用户消息\n\n'+text : text;
       if (abort.signal.aborted) throw new AbortError();
       this.turnActivity.set(taskId, { startedAt: now(), action: '正在处理任务' }); this.emitUpdated(taskId);
@@ -1007,7 +1032,7 @@ export class TaskService {
         }, Math.min(1000, this.noResponseNoticeMs, this.noResponseCancelMs));
         watchdog.unref?.();
       });
-      const prompt = rt.conn.prompt({ text: promptText, attachments }, abort.signal);
+      const prompt = rt.conn.prompt({ ...(handoff?.input ?? {text:promptText}), attachments }, abort.signal);
       let r: Awaited<typeof prompt>;
       try { r = await Promise.race([prompt, timeout]); }
       catch (error) {
@@ -1017,6 +1042,16 @@ export class TaskService {
       rt.lastActive = now();
       if (rt.redactor.active) this.flushRedactor(taskId, rt.sessionId, rt.redactor);
       if (r.usage && !abort.signal.aborted && r.stopReason !== 'cancelled' && r.stopReason !== 'error') usage = { ...r.usage, source };
+      if(handoff && !abort.signal.aborted && !['error','cancelled'].includes(r.stopReason)) {
+        const correction=await this.handoffs!.restatement(taskId,rt.sessionId,handoff.record);
+        if(correction) {
+          this.events.append({type:'session.notice',taskId,sessionId:rt.sessionId,data:{level:'warn',text:correction}});
+          const follow=await Promise.race([rt.conn.prompt({text:correction},abort.signal),timeout]);
+          if(follow.usage)recordTurnUsage(this.db,this.events,taskId,rt.sessionId,newId('m'),{...follow.usage,source});
+          r=follow;
+          this.db.run("UPDATE handoffs SET quality_json=json_set(quality_json,'$.restatement.corrected',json('true')) WHERE id=?",handoff.record.id);
+        }
+      }
       // 审批超时：不放行，本轮结束后任务暂停（不进入待验收）
       const timedOut = this.approvalTimedOut.has(taskId);
       if (timedOut && r.stopReason !== 'error') {
@@ -1024,6 +1059,17 @@ export class TaskService {
       }
       await finishSnapshot();
       await this.refreshChanges(taskId);
+      if (handoff && !abort.signal.aborted && !['error','cancelled'].includes(r.stopReason)) {
+        this.db.tx(()=>{
+          this.db.run("UPDATE handoffs SET state='sent' WHERE task_id=? AND id=?",taskId,handoff.record.id);
+          this.db.run("UPDATE handoffs SET state='returned' WHERE task_id=? AND id=(SELECT json_extract(request_json,'$.reverseOf') FROM handoffs WHERE id=?)",taskId,handoff.record.id);
+        });
+        const updated=this.handoffs!.get(taskId,handoff.record.id);
+        this.events.append({type:'session.handoff',taskId,sessionId:rt.sessionId,data:{handoffId:updated.id,fromSession:updated.document.meta.from.sessionId,
+          toSession:rt.sessionId,from:handoff.original.agent,to:updated.document.meta.to.agent,level:updated.level,quality:updated.quality}});
+        this.handoffs!.progress(taskId,updated.id,'send','done');
+        sent=true;
+      }
       this.setStatus(taskId, r.stopReason === 'cancelled' || timedOut ? 'paused' : r.stopReason === 'error' ? 'failed' : 'review');
     } catch (e) {
       try { await finishSnapshot(); } catch (error) { e = error; }
@@ -1055,6 +1101,11 @@ export class TaskService {
         this.setStatus(taskId, 'failed');
       }
     } finally {
+      if(handoff && !sent) await this.failedHandoff(taskId,handoff.record,handoff.original);
+      if(handoff && sent) {
+        const previous=this.parkedSources.get(taskId);
+        if(previous) {await this.closeRuntime(taskId,previous,'handoff');this.parkedSources.delete(taskId);}
+      }
       this.scheduleSummary(taskId);
       if (watchdog) clearInterval(watchdog);
       releaseDemo?.(); releaseProject?.();
@@ -1092,21 +1143,132 @@ export class TaskService {
     }
   }
 
-  async prompt(taskId: string, text: string, attachmentIds: string[] = []): Promise<{ taskId: string; messageId: string }> {
+  private async failedHandoff(taskId:string,record:HandoffRecord,original:TaskRow) {
+    try { if(this.runtimes.get(taskId)?.sessionId!==record.document.meta.from.sessionId) await this.dropRuntime(taskId,'handoff_failed'); }
+    finally {
+      const source=this.parkedSources.get(taskId);
+      if(source) {
+        this.parkedSources.delete(taskId);
+        if(!source.conn.isClosed?.()) {
+          source.lastActive=now();this.runtimes.set(taskId,source);this.secretsOf.set(taskId,source.secrets);
+        } else {source.release();this.endSession(taskId,source.sessionId,'closed');}
+      }
+      this.db.run('UPDATE tasks SET agent=?,model=?,effort=?,profile_id=? WHERE id=?',original.agent,original.model,original.effort,original.profile_id,taskId);
+      this.db.run("UPDATE handoffs SET state='failed' WHERE task_id=? AND id=?",taskId,record.id);
+      this.handoffs!.progress(taskId,record.id,'send','failed');
+      this.emitUpdated(taskId);
+    }
+  }
+
+  async prompt(taskId: string, text: string, attachmentIds: string[] = [], target?:HandoffTarget, options:HandoffSendOptions={},reverseOf?:string): Promise<{ taskId: string; messageId: string;pendingHandoffId?:string }> {
     const row = this.getRow(taskId);
     if (FINAL.includes(this.get(taskId).status)) throw Errors.invalidState('任务已经结束，不能继续发送消息');
     if(this.workspaces?.operation(taskId)?.state==='pending')throw Errors.invalidState('上次项目操作尚未确认完成，暂不能继续任务。');
     if (this.db.get('SELECT task_id FROM workspace_preparations WHERE task_id=?', taskId)) throw Errors.invalidState('工作副本尚未准备好，请先处理准备提示');
     if (this.isBusy(taskId)) throw Errors.invalidState('任务正在执行', '请等这一轮结束，或先点 [停止]', [{ label: '停止', action: 'task.cancel', args: { taskId } }]);
-    if (row.agent === 'independent') this.independentRuntime?.assertReady(taskId);
+    const destination=target?.agent??row.agent;
+    const switching=!!target && (destination!==row.agent || !!options.forceH2);
+    if (destination === 'independent') {
+      if(!this.db.get('SELECT 1 FROM independent_task_settings WHERE task_id=?',taskId))throw Errors.invalidState('请先填写这个任务的独立 Agent 服务、模型与预算');
+      this.independentRuntime?.assertReady(taskId);
+      if(switching && target) target={agent:destination,model:this.independentRuntime!.reference(taskId).modelId};
+    }
     const a = this.attachments?.resolve(taskId, attachmentIds) ?? { infos: [], inputs: [] };
-    const agent = this.agents.get(row.agent);
-    const info = row.agent === 'independent' ? this.independentRuntime?.info() : agent ? this.agentSvc?.info(agent) : undefined;
-    const configModels = this.runtimes.get(taskId)?.conn.config?.().models;
-    if (a.infos.some((x) => x.kind === 'image') && visionOf(info ? { ...info, models: configModels ?? info.models } : undefined, row.model) === false) {
+    const agent = this.agents.get(destination);
+    const info = destination === 'independent' ? this.independentRuntime?.info() : agent ? this.agentSvc?.info(agent) : undefined;
+    const configModels = switching?undefined:this.runtimes.get(taskId)?.conn.config?.().models;
+    if (a.infos.some((x) => x.kind === 'image') && visionOf(info ? { ...info, models: configModels ?? info.models } : undefined, switching?target?.model??null:row.model) === false) {
       throw new AppError(415, { code: ErrorCode.AttachmentUnsupported, message: (info?.displayName ?? row.agent) + ' · ' + (row.model ?? '当前模型') + ' 看不了图片', actions: [{ label: '换模型', action: 'task.switch_model', args: { taskId } }] });
     }
-    return { taskId, messageId: this.startTurn(taskId, text, a.infos, a.inputs) };
+    if (!switching || !target) return { taskId, messageId: this.startTurn(taskId, text, a.infos, a.inputs) };
+    if(!this.handoffs) throw Errors.invalidState('交接服务尚未就绪');
+    this.checkTaskPermission(destination,row.permission_level,!!this.workspaces?.get(taskId));
+    if(agent) this.checkPermission(agent,row.permission_level,!!this.workspaces?.get(taskId));
+    if(!agent && destination!=='independent') throw Errors.agentUnavailable('目标 Agent 不可用');
+    this.configuring.add(taskId);
+    try {
+      const outgoing=await this.handoffs.attachments(taskId,a.inputs,target);
+      const {record,pending}=await this.handoffs.prepare(taskId,target,text,attachmentIds,options,outgoing.values,reverseOf);
+      if(pending)return {taskId,messageId:record.id,pendingHandoffId:record.id};
+      let replacing=false;
+      try {
+        if(record.edited) await this.handoffs.publish(taskId,record);
+        const summary=await this.taskSummaryText(taskId);
+        const content=await this.handoffs.input(taskId,record,summary,text,outgoing);
+        this.handoffs.progress(taskId,record.id,'send','running');
+        const source=this.runtimes.get(taskId);
+        const capabilities=source && this.db.get<{caps_json:string|null}>('SELECT caps_json FROM sessions WHERE task_id=? AND id=?',taskId,source.sessionId);
+        const caps=capabilities?.caps_json ? JSON.parse(capabilities.caps_json) : null;
+        if(source && row.agent!=='independent' && !source.conn.isClosed?.() && !caps?.resume && !caps?.loadSession) {
+          this.parkedSources.set(taskId,source);
+          this.runtimes.delete(taskId);
+        } else await this.dropRuntime(taskId,'handoff');
+        replacing=true;
+        const rt=await this.startHandoffRuntime(taskId,record.id,target);
+        const input=rt.conn.caps?.prompt.embeddedContext ? content : {text:[...content.resources.map(resource=>resource.text),content.text].join('\n\n')};
+        const model=rt.conn.config?.().model??target.model??null;
+        this.db.tx(()=>{
+          this.db.run('UPDATE tasks SET agent=?,model=?,effort=?,profile_id=? WHERE id=?',destination,model,target.effort??null,rt.profileId,taskId);
+          this.db.run("UPDATE handoffs SET to_session_id=?,document_json=json_set(document_json,'$.meta.to.sessionId',?) WHERE task_id=? AND id=?",rt.sessionId,rt.sessionId,taskId,record.id);
+        });
+        await this.handoffs.publish(taskId,this.handoffs.get(taskId,record.id));
+        this.emitUpdated(taskId);
+        return {taskId,messageId:this.startTurn(taskId,text,a.infos,outgoing.files,{record,original:row,input})};
+      } catch(error) {
+        if(replacing) await this.failedHandoff(taskId,record,row);
+        else {this.db.run("UPDATE handoffs SET state='failed' WHERE id=?",record.id);this.handoffs.progress(taskId,record.id,'send','failed');}
+        throw error;
+      }
+    } finally {this.configuring.delete(taskId);}
+  }
+
+  private returnRecord(taskId:string,id:string) {
+    if(!this.handoffs)throw Errors.invalidState('交接服务尚未就绪');
+    const record=this.handoffs.get(taskId,id);
+    const task=this.get(taskId);
+    const latest=this.db.get<{id:string}>("SELECT id FROM handoffs WHERE task_id=? AND state='sent' ORDER BY ordinal DESC LIMIT 1",taskId);
+    if(record.state!=='sent' || latest?.id!==id || task.agent!==record.document.meta.to.agent || FINAL.includes(task.status)) throw Errors.invalidState('请从当前交接记录切回原 Agent');
+    if(this.isBusy(taskId))throw Errors.invalidState('请等当前回合结束，或先停止当前回合');
+    return record;
+  }
+
+  async previewReturn(taskId:string,id:string) {
+    const ref=this.returnRecord(taskId,id).document.meta.checkpoint;
+    if(!ref || !this.workspaces)throw Errors.invalidState('这个任务没有可恢复的工作副本检查点');
+    return this.workspaces.checkpointRestore(taskId,ref);
+  }
+
+  async returnHandoff(taskId:string,id:string,restoreRevision?:string,confirmation:HandoffSendOptions={}) {
+    const record=this.returnRecord(taskId,id);
+    const {from,checkpoint}=record.document.meta;
+    const original=from.sessionId ? this.db.get<{model:string|null;profile_id:string|null;caps_json:string|null}>('SELECT model,profile_id,caps_json FROM sessions WHERE id=? AND task_id=? AND agent_id=?',from.sessionId,taskId,from.agent) : undefined;
+    const target:HandoffTarget={agent:from.agent,...(original?.model?{model:original.model}:{})};
+    const caps=original?.caps_json?JSON.parse(original.caps_json):null;
+    this.configuring.add(taskId);
+    try {
+      this.checkTaskPermission(from.agent,this.getRow(taskId).permission_level,!!this.workspaces?.get(taskId));
+      if(from.agent==='independent')this.independentRuntime?.assertReady(taskId);
+      if(restoreRevision!==undefined) {
+        if(!checkpoint || !this.workspaces)throw Errors.invalidState('当前交接没有检查点');
+        await this.workspaces.checkpointRestore(taskId,checkpoint,restoreRevision);
+        await this.refreshChanges(taskId);
+      }
+      if(!confirmation.confirmedId && original && from.sessionId && (from.agent==='independent'||caps?.resume||caps?.loadSession)) {
+        await this.dropRuntime(taskId,'handoff_return');
+        try {
+          const rt=await this.startRuntime(taskId,undefined,{noQueue:true,returnTo:{sessionId:from.sessionId,target,profileId:original.profile_id}});
+          this.db.run('UPDATE tasks SET agent=?,model=?,effort=?,profile_id=? WHERE id=?',from.agent,rt.conn.config?.().model??original.model,rt.conn.config?.().effort??null,rt.profileId,taskId);
+          this.db.run("UPDATE handoffs SET state='returned' WHERE task_id=? AND id=?",taskId,id);
+          this.emitUpdated(taskId);
+          this.events.append({type:'session.notice',taskId,sessionId:rt.sessionId,data:{level:'info',text:'已切回原 Agent，原生会话已恢复（H1）。'}});
+          return {taskId,level:'H1' as const};
+        } catch(error) {
+          if(!(error instanceof AppError && error.body.code===ErrorCode.SessionNotRecoverable))throw error;
+        }
+      }
+    } finally {this.configuring.delete(taskId);}
+    // 无法原生恢复时，反向交接使用工作台说明；用户消息事件只记录真实输入。
+    return this.prompt(taskId,'',[],target,confirmation,id);
   }
 
   async cancel(taskId: string): Promise<void> {
@@ -1119,17 +1281,17 @@ export class TaskService {
   /** 独立任务的配置 / 恢复操作在整个异步收尾期间占住任务，防止并发发送。 */
   async updateIndependent(taskId: string, action: 'configure' | 'recover' | 'checkpoint', input: IndependentTaskOptions | { expectedRevision: number } | { throughSeq: number; summary: string; expectedTailHash: string }, expectedRevision?: number) {
     const row = this.getRow(taskId);
-    if (row.agent !== 'independent' || !this.independentRuntime) throw Errors.badRequest('这个任务不是独立 Agent 任务');
+    if ((row.agent !== 'independent' && action!=='configure') || !this.independentRuntime) throw Errors.badRequest('这个任务不是独立 Agent 任务');
     if (FINAL.includes(row.status) || this.isBusy(taskId)) throw Errors.invalidState('请在任务空闲且未结束时操作');
     this.configuring.add(taskId);
     try {
-      await this.dropRuntime(taskId, 'independent_config');
+      if(row.agent==='independent') await this.dropRuntime(taskId, 'independent_config');
       if (action === 'configure') this.independentRuntime.configure(taskId, input as IndependentTaskOptions, expectedRevision);
       else if (action === 'recover') await this.independentRuntime.acknowledge(taskId, (input as { expectedRevision: number }).expectedRevision);
       else this.independentRuntime.checkpoint(taskId, input as { throughSeq: number; summary: string; expectedTailHash: string });
       this.emitUpdated(taskId);
       // 输入框从会话事件推导当前模型；明确应用后立即覆盖旧 session.started。
-      if (action === 'configure') this.emitConfig(taskId, null, null);
+      if (action === 'configure' && row.agent==='independent') this.emitConfig(taskId, null, null);
       return this.independentRuntime.state(taskId);
     } finally { this.configuring.delete(taskId); }
   }
@@ -1142,7 +1304,7 @@ export class TaskService {
     const row = this.getRow(taskId);
     if (row.agent === 'independent') throw Errors.badRequest('请在独立任务配置中明确应用服务、模型与预算');
     if (opts.agent && opts.agent !== row.agent) {
-      throw Errors.agentUnavailable('暂时不能切换到其他 Agent', '跨 Agent 交接会在之后的版本提供；现在可以换模型或思考强度');
+      throw Errors.agentUnavailable('请在发送消息时切换 Agent', '选好目标 Agent 后发送下一条消息即可交接');
     }
     if (opts.profileId !== undefined && opts.profileId !== row.profile_id) await this.switchProfile(taskId, opts.profileId);
     if (opts.model === undefined && opts.effort === undefined) return this.get(taskId);
@@ -1429,8 +1591,9 @@ export class TaskService {
     for (const t of this.emitTimers.values()) clearTimeout(t);
     this.emitTimers.clear();
     for (const p of [...this.pending.values()]) p.cleanup();
-    const all = [...this.runtimes.entries()];
+    const all = [...this.runtimes.entries(),...this.parkedSources.entries()];
     this.runtimes.clear();
+    this.parkedSources.clear();
     await Promise.allSettled(all.map(async ([, rt]) => {
       rt.closing = true;
       await rt.conn.close().catch(() => {});

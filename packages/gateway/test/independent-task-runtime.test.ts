@@ -46,6 +46,21 @@ async function setup(respond: (n: number, body: any) => unknown = () => done('�
 }
 
 describe('正式独立任务的离线接口与闭环', () => {
+  it('独立会话与演示 Agent 双向交接，沿用同一预算且开启独立的新会话',async()=>{
+    const f=await setup(()=>done('已了解交接目标'));
+    const {id}=f.task;
+    await f.s.tasks.patch(id,{permission:'readonly'});
+    await f.s.tasks.prompt(id,'先说明任务');await f.s.tasks.idle();
+    await f.s.tasks.prompt(id,'交给演示继续',[],{agent:'fake'});await f.s.tasks.idle();
+    expect(f.s.tasks.get(id).agent).toBe('fake');
+    await f.s.tasks.prompt(id,'回到独立模型核对',[],{agent:'independent'});await f.s.tasks.idle();
+    expect(f.s.tasks.get(id).agent).toBe('independent');
+    expect(f.count()).toBe(2);
+    const sessions=f.s.db.all<{id:string;parent_session_id:string|null;handoff_id:string|null}>('SELECT * FROM sessions WHERE task_id=? ORDER BY started_at,rowid',id);
+    expect(sessions).toHaveLength(3);expect(sessions[2]?.parent_session_id).toBe(sessions[1]?.id);
+    expect(sessions[2]?.handoff_id).toBeTruthy();expect(JSON.stringify(f.bodies[1])).toContain('回到独立模型核对');
+    expect(f.state().budget.attemptedRequests).toBe(2);
+  },60000);
   it.each(['readonly','ask','workspace','full'] as const)('独立文件工具在 %s 档经统一规则决定',async permission=>{
     const f=await setup(n=>n===1?{choices:[{index:0,message:{role:'assistant',content:'',tool_calls:[{id:'auto-file',type:'function',function:{name:'create_file',arguments:JSON.stringify({path:'auto.txt',content:'自动权限测试',createParents:false})}}]},finish_reason:'tool_calls'}],usage:{prompt_tokens:5,completion_tokens:5}}:done('完成'),'separate_v2');
     await f.s.tasks.patch(f.task.id,{permission});await f.s.tasks.prompt(f.task.id,'验证文件权限');
@@ -332,7 +347,7 @@ describe('正式独立任务的离线接口与闭环', () => {
     const f = await setup(); f.s.independentRuntime.ledger.reserve(f.state().binding, { kind: 'model', requestHash: 'c'.repeat(64) });
     // 用 SQLite 的备份语句生成独立副本，避免读取实际用户数据。
     const file = path.join(temporary(), 'old.sqlite'); f.s.db.run('VACUUM INTO ?', file);
-    const old = new DatabaseSync(file); old.exec('DROP TABLE handoff_path_aliases; DROP TABLE handoffs; DROP TABLE workspace_artifacts; DROP TABLE task_memory_cursors; DROP TABLE task_memory; DROP TABLE permission_rules; DROP TABLE permission_rule_sets; DROP TABLE workspace_operations; DROP TABLE workspace_preparations; ALTER TABLE projects DROP COLUMN carry_globs; DROP TABLE workspace_records; ALTER TABLE tasks DROP COLUMN workspace_large_files; DROP TABLE saved_environments; DROP TABLE turn_usage; DROP TABLE independent_task_settings; ALTER TABLE independent_request_attempts DROP COLUMN binding_json; ALTER TABLE independent_request_attempts DROP COLUMN currency; ALTER TABLE independent_request_budgets DROP COLUMN revision; PRAGMA user_version=11;'); old.close();
+    const old = new DatabaseSync(file); old.exec('DROP TABLE handoff_checkpoints; DROP TABLE handoff_path_aliases; DROP TABLE handoffs; DROP TABLE workspace_artifacts; DROP TABLE task_memory_cursors; DROP TABLE task_memory; DROP TABLE permission_rules; DROP TABLE permission_rule_sets; DROP TABLE workspace_operations; DROP TABLE workspace_preparations; ALTER TABLE projects DROP COLUMN carry_globs; DROP TABLE workspace_records; ALTER TABLE tasks DROP COLUMN workspace_large_files; DROP TABLE saved_environments; DROP TABLE turn_usage; DROP TABLE independent_task_settings; ALTER TABLE independent_request_attempts DROP COLUMN binding_json; ALTER TABLE independent_request_attempts DROP COLUMN currency; ALTER TABLE independent_request_budgets DROP COLUMN revision; PRAGMA user_version=11;'); old.close();
     for (let i = 0; i < 2; i++) { const migrated = openDb(file); try {
       expect(migrated.get('PRAGMA user_version')).toEqual({ user_version: SCHEMA_VERSION });
       const row = migrated.get('SELECT binding_json,currency FROM independent_request_attempts')!;

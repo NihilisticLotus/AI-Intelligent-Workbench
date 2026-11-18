@@ -28,6 +28,7 @@ import { IndependentTaskRuntime } from './independent/task-runtime';
 import type { readMetadataJson } from './independent/metadata-http';
 import { TaskService } from './tasks';
 import { HistoryAccess } from './handoff/history-access';
+import { HandoffExecution } from './handoff/execution';
 import { Git } from './git';
 import { WorkspaceManager } from './workspaces';
 import { newId } from './util';
@@ -263,6 +264,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
     bootId,
   };
 
+  tasks.handoffs = new HandoffExecution(services);
   const webDist = opts.webDist ?? path.resolve(here, '../../../apps/web/dist');
   const app = createApp(services, { webDist });
   const server = createAdaptorServer({ fetch: app.fetch }) as Server;

@@ -27,7 +27,7 @@ function sanitizeDocument(source:HandoffDocument,r:HandoffRedactor):HandoffDocum
 }
 
 export async function previewHandoff(s:Services,id:string,target:HandoffTarget,options:{
-  narrative?:HandoffNarrative;forceH2?:boolean;checkpoint?:string;
+  narrative?:HandoffNarrative;forceH2?:boolean;checkpoint?:string;environment?:readonly string[];
 }={}):Promise<HandoffPreview> {
   const {document:raw,lines,marked,window}=await readHandoffState(s,id,target);
   const values:string[]=[];
@@ -35,7 +35,7 @@ export async function previewHandoff(s:Services,id:string,target:HandoffTarget,o
   for(const l of lines) values.push(l.text,l.output??'');
   if(options.narrative) values.push(...Object.values(options.narrative).flat());
   const keys=await s.secrets.forRedaction(values.join('\n'));
-  const envValues=environmentValues(lines.flatMap(line=>line.env && line.output ? [line.output] : []));
+  const envValues=[...environmentValues(lines.flatMap(line=>line.env && line.output ? [line.output] : [])),...(options.environment??[])];
   const paths=raw.files.changed.flatMap(file=>file.oldPath?[file.path,file.oldPath]:[file.path]);
   paths.push(...raw.files.read.map(file=>file.path));
   const aliases=pathAliases(s.db,id,envValues,paths);

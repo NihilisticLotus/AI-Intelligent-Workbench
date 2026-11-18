@@ -8,7 +8,7 @@ import { Errors } from '../util';
 import { parseQuery, readBody, type Env } from './app';
 import { taskUsage } from '../usage';
 import { taskFiles } from '../task-files';
-import { AddTaskConstraint, HandoffTarget } from '@aic/protocol';
+import { AddTaskConstraint, HandoffTarget, HandoffReturnBody } from '@aic/protocol';
 import { previewHandoff } from '../handoff/preview';
 
 export function taskRoutes(s: Services) {
@@ -18,6 +18,12 @@ export function taskRoutes(s: Services) {
   r.post('/tasks', async (c) => c.json(await s.tasks.create(await readBody(c, CreateTaskBody)), 201));
   r.get('/tasks/:id', (c) => c.json(s.tasks.get(c.req.param('id'))));
   r.post('/tasks/:id/handoff/preview', async c => c.json(await previewHandoff(s,c.req.param('id'),await readBody(c,HandoffTarget))));
+  r.get('/tasks/:id/handoff/:handoffId',c=>c.json(s.tasks.handoffs!.get(c.req.param('id'),c.req.param('handoffId'))));
+  r.get('/tasks/:id/handoff/:handoffId/restore',async c=>c.json(await s.tasks.previewReturn(c.req.param('id'),c.req.param('handoffId'))));
+  r.post('/tasks/:id/handoff/:handoffId/return',async c=>{
+    const {restoreRevision,...confirmation}=await readBody(c,HandoffReturnBody);
+    return c.json(await s.tasks.returnHandoff(c.req.param('id'),c.req.param('handoffId'),restoreRevision,confirmation));
+  });
   r.get('/tasks/:id/memory', c => c.json({items:s.tasks.memory.list(c.req.param('id'))}));
   r.post('/tasks/:id/memory', async c => {
     const id = c.req.param('id'), input = await readBody(c,AddTaskConstraint);

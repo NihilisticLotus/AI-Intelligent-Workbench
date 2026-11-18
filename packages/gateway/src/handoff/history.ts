@@ -69,23 +69,28 @@ function boundedText(input:string,maxBytes=HISTORY_BYTES) {
   }
 }
 
+export function outgoingRedactor(s:Services,taskId:string,rows=projectEvents(s,taskId),extraValues:readonly string[]=[]) {
+  const envOutputs=rows.filter(row=>row.env && row.type==='tool.output').map(row=>row.text);
+  for (const session of s.db.all<{id:string}>("SELECT id FROM sessions WHERE task_id=? AND agent_id='independent'",taskId)) {
+    const portable=independentLines(s.independentRuntime.portableEntries(taskId,session.id));
+    envOutputs.push(...portable.flatMap(line=>line.env && line.output ? [line.output] : []));
+  }
+  const environment=[...environmentValues(envOutputs),...extraValues];
+  const aliases=pathAliases(s.db,taskId,environment);
+  const clean=async(input:string,source?:string)=>{
+    const r=new HandoffRedactor([...await s.secrets.forRedaction(input),...s.tasks.sessionSecrets(taskId)],environment,aliases);
+    return r.text(input,source);
+  };
+  return {clean,aliases,environment};
+}
+
 export async function readHistory(s:Services,grant:HistoryGrant,q:HistoryQuery) {
   const {taskId,handoffId}=grant;
   const record=s.db.get<{document_json:string}>('SELECT document_json FROM handoffs WHERE task_id=? AND id=?',taskId,handoffId);
   if(!record) throw Errors.notFound('本任务没有这次交接');
   const stored=JSON.parse(record.document_json);
   const rows=projectEvents(s,taskId);
-  const envOutputs=rows.filter(row=>row.env && row.type==='tool.output').map(row=>row.text);
-  for (const session of s.db.all<{id:string}>("SELECT id FROM sessions WHERE task_id=? AND agent_id='independent'",taskId)) {
-    const portable=independentLines(s.independentRuntime.portableEntries(taskId,session.id));
-    envOutputs.push(...portable.flatMap(line=>line.env && line.output ? [line.output] : []));
-  }
-  const environment=environmentValues(envOutputs);
-  const aliases=pathAliases(s.db,taskId,environment);
-  const clean=async(input:string,source?:string)=>{
-    const r=new HandoffRedactor([...await s.secrets.forRedaction(input),...s.tasks.sessionSecrets(taskId)],environment,aliases);
-    return r.text(input,source);
-  };
+  const {clean,aliases,environment}=outgoingRedactor(s,taskId,rows);
   if(q.name==='get_file_at') {
     const found=s.db.get("SELECT 1 FROM handoffs WHERE task_id=? AND json_extract(document_json,'$.meta.checkpoint')=? LIMIT 1",taskId,q.arguments.checkpoint);
     if(!found) throw Errors.forbidden('只能读取本任务已经登记的检查点');

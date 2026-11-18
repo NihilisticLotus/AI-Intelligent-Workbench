@@ -256,7 +256,7 @@ export const AttachmentInfo = z.object({
 export type AttachmentInfo = z.infer<typeof AttachmentInfo>;
 /** 仅服务端和适配器之间传递，路径不返回客户端。 */
 export type PromptAttachment = Pick<AttachmentInfo, 'kind' | 'mime' | 'name' | 'width' | 'height'> & { path: string; uri: string; attachmentId?: string };
-export type PromptInput = { text: string; attachments?: PromptAttachment[] };
+export type PromptInput = { text: string; attachments?: PromptAttachment[]; resources?: {uri:string;text:string}[] };
 
 export const Approval = z.object({
   id: Id, taskId: Id, sessionId: Id,
@@ -377,6 +377,8 @@ export const HistoryQuery = z.discriminatedUnion('name', [
 export type HistoryQuery = z.infer<typeof HistoryQuery>;
 export interface HistoryGrant { taskId: string; sessionId: string; handoffId: string }
 export const HandoffQuality = z.object({
+  restatement: z.object({text:z.string(),matched:z.boolean(),corrected:z.boolean()}).optional(),
+  warnings: z.array(z.string()).optional(),
   historyCalls: z.number().int().nonnegative().optional(),
   added: z.array(z.string()), inconsistent: z.array(z.string()), redactions: z.number().int().nonnegative(),
   coveragePassed: z.boolean(), consistencyPassed: z.boolean(), window: z.number().positive(), estimatedTokens: z.number().nonnegative(),
@@ -385,6 +387,20 @@ export const HandoffQuality = z.object({
 export type HandoffQuality = z.infer<typeof HandoffQuality>;
 export const HandoffPreview = z.object({ document: HandoffDocument, markdown: z.string(), level: HandoffLevel, quality: HandoffQuality }).strict();
 export type HandoffPreview = z.infer<typeof HandoffPreview>;
+export const HandoffProgressStep = z.enum(['generate','coverage','consistency','probe','send']);
+export type HandoffProgressStep = z.infer<typeof HandoffProgressStep>;
+export const HandoffSettings = z.object({confirmBeforeSend:z.boolean()}).strict();
+export type HandoffSettings = z.infer<typeof HandoffSettings>;
+export const HandoffSendOptions = z.object({
+  forceH2:z.boolean().optional(), confirmedId:Id.optional(), markdown:z.string().max(2_000_000).optional(),
+}).strict();
+export type HandoffSendOptions = z.infer<typeof HandoffSendOptions>;
+export const CheckpointRestorePreview = z.object({files:z.array(z.string()),skipped:z.array(z.string()),revision:z.string()}).strict();
+export const HandoffReturnBody = HandoffSendOptions.pick({confirmedId:true,markdown:true}).extend({restoreRevision:z.string().optional()}).strict();
+export const HandoffRecord = HandoffPreview.extend({
+  id:Id,ordinal:z.number().int().positive(),createdAt:Ts,edited:z.boolean(),state:z.enum(['prepared','sent','failed','returned']),
+}).strict();
+export type HandoffRecord = z.infer<typeof HandoffRecord>;
 export const TaskFile = ToolFile.extend({ sessionId: Id.nullable(), name: z.string(), directory: z.string(), updatedAt: Ts, source: z.enum(['agent', 'independent']) }).strict();
 export type TaskFile = z.infer<typeof TaskFile>;
 export const EventEnvelope = z.discriminatedUnion('type', [
@@ -400,6 +416,8 @@ export const EventEnvelope = z.discriminatedUnion('type', [
     profileId: Id.nullable().optional(), resumed: z.boolean().optional(),
   })),
   ev('session.ended', z.object({ reason: z.string() })),
+  ev('handoff.progress',z.object({handoffId:Id,step:HandoffProgressStep,status:z.enum(['running','done','skipped','failed'])})),
+  ev('session.handoff',z.object({handoffId:Id,fromSession:Id.nullable(),toSession:Id,from:AgentKind,to:AgentKind,level:HandoffLevel,quality:HandoffQuality})),
   ev('message.user', z.object({ messageId: Id, text: z.string(), attachments: z.array(AttachmentInfo).max(10).optional() })),
   ev('turn.usage', z.object({ messageId: Id, usage: TurnUsage }).strict()),
   ev('message.delta', z.object({ messageId: Id, text: z.string() })),
@@ -462,7 +480,7 @@ export const ClientOp = z.discriminatedUnion('op', [
    * 每条连接只有一个订阅，重复 subscribe 以最后一次为准。
    */
   op('subscribe', z.object({ lastSeq: z.number().int().nonnegative(), taskIds: z.array(Id).optional() })),
-  op('prompt', z.object({ taskId: Id, text: z.string().max(100_000), attachments: z.array(Id).max(10).optional() })
+  op('prompt', z.object({ taskId: Id, text: z.string().max(100_000), attachments: z.array(Id).max(10).optional(), target:HandoffTarget.optional(), handoff:HandoffSendOptions.optional() })
     .refine((v) => !!v.text.trim() || !!v.attachments?.length, '文字和附件至少提供一个')),
   op('cancel', z.object({ taskId: Id })),
   op('approve', z.object({ approvalId: Id, optionId: z.string(), note: z.string().max(2000).optional(), alwaysAllow: AlwaysAllowConfirmation.optional() })),
@@ -644,7 +662,7 @@ export const ApprovalsQuery = z.object({ status: Approval.shape.status.optional(
 
 // ---------- WebSocket ack 的 result ----------
 export const SubscribeResult = z.object({ upToSeq: z.number().int().nonnegative() });
-export const PromptResult = z.object({ taskId: Id, messageId: Id });
+export const PromptResult = z.object({ taskId: Id, messageId: Id, pendingHandoffId:Id.optional() });
 export const ApproveResult = z.object({ approval: Approval });
 export const SwitchResult = z.object({ task: Task });
 export const CancelResult = z.object({ taskId: Id });

@@ -32,9 +32,8 @@ describe('只读历史 MCP',()=>{
   const create=async(prompt:string)=>(await gw!.api('POST','/tasks',{token,body:{projectId:p.id,agent:'fake',permission:'readonly',prompt,deferPrompt:true}})).json.id as string;
   const id=await create('关卡尺寸'), other=await create('禁止返回的另外任务内容');
   const handoffId='ho_local';
-  const cp='refs/aic/checkpoints/'+id+'/1';
+  const cp=await s.workspaces.createCheckpoint(id,1);
   const w=s.workspaces.get(id)!;
-  await s.workspaces.git.checked(['update-ref',cp,w.snapshotAfter!],{cwd:w.path,gitDir:w.gitDir!,workTree:w.path});
   writeFileSync(path.join(w.path,'notes.txt'),'随后修改\n');
   for(const name of ['Town.unity','Level1.txt']) writeFileSync(path.join(w.path,name),'关卡文件');
   s.events.append({type:'tool.start',taskId:id,sessionId:null,data:{toolId:'env-map',kind:'read',target:'.env.local',title:'读配置'}});

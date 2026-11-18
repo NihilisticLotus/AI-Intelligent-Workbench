@@ -51,7 +51,7 @@ export async function readHandoffState(s:Services,id:string,destination:HandoffT
     if(bound) independentWindow=usableCapability(s.independent.getModel(bound.service_id,bound.model_id),'contextWindow');
   }
   const document:HandoffDocument={
-    meta:{taskId:id,from:{agent:task.agent,model:task.model,sessionId:sessions.at(-1)?.id??null},
+    meta:{taskId:id,from:{agent:task.agent,model:task.model,sessionId:sessions.findLast(s=>s.agent_id===task.agent)?.id??null},
       to:{agent:destination.agent,model:destination.model??null,sessionId:null},checkpoint:null,level:'H2',fromSeq:events[0]?.seq??null,toSeq:events.at(-1)?.seq??null},
     intent:{goal:task.prompt,constraints}, userMessages,corrections,tasks,
     files:{changed:[...fileMap.values()],read:[...reads].sort((a,b)=>b[1]-a[1]).slice(0,20).map(([path,count])=>({path,count}))},

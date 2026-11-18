@@ -274,6 +274,10 @@ export class AcpSession implements AgentConnection {
     this.turnMessages.clear(); this.turnTools = false; this.turnCompactions.clear();
     const prompt: Record<string, unknown>[] = [];
     if (input.text) prompt.push({ type: 'text', text: input.text });
+    for (const resource of input.resources ?? []) {
+      if (this.caps.prompt.embeddedContext) prompt.push({type:'resource',resource:{...resource,mimeType:'text/markdown'}});
+      else prompt.push({type:'text',text:resource.text});
+    }
     for (const a of input.attachments ?? []) {
       if (a.kind === 'image') {
         if (!this.caps.prompt.image) throw new AgentError({ code: ErrorCode.AttachmentUnsupported, message: '这个 Agent 看不了图片', actions: [] }, 'unsupported');

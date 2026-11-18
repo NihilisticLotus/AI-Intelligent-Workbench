@@ -22,6 +22,55 @@ function change(root: string) {
 }
 
 describe('任务改动 REST 与还原', () => {
+  it.each([true,false])('检查点按确认清单恢复普通文件并保留环境文件，Git 工作树=%s',async gitProject => {
+    const f=await setup(gitProject);
+    const write=(name:string,value:string)=>writeFileSync(path.join(f.root,name),value);
+    const read=(name:string)=>readFileSync(path.join(f.root,name),'utf8');
+    const opts={cwd:f.root};
+    write('.gitignore','.env.local\n');
+    write('.env.local','SCENE=初始测试值\n');
+    write('modify.txt','检查点版本\r\n');
+    const git=(...args:string[])=>f.manager.git.checked(args,opts).then(out=>out.toString().trim());
+    if(gitProject) await git('add','modify.txt');
+    const branch=gitProject?await git('rev-parse','HEAD'):null;
+    const index=gitProject?await git('write-tree'):null;
+    const ref=await f.manager.createCheckpoint(f.task.id,1);
+    if(gitProject) {
+      const oid=await git('hash-object','--no-filters','.env.local');
+      expect((await f.manager.git.run(['cat-file','-e',oid],{cwd:f.project.path})).code).not.toBe(0);
+      expect(await git('ls-tree',ref,'--','.aic','.env.local')).toBe('');
+    }
+    write('.env.local','SCENE=当前测试值\n');
+    write('modify.txt','当前修改\n'); write('new.txt','交接后新增');
+    unlinkSync(path.join(f.root,'delete.txt'));
+    const preview=await f.manager.checkpointRestore(f.task.id,ref);
+    expect(preview.files).toEqual(['delete.txt','modify.txt','new.txt']);
+    expect(preview.skipped).toEqual(['.env.local']);
+    write('new.txt','确认前又改过');
+    await expect(f.manager.checkpointRestore(f.task.id,ref,preview.revision)).rejects.toThrow('重新查看');
+    expect(read('modify.txt')).toBe('当前修改\n');
+    const fresh=await f.manager.checkpointRestore(f.task.id,ref);
+    await f.manager.checkpointRestore(f.task.id,ref,fresh.revision);
+    expect(read('.env.local')).toBe('SCENE=当前测试值\n');
+    expect(read('modify.txt')).toBe('检查点版本\r\n'); expect(read('delete.txt').trim()).toBe('待删除');
+    expect(existsSync(path.join(f.root,'new.txt'))).toBe(false);
+    if(gitProject) {
+      expect(await git('rev-parse','HEAD')).toBe(branch);
+      expect(await git('write-tree')).toBe(index);
+    }
+  });
+  it('预览、改动列表和单文件补丁都不会在原项目对象库留下副本的新内容',async()=>{
+    const f=await setup(), cwd=f.project.path, bytes='SCENE=专用于临时验收的关卡名\n';
+    const oid=(await f.manager.git.checked(['hash-object','--stdin'],{cwd,input:bytes})).toString().trim();
+    const exists=async()=>(await f.manager.git.run(['cat-file','-e',oid],{cwd})).code===0;
+    writeFileSync(path.join(f.root,'.env.local'),bytes);
+    expect(await exists()).toBe(false);
+    expect((await t!.api('POST','/tasks/'+f.task.id+'/handoff/preview',{token:f.token,body:{agent:'codex'}})).status).toBe(200);
+    expect(await exists()).toBe(false);
+    expect((await f.get()).json.files.map((item:{path:string})=>item.path)).toContain('.env.local');
+    expect((await f.get('/file?path=.env.local')).json.patch).toContain(bytes.trim());
+    expect(await exists()).toBe(false);
+  });
   it('哈希缓存不漏掉同样大小的内容改动（ISSUE-0100）', async () => {
     const f=await setup(true); const file=path.join(f.root,'modify.txt');
     writeFileSync(file,'AAAA\n'); utimesSync(file,new Date(Date.now()-60_000),new Date(Date.now()-60_000));

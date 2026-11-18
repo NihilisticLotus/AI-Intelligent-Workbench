@@ -103,6 +103,8 @@ export class TaskService {
   readonly permissions: PermissionBroker;
   private runtimes = new Map<string, Runtime>();
   private parkedSources = new Map<string, Runtime>();
+  /** 反向交接里已恢复检查点的记录；交接未完成时据此还原。 */
+  private restoredBeforeReturn = new Set<string>();
   private starting = new Map<string, Promise<Runtime>>();
   /**
    * 每个任务当前回合的 AbortController：startTurn 时同步写入、回合结束时删除。
@@ -991,6 +993,7 @@ export class TaskService {
     let snapshotStarted = false;
     let snapshotFailed = false;
     let sent = false;
+    let delivered = false;
     const finishSnapshot = async () => {
       if (watchdog) clearInterval(watchdog);
       if (!snapshotStarted || !this.workspaces) return;
@@ -1040,6 +1043,7 @@ export class TaskService {
         }, Math.min(1000, this.noResponseNoticeMs, this.noResponseCancelMs));
         watchdog.unref?.();
       });
+      delivered = true;
       const prompt = rt.conn.prompt({ ...(handoff?.input ?? {text:promptText}), attachments }, abort.signal);
       let r: Awaited<typeof prompt>;
       try { r = await Promise.race([prompt, timeout]); }
@@ -1069,14 +1073,7 @@ export class TaskService {
       await finishSnapshot();
       await this.refreshChanges(taskId);
       if (handoff && handoffTurnCompleted()) {
-        this.db.tx(()=>{
-          this.db.run("UPDATE handoffs SET state='sent' WHERE task_id=? AND id=?",taskId,handoff.record.id);
-          this.db.run("UPDATE handoffs SET state='returned' WHERE task_id=? AND id=(SELECT json_extract(request_json,'$.reverseOf') FROM handoffs WHERE id=?)",taskId,handoff.record.id);
-        });
-        const updated=this.handoffs!.get(taskId,handoff.record.id);
-        this.events.append({type:'session.handoff',taskId,sessionId:rt.sessionId,data:{handoffId:updated.id,fromSession:updated.document.meta.from.sessionId,
-          toSession:rt.sessionId,from:handoff.original.agent,to:updated.document.meta.to.agent,level:updated.level,quality:updated.quality}});
-        this.handoffs!.progress(taskId,updated.id,'send','done');
+        this.acceptHandoff(taskId,rt.sessionId,handoff);
         sent=true;
       }
       this.setStatus(taskId, r.stopReason === 'cancelled' || timedOut || (handoff && r.stopReason === 'refusal') ? 'paused' : r.stopReason === 'error' ? 'failed' : 'review');
@@ -1110,6 +1107,15 @@ export class TaskService {
         this.setStatus(taskId, 'failed');
       }
     } finally {
+      // 接收方已经动手（调用过工具），或用户在消息送达后主动停止：保留交接，不把它的改动静默留给不知情的原 Agent。
+      if(handoff && !sent && rt && rt.sessionId===this.db.get<{to_session_id:string|null}>('SELECT to_session_id FROM handoffs WHERE id=?',handoff.record.id)?.to_session_id
+        && (abort.signal.aborted && delivered && !noResponse || this.receiverActed(taskId,rt.sessionId))) {
+        try {
+          this.acceptHandoff(taskId,rt.sessionId,handoff);
+          sent=true;
+          this.events.append({type:'session.notice',taskId,sessionId:rt.sessionId,data:{level:'warn',text:'接手的 Agent 首轮没有正常结束，但已经收到交接内容并开始处理；交接已保留，任务留在当前 Agent。可以继续发消息，或从交接分隔条切回原 Agent。'}});
+        } catch(error) {console.error('[tasks] 保留交接失败',errorLogText(error,rt.secrets));}
+      }
       if(handoff && !sent) await this.failedHandoff(taskId,handoff.record,handoff.original);
       if(handoff && sent) {
         const previous=this.parkedSources.get(taskId);
@@ -1172,10 +1178,43 @@ export class TaskService {
     }
   }
 
+  private receiverActed(taskId:string,sessionId:string) {
+    return !!this.db.get("SELECT 1 FROM events WHERE task_id=? AND session_id=? AND type='tool.start' AND replay=0 LIMIT 1",taskId,sessionId);
+  }
+
+  private acceptHandoff(taskId:string,sessionId:string,handoff:{record:HandoffRecord;original:TaskRow}) {
+    this.db.tx(()=>{
+      this.db.run("UPDATE handoffs SET state='sent' WHERE task_id=? AND id=?",taskId,handoff.record.id);
+      this.db.run("UPDATE handoffs SET state='returned' WHERE task_id=? AND id=(SELECT json_extract(request_json,'$.reverseOf') FROM handoffs WHERE id=?)",taskId,handoff.record.id);
+    });
+    this.restoredBeforeReturn.delete(handoff.record.id);
+    const updated=this.handoffs!.get(taskId,handoff.record.id);
+    this.events.append({type:'session.handoff',taskId,sessionId,data:{handoffId:updated.id,fromSession:updated.document.meta.from.sessionId,
+      toSession:sessionId,from:handoff.original.agent,to:updated.document.meta.to.agent,level:updated.level,quality:updated.quality}});
+    this.handoffs!.progress(taskId,updated.id,'send','done');
+  }
+
+  /** 切回时已恢复检查点、而反向交接没有完成：把工作副本恢复到切回前（反向交接自己的检查点）。 */
+  private async undoReturnRestore(taskId:string,record:HandoffRecord) {
+    if(!this.restoredBeforeReturn.delete(record.id))return;
+    const ref=record.document.meta.checkpoint;
+    if(!ref || !this.workspaces)return;
+    try {
+      const {revision}=await this.workspaces.checkpointRestore(taskId,ref);
+      await this.workspaces.checkpointRestore(taskId,ref,revision);
+      await this.refreshChanges(taskId);
+      this.events.append({type:'session.notice',taskId,sessionId:null,data:{level:'warn',text:'切回没有完成，已把工作副本恢复到切回之前的状态。'}});
+    } catch(error) {
+      this.events.append({type:'session.notice',taskId,sessionId:null,data:{level:'warn',text:'切回没有完成，工作副本保持检查点恢复后的状态，未能自动还原；切回前的文件保存在检查点 '+ref+'。'}});
+      console.error('[tasks] 还原切回前的工作副本失败',errorLogText(error,[]));
+    }
+  }
+
   private async failedHandoff(taskId:string,record:HandoffRecord,original:TaskRow) {
     try { if(this.runtimes.get(taskId)?.sessionId!==record.document.meta.from.sessionId) await this.dropRuntime(taskId,'handoff_failed'); }
     finally {
       this.reconnectSource(taskId);
+      await this.undoReturnRestore(taskId,record);
       this.db.run('UPDATE tasks SET agent=?,model=?,effort=?,profile_id=? WHERE id=?',original.agent,original.model,original.effort,original.profile_id,taskId);
       this.db.run("UPDATE handoffs SET state='failed' WHERE task_id=? AND id=?",taskId,record.id);
       this.handoffs!.progress(taskId,record.id,'send','failed');
@@ -1183,7 +1222,7 @@ export class TaskService {
     }
   }
 
-  async prompt(taskId: string, text: string, attachmentIds: string[] = [], target?:HandoffTarget, options:HandoffSendOptions={},reverseOf?:string): Promise<{ taskId: string; messageId: string;pendingHandoffId?:string }> {
+  async prompt(taskId: string, text: string, attachmentIds: string[] = [], target?:HandoffTarget, options:HandoffSendOptions={},reverseOf?:string,restore?:{checkpoint:string;revision:string}): Promise<{ taskId: string; messageId: string;pendingHandoffId?:string }> {
     const row = this.getRow(taskId);
     if (FINAL.includes(this.get(taskId).status)) throw Errors.invalidState('任务已经结束，不能继续发送消息');
     if(this.workspaces?.operation(taskId)?.state==='pending')throw Errors.invalidState('上次项目操作尚未确认完成，暂不能继续任务。');
@@ -1227,6 +1266,14 @@ export class TaskService {
         await this.releaseForHandoff(taskId,row.agent,destination);
         replacing=true;
         const rt=await this.startHandoffRuntime(taskId,record.id,target);
+        // 切回时恢复检查点放在新会话已启动之后；之后任一步失败，按本次交接自己的检查点还原（undoReturnRestore）。
+        if(restore) {
+          if(!record.document.meta.checkpoint)throw Errors.invalidState('当前工作副本无法生成检查点，不能恢复');
+          this.restoredBeforeReturn.add(record.id);
+          await this.workspaces!.checkpointRestore(taskId,restore.checkpoint,restore.revision);
+          await this.refreshChanges(taskId);
+          content.text+='\n\n工作台操作：工作副本已恢复到交接给对方之前的检查点，对方之后的文件改动已撤销。';
+        }
         const input=rt.conn.caps?.prompt.embeddedContext ? content : {text:[...content.resources.map(resource=>resource.text),content.text].join('\n\n')};
         const model=rt.conn.config?.().model??target.model??null;
         this.db.tx(()=>{
@@ -1251,6 +1298,13 @@ export class TaskService {
     if(record.state!=='sent' || !record.latestSent || task.agent!==record.document.meta.to.agent || FINAL.includes(task.status)) throw Errors.invalidState('请从当前交接记录切回原 Agent');
     if(this.isBusy(taskId))throw Errors.invalidState('请等当前回合结束，或先停止当前回合');
     return record;
+  }
+
+  /** 用户在“确认交接内容”里取消：清理待确认的交接，原会话不受影响。 */
+  async cancelHandoff(taskId:string,id:string) {
+    if(!this.handoffs)throw Errors.invalidState('交接服务尚未就绪');
+    if(this.configuring.has(taskId))throw Errors.invalidState('交接正在进行，请稍后再试');
+    return this.handoffs.discard(taskId,id);
   }
 
   async redoHandoff(taskId:string,id:string,confirmation:HandoffSendOptions={}) {
@@ -1281,15 +1335,21 @@ export class TaskService {
     try {
       this.checkTaskPermission(from.agent,this.getRow(taskId).permission_level,!!this.workspaces?.get(taskId));
       if(from.agent==='independent')this.independentRuntime?.assertReady(taskId);
-      if(restoreRevision!==undefined) {
-        if(!checkpoint || !this.workspaces)throw Errors.invalidState('当前交接没有检查点');
-        await this.workspaces.checkpointRestore(taskId,checkpoint,restoreRevision);
-        await this.refreshChanges(taskId);
-      }
+      if(restoreRevision!==undefined && (!checkpoint || !this.workspaces))throw Errors.invalidState('当前交接没有检查点');
+      // 先预检修订，避免切换成功后才发现清单已过期。
+      if(restoreRevision!==undefined && (await this.workspaces!.checkpointRestore(taskId,checkpoint!)).revision!==restoreRevision)
+        throw Errors.invalidState('工作副本已变化，请重新查看恢复清单');
       if(!confirmation.confirmedId && from.sessionId && (from.agent==='independent'||caps?.resume||caps?.loadSession)) {
         await this.releaseForHandoff(taskId,this.get(taskId).agent,from.agent);
+        let started=false;
         try {
           const rt=await this.startRuntime(taskId,undefined,{noQueue:true,returnTo:{sessionId:from.sessionId,target,profileId:original.profile_id}});
+          started=true;
+          // 原生会话已恢复后再改文件；恢复失败则关闭新会话、接回交出方，工作副本不变。
+          if(restoreRevision!==undefined) {
+            await this.workspaces!.checkpointRestore(taskId,checkpoint!,restoreRevision);
+            await this.refreshChanges(taskId);
+          }
           const actual=rt.conn.config?.();
           this.db.run('UPDATE tasks SET agent=?,model=?,effort=?,profile_id=? WHERE id=?',from.agent,actual?.model??original.model,actual?actual.effort:original.effort,rt.profileId,taskId);
           const parked=this.parkedSources.get(taskId);
@@ -1299,13 +1359,14 @@ export class TaskService {
           this.events.append({type:'session.notice',taskId,sessionId:rt.sessionId,data:{level:'info',text:'已切回原 Agent，原生会话已恢复（H1）。'}});
           return {taskId,level:'H1' as const};
         } catch(error) {
+          if(started) await this.dropRuntime(taskId,'handoff_failed');
           this.reconnectSource(taskId);
           if(!(error instanceof AppError && error.body.code===ErrorCode.SessionNotRecoverable))throw error;
         }
       }
     } finally {this.configuring.delete(taskId);}
     // 无法原生恢复时，反向交接使用工作台说明；用户消息事件只记录真实输入。
-    return this.prompt(taskId,'',[],target,confirmation,id);
+    return this.prompt(taskId,'',[],target,confirmation,id,restoreRevision!==undefined?{checkpoint:checkpoint!,revision:restoreRevision}:undefined);
   }
 
   async cancel(taskId: string): Promise<void> {

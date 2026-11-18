@@ -223,6 +223,7 @@ export class HttpClient {
   private handoffPath(taskId:string,id:string) {return '/tasks/'+encodeURIComponent(taskId)+'/handoff/'+encodeURIComponent(id);}
   handoff(taskId:string,id:string) {return this.request('GET',this.handoffPath(taskId,id),{parse:HandoffRecord});}
   restorePreview(taskId:string,id:string) {return this.request('GET',this.handoffPath(taskId,id)+'/restore',{parse:CheckpointRestorePreview});}
+  cancelHandoff(taskId:string,id:string) {return this.request('DELETE',this.handoffPath(taskId,id),{parse:HandoffRecord});}
   handoffAction(taskId:string,id:string,action:'return'|'redo',body:HandoffReturnBody) {
     return this.request('POST',this.handoffPath(taskId,id)+'/'+action,{body,parse:HandoffActionResult});
   }

@@ -143,3 +143,12 @@
 | [ISSUE-0135](ISSUE-0135-handoff-attachment-only.md) | 仅发送附件换 Agent 时接收方误收切回等待指令 | fixed | bug | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0136](ISSUE-0136-acp-handoff-resource-order.md) | ACP 首轮请求把历史资料放在本轮用户指令之后 | fixed | bug | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0137](ISSUE-0137-handoff-return-model-effort.md) | 切回原 Agent 或强制重新交接丢失模型选择或思考强度 | fixed | bug | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0138](ISSUE-0138-handoff-receiver-partial-turn.md) | 接收方首轮中途失败或被停止时交接被静默撤回 | fixed | bug | 2026-11-19 | 2026-11-19 |
+| [ISSUE-0139](ISSUE-0139-handoff-return-restore-order.md) | 切回原 Agent 时先恢复检查点，切换失败后文件已被改回 | fixed | bug | 2026-11-19 | 2026-11-19 |
+| [ISSUE-0140](ISSUE-0140-handoff-narrative-incremental.md) | 第二次交接的摘要只看新事件，丢掉上次的尝试与决策 | fixed | bug | 2026-11-19 | 2026-11-19 |
+| [ISSUE-0141](ISSUE-0141-handoff-env-over-redaction.md) | 环境文件里的普通配置值被全局打码 | fixed | bug | 2026-11-19 | 2026-11-19 |
+| [ISSUE-0142](ISSUE-0142-history-query-recompute.md) | 历史查询每次调用都重新投影与打码全部事件 | fixed | bug | 2026-11-19 | 2026-11-19 |
+| [ISSUE-0143](ISSUE-0143-events-session-index.md) | 交接守卫按会话查询事件但没有索引 | fixed | bug | 2026-11-19 | 2026-11-19 |
+| [ISSUE-0144](ISSUE-0144-merge-private-history-stuck.md) | 任务分支提交过 .aic 后永远无法合并 | fixed | bug | 2026-11-19 | 2026-11-19 |
+| [ISSUE-0145](ISSUE-0145-handoff-cancel-cleanup.md) | 取消交接确认后留下待确认记录、检查点和说明文件 | fixed | bug | 2026-11-19 | 2026-11-19 |
+| [ISSUE-0146](ISSUE-0146-handoff-edit-tool-hint.md) | 交接说明硬编码 Codex 的 apply_patch 工具名 | fixed | bug | 2026-11-19 | 2026-11-19 |

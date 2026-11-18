@@ -126,7 +126,7 @@ describe('非 git 应用与回滚保护',{timeout:60000},()=>{
 afterEach(async()=>{await manager?.settle();vi.restoreAllMocks();db?.close();if(!isInside(tmpdir(),base)||!path.basename(base).startsWith('aic-workspace-ops-'))throw Error('清理范围错误');await rm(base,{recursive:true,force:true});},60000);
 
 describe('临时仓库合并与撤销',()=>{
-  it('保留历史合并不能引入中途已删除的任务说明', async () => {
+  it('保留历史合并不能引入中途已删除的任务说明，改为提示压缩合并（ISSUE-0144）', async () => {
     const record = await workspace();
     await mkdir(path.join(record.path, '.aic'));
     await put(record.path, '.aic/TASK.md', '工作台任务说明');
@@ -137,8 +137,21 @@ describe('临时仓库合并与撤销',()=>{
     await run(record.path, 'add', 'notes.txt');
     await run(record.path, 'commit', '-m', '移除说明');
     const before = await run(project, 'rev-parse', 'HEAD');
-    await expect(merge(record.taskId, 'merge')).rejects.toMatchObject({code:'workspace.private_history'});
+    expect(await merge(record.taskId, 'merge')).toEqual({status:'manual_required',reason:'private_history',files:['.aic/TASK.md']});
     expect(await run(project, 'rev-parse', 'HEAD')).toBe(before);
+  });
+  it('任务分支已提交 .aic 时压缩合并先移除再合并，项目里没有 .aic（ISSUE-0144）', async () => {
+    const record = await workspace();
+    await mkdir(path.join(record.path, '.aic'));
+    await put(record.path, '.aic/TASK.md', '被 Agent 强制提交的说明');
+    await put(record.path, 'notes.txt', '项目成果\n');
+    await run(record.path, 'add', '-f', '.aic/TASK.md', 'notes.txt');
+    await run(record.path, 'commit', '-m', 'Agent 提交');
+    expect((await merge(record.taskId, 'squash')).status).toBe('merged');
+    expect(await readFile(path.join(project, 'notes.txt'), 'utf8')).toBe('项目成果\n');
+    expect(await run(project, 'log', '--format=', '--name-only', '-1')).not.toContain('.aic/');
+    await expect(access(path.join(project, '.aic'))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readFile(path.join(record.path, '.aic/TASK.md'), 'utf8')).toBe('被 Agent 强制提交的说明');
   });
   it.each(['squash','merge'] as const)('%s 合并只发布项目文件，即使任务说明已暂存', async strategy => {
     const record = await workspace();

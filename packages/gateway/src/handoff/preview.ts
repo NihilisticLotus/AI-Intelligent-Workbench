@@ -1,5 +1,5 @@
 import { attachmentEnvironment } from './history';
-import { HandoffPreview, type HandoffDocument, type HandoffTarget, type HandoffNarrative, type HandoffLevel, type IndependentSelection } from '@aic/protocol';
+import { HandoffNarrative, HandoffPreview, type HandoffDocument, type HandoffTarget, type HandoffLevel, type IndependentSelection } from '@aic/protocol';
 import type { Services } from '../services';
 import { readHandoffState } from './state';
 import { environmentValues, HandoffRedactor } from './redact';
@@ -89,14 +89,15 @@ export async function previewHandoff(s:Services,id:string,target:HandoffTarget,o
   let calls: ReturnType<typeof summaryRequests>;
   try {
     calls=summaryRequests(s,id,options.summaryModel,options.summaryTimeoutMs);
-    const previous=s.db.get<{through:number; at:number}>(`SELECT e.seq AS through,e.ts AS at FROM handoffs h
+    const previous=s.db.get<{through:number; at:number; document_json:string}>(`SELECT e.seq AS through,e.ts AS at,h.document_json FROM handoffs h
       JOIN events e ON e.seq=json_extract(h.document_json,'$.meta.toSeq') AND e.task_id=h.task_id
       WHERE h.task_id=? AND h.state IN ('sent','returned') ORDER BY h.ordinal DESC LIMIT 1`,id);
     const incremental=previous ? fullBlocks.filter((_,i)=>{
       const line=lines[i]!;
       return line.seq===undefined ? line.at>=previous.at : line.seq>previous.through;
     }) : fullBlocks;
-    generated=await calls.narrative(incremental.join('\n'));
+    const earlier=previous ? HandoffNarrative.safeParse(narrativeOf(JSON.parse(previous.document_json))).data : undefined;
+    generated=mergeNarrative(earlier,await calls.narrative(incremental.join('\n'),earlier));
     // 模型输出也需要按工作台已存 Key 检查，摘要输入中可能从未出现这些值。
     const outputKeys=await s.secrets.forRedaction(Object.values(generated).flat().join('\n'));
     const scrub=new HandoffRedactor(outputKeys,envValues,aliases);
@@ -148,4 +149,24 @@ export async function previewHandoff(s:Services,id:string,target:HandoffTarget,o
   result.quality.added.push(...missed.map(f=>'探针补齐：'+f.question));
   result.quality.estimatedTokens=estimateTokens(result.markdown);
   return result;
+}
+
+function narrativeOf(doc: Record<string, unknown>) {
+  const out: Record<string, unknown> = {};
+  for (const key of ['attempts','decisions','openIssues','current'] as const) if (doc[key] !== undefined) out[key] = doc[key];
+  return out;
+}
+
+/** 尝试与决策只增不减（去重、旧的在前）；未决问题与当前进展以本次结果为准，本次没给出时沿用上次。 */
+export function mergeNarrative(earlier: HandoffNarrative | undefined, next: HandoffNarrative): HandoffNarrative {
+  if (!earlier) return next;
+  const union = (a?: string[], b?: string[]) => (a || b) ? [...new Set([...(a ?? []), ...(b ?? [])])] : undefined;
+  const merged: HandoffNarrative = {};
+  const attempts = union(earlier.attempts, next.attempts), decisions = union(earlier.decisions, next.decisions);
+  const openIssues = next.openIssues ?? earlier.openIssues, current = next.current ?? earlier.current;
+  if (attempts) merged.attempts = attempts;
+  if (decisions) merged.decisions = decisions;
+  if (openIssues) merged.openIssues = openIssues;
+  if (current) merged.current = current;
+  return merged;
 }

@@ -24,6 +24,7 @@ export function taskRoutes(s: Services) {
     const {restoreRevision,...confirmation}=await readBody(c,HandoffReturnBody);
     return c.json(await s.tasks.returnHandoff(c.req.param('id'),c.req.param('handoffId'),restoreRevision,confirmation));
   });
+  r.delete('/tasks/:id/handoff/:handoffId',async c=>c.json(await s.tasks.cancelHandoff(c.req.param('id'),c.req.param('handoffId'))));
   r.post('/tasks/:id/handoff/:handoffId/redo',async c=>c.json(await s.tasks.redoHandoff(c.req.param('id'),c.req.param('handoffId'),await readBody(c,HandoffReturnBody.omit({restoreRevision:true})))));
   r.get('/tasks/:id/memory', c => c.json({items:s.tasks.memory.list(c.req.param('id'))}));
   r.post('/tasks/:id/memory', async c => {

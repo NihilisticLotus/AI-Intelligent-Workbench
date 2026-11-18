@@ -302,6 +302,8 @@ const MIGRATIONS: string[] = [
     settlement_json TEXT, reserved_micros INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
     binding_json TEXT NOT NULL, currency TEXT);
    CREATE INDEX idx_summary_requests_task ON handoff_summary_requests(task_id,ordinal);`,
+  // 交接后的行为守卫与复述核对按会话读取事件（1.6 代码审查）
+  `CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, seq);`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

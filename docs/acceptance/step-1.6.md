@@ -538,7 +538,33 @@ Claude 报告 8641 token、0.003556465 美元，供应商实际账单未核对�
 
 四项修复提交为 `104ae53`、`60a1e10`、`bf3f7bb`、`84ca26d`。最终代码的 `npm run typecheck`、`npm test`、`npm run build` 均通过。默认离线测试 1139 通过、3 跳过（适配器 104、Gateway 800、协议 67、网页 168），较审查前增加 7 个通过用例。另在临时库验证了没有来源配置快照的旧收据可原生切回，保留旧会话记录的模型。修复与新增问题单双向可查。
 
+### 第二次代码审查（2026-11-19）
+
+审查范围 `5dc0c9c..72adaf5`，即 1.6 全部代码。发现九项问题，全部修复。回归测试集中在新文件 `packages/gateway/test/handoff-review.test.ts`（10 例），另改写 3 个旧断言，原因见下表。
+
+| 问题 | 修复与核对 |
+|---|---|
+| [ISSUE-0138 接收方首轮中途失败](../issues/ISSUE-0138-handoff-receiver-partial-turn.md) | 接收方已调用工具，或消息送达后用户停止时，交接保留为已发送，任务留在接收方并提示。未动手就失败仍回到原 Agent。 |
+| [ISSUE-0139 切回时的检查点恢复顺序](../issues/ISSUE-0139-handoff-return-restore-order.md) | 原生恢复在新会话启动后才恢复文件；反向交接在新会话启动后恢复，未完成则按反向交接自己的检查点还原。 |
+| [ISSUE-0140 叙述增量合并](../issues/ISSUE-0140-handoff-narrative-incremental.md) | 上次交接的叙述作为摘要基础，本地合并：尝试与决策累积，未决问题与当前进展取最新。 |
+| [ISSUE-0141 环境值过度打码](../issues/ISSUE-0141-handoff-env-over-redaction.md) | 常见开关、端口、环境名、本机地址和过短的值不再全局打码；名称像密钥的变量仍打码。 |
+| [ISSUE-0142 历史查询重复计算](../issues/ISSUE-0142-history-query-recompute.md) | 按任务缓存投影与打码结果，事件、附件、Key、别名或会话密钥变化时重建。 |
+| [ISSUE-0143 事件会话索引](../issues/ISSUE-0143-events-session-index.md) | 迁移 v25 新增 `idx_events_session(session_id, seq)`。`step-1.3.test.ts` 的版本号断言由 24 改为 25。 |
+| [ISSUE-0144 .aic 历史导致合并卡死](../issues/ISSUE-0144-merge-private-history-stuck.md) | 压缩合并先在任务分支移除 .aic 再合并；保留提交记录返回 `manual_required`（新原因 `private_history`），网页提示改选压缩。旧断言“抛出 private_history 错误”改为检查该结果，项目 HEAD 不变的断言保留。 |
+| [ISSUE-0145 取消确认的清理](../issues/ISSUE-0145-handoff-cancel-cleanup.md) | 新增 `DELETE /tasks/:id/handoff/:handoffId`，状态新增 `cancelled`；网页取消确认时调用，启动时清理停在确认框的交接。 |
+| [ISSUE-0146 编辑工具提示](../issues/ISSUE-0146-handoff-edit-tool-hint.md) | 不再点名 Codex 的 apply_patch，所有非只读接收方收到通用说明。旧用例“交给 Claude 不提示”改为“也提示”。 |
+
+协议改动只增：交接状态加 `cancelled`，`manual_required.reason` 加 `private_history`。
+
+修复前后核对：临时撤掉 ISSUE-0138 与 0139 的修复后，`handoff-review.test.ts` 的三例（接收方动手后崩溃、原生恢复失败、反向交接未完成）失败；恢复修复后 10 例全部通过。
+
+网页验证：在开发预览（`.aic-data`）的已有演示任务上开启“交接前让我确认”，选择 Codex · 6 Luna 后发送，确认框出现后点“返回草稿”。核对结果：交接记录状态为 `cancelled`；本次检查点引用 `refs/aic/checkpoints/<任务>/2` 已删除，较早的 1 号保留；`.aic/handoffs/2.md` 已删除；输入框保留草稿；分隔条显示“已取消交接”。夜间和日间两套主题都看过。没有消息发给 Codex，也没有产生费用。验证后设置已改回关闭，待切换已撤销。
+
+全仓结果：`npm run typecheck`、`npm test`、`npm run build` 均通过。默认离线测试 1150 通过、3 跳过（适配器 104、Gateway 811、协议 67、网页 168），较上次增加 11 个通过用例。
+
+未验证：真实摘要模型对增量叙述的处理；真实接收方面对通用编辑提示的行为。本轮没有付费调用。
+
 ## 当前进度
 
-- 1.6 第 12.13 节六项已验收，完成后代码审查的四项问题已修复并通过全仓门禁。
+- 1.6 第 12.13 节六项已验收；第一次代码审查的四项、第二次代码审查的九项（ISSUE-0138～0146）均已修复并通过全仓门禁。
 - 没有待批准事项、收费调用计划或定时任务。ISSUE-0131～0133 继续保留既有真实客户端观察；CodeBuddy 的模型级历史调用未验证。

@@ -11,8 +11,8 @@ afterEach(async()=>{await gw?.stop();gw=undefined;});
 
 describe('发送时交接',()=>{
   it.each([
-    ['ask', 'codex', true], ['readonly', 'codex', false], ['ask', 'claude', false],
-  ] as const)('%s 权限交给 %s 时按接收方提供编辑工具提示',async (permission,agent,expectsHint)=>{
+    ['ask', 'codex', true], ['readonly', 'codex', false], ['ask', 'claude', true],
+  ] as const)('%s 权限交给 %s 时提供通用编辑工具提示',async (permission,agent,expectsHint)=>{
     const fake=createFakeAdapter({speed:0});
     let received='';
     gw=await startGw({adapters:[{...fake,async spawn(opts){
@@ -29,7 +29,8 @@ describe('发送时交接',()=>{
     await s.tasks.prompt(task.id,'记录当前目标');await s.tasks.idle();
     await s.tasks.prompt(task.id,'仅新增 Result.txt',[],{agent});await s.tasks.idle();
     expect(received).toContain('仅新增 Result.txt');
-    expect(received.includes('tools.apply_patch')).toBe(expectsHint);
+    expect(received.includes('你自己的文件编辑工具')).toBe(expectsHint);
+    expect(received).not.toContain('apply_patch');
     if (expectsHint) expect(received).toContain('禁止命令也适用于读取文件');
   });
   it.each([true,false])('切回时使用交出前最后选中的模型与思考强度（原生恢复 %s）',async resume=>{

@@ -1,5 +1,6 @@
 import type { EventEnvelope, HistoryQuery, HistoryGrant } from '@aic/protocol';
 import type { Services } from '../services';
+import { createHash } from 'node:crypto';
 import { Errors } from '../util';
 import { clipBytes } from './budget';
 import { environmentValues, HandoffRedactor, isEnvSource } from './redact';
@@ -102,13 +103,38 @@ export async function outgoingRedactor(s:Services,taskId:string,rows=projectEven
   return {clean,aliases,environment};
 }
 
+type HistoryContext={fingerprint:string;rows:ReturnType<typeof projectEvents>;redactor:HandoffRedactor;masked:Map<number,string>}
+  & Awaited<ReturnType<typeof outgoingRedactor>>;
+const historyCache=new Map<string,HistoryContext>();
+/** 同一任务连续查询时复用投影与打码结果；事件、已发送附件、保存的 Key、路径别名或会话密钥变化时重建（1.6 代码审查）。 */
+async function historyContext(s:Services,taskId:string):Promise<HistoryContext> {
+  const fingerprint=createHash('sha256').update(JSON.stringify([
+    s.db.get<{n:number|null}>('SELECT MAX(seq) AS n FROM events WHERE task_id=?',taskId)?.n??0,
+    s.db.get("SELECT COUNT(*) AS n,MAX(used_at) AS u FROM attachments WHERE task_id=? AND used_at IS NOT NULL",taskId),
+    s.db.get("SELECT COUNT(*) AS n,group_concat(id||':'||hint) AS k FROM secrets"),
+    s.db.get('SELECT COUNT(*) AS n FROM handoff_path_aliases WHERE task_id=?',taskId),
+    s.db.get("SELECT COUNT(*) AS n,MAX(m.created_at) AS at FROM independent_messages m JOIN sessions x ON x.id=m.session_id WHERE x.task_id=?",taskId),
+    s.tasks.sessionSecrets(taskId),
+  ])).digest('hex');
+  const cached=historyCache.get(taskId);
+  if(cached?.fingerprint===fingerprint) return cached;
+  const rows=projectEvents(s,taskId);
+  const outgoing=await outgoingRedactor(s,taskId,rows);
+  const keys=await s.secrets.forRedaction(rows.map(r=>r.text).join('\n'));
+  const context={...outgoing,fingerprint,rows,masked:new Map<number,string>(),
+    redactor:new HandoffRedactor([...keys,...s.tasks.sessionSecrets(taskId)],outgoing.environment,outgoing.aliases)};
+  historyCache.delete(taskId);
+  historyCache.set(taskId,context);
+  while(historyCache.size>16) historyCache.delete(historyCache.keys().next().value!);
+  return context;
+}
+
 export async function readHistory(s:Services,grant:HistoryGrant,q:HistoryQuery) {
   const {taskId,handoffId}=grant;
   const record=s.db.get<{document_json:string}>('SELECT document_json FROM handoffs WHERE task_id=? AND id=?',taskId,handoffId);
   if(!record) throw Errors.notFound('本任务没有这次交接');
   const stored=JSON.parse(record.document_json);
-  const rows=projectEvents(s,taskId);
-  const {clean,aliases,environment}=await outgoingRedactor(s,taskId,rows);
+  const {clean,aliases,rows,redactor,masked:cache}=await historyContext(s,taskId);
   if(q.name==='get_file_at') {
     const found=s.db.get("SELECT 1 FROM handoffs WHERE task_id=? AND json_extract(document_json,'$.meta.checkpoint')=? LIMIT 1",taskId,q.arguments.checkpoint);
     if(!found) throw Errors.forbidden('只能读取本任务已经登记的检查点');
@@ -131,13 +157,12 @@ export async function readHistory(s:Services,grant:HistoryGrant,q:HistoryQuery) 
     const text=await clean(sections.filter(Boolean).join('\n\n'));
     return boundedText(text);
   }
-  const keys=await s.secrets.forRedaction(rows.map(r=>r.text).join('\n'));
-  const redactor=new HandoffRedactor([...keys,...s.tasks.sessionSecrets(taskId)],environment,aliases);
   const results:{seq:number;type:string;text:string}[]=[];
   let bytes=0, truncated=false;
   for(const row of rows) {
     if(q.name==='get_events' && (row.seq<q.arguments.fromSeq || row.seq>q.arguments.toSeq))continue;
-    const masked=redactor.text(row.text,row.env?'.env':undefined);
+    let masked=cache.get(row.seq);
+    if(masked===undefined) {masked=redactor.text(row.text,row.env?'.env':undefined);cache.set(row.seq,masked);}
     if(q.name==='search' && !masked.toLocaleLowerCase().includes(q.arguments.query.toLocaleLowerCase()))continue;
     const clipped=boundedText(masked,8192);
     const result={seq:row.seq,type:row.type,text:clipped.text};

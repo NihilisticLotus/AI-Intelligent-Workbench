@@ -21,6 +21,21 @@ export class HandoffExecution {
     this.summaryLedger = new IndependentRequestLedger(s.db, 'summary');
     this.summaryLedger.recover();
     s.events.bus.on(event=>this.guard(event));
+    // 上次运行时停在确认框的交接：没有开始发送，按取消清理检查点与说明文件。
+    const stale=s.db.all<{id:string;task_id:string}>("SELECT id,task_id FROM handoffs WHERE state='prepared'");
+    if(stale.length) void Promise.allSettled(stale.map(row=>this.discard(row.task_id,row.id)));
+  }
+
+  /** 取消尚未发送的交接：记录保留为“已取消”，删除检查点引用和 .aic/handoffs 下的说明。 */
+  async discard(taskId:string,id:string) {
+    const record=this.get(taskId,id);
+    const changed=this.s.db.run("UPDATE handoffs SET state='cancelled' WHERE task_id=? AND id=? AND state='prepared' AND to_session_id IS NULL",taskId,id).changes;
+    if(!changed) throw Errors.invalidState('这次交接已经开始发送或已经结束，不能取消');
+    this.progress(taskId,id,'send','skipped');
+    const ref=record.document.meta.checkpoint;
+    if(ref && this.s.workspaces.get(taskId)) await this.s.workspaces.dropCheckpoint(taskId,ref);
+    if(this.s.workspaces.get(taskId)) await this.s.workspaces.removeTaskArtifacts(taskId,['.aic/handoffs/'+record.ordinal+'.md','.aic/handoffs/'+record.ordinal+'.json']);
+    return this.get(taskId,id);
   }
 
   private guard(event:EventEnvelope) {
@@ -173,8 +188,9 @@ export class HandoffExecution {
     const instruction='请先用几句话复述目标、下一步和准备先读的文件，再继续本轮用户的任务。';
     const hasUserMessage=Boolean(user || attachments.texts.length || attachments.files.length);
     const parts=hasUserMessage ? ['## 本轮用户消息',user,...attachments.texts,instruction] : [action==='redo'?'工作台操作：用完整转写重新交接。请复述当前目标和下一步，等用户发送下一条消息。':'工作台操作：切回原 Agent。请复述交接信息，等用户发送下一条消息。'];
-    if (record.document.meta.to.agent==='codex' && permission!=='readonly' && hasUserMessage) {
-      parts.push('若本轮用户要求编辑文件，请在当前工作副本使用 Codex 原生 apply_patch（函数形式为 tools.apply_patch），按现有权限申请编辑。历史里的工具名属于上一会话。若只需新建文件且交接中已有所需内容，可直接新增。用户禁止命令也适用于读取文件。');
+    if (permission!=='readonly' && hasUserMessage) {
+      // 不点名具体工具：各家工具名不同，历史中的工具属于上一会话（ISSUE-0133 的通用化）。
+      parts.push('若本轮用户要求编辑文件，请在当前工作副本使用你自己的文件编辑工具，按现有权限申请编辑；历史里的工具名属于上一会话，不一定可用。若只需新建文件且交接中已有所需内容，可直接新增。用户禁止命令也适用于读取文件。');
     }
     if (action==='redo') checkForcedWindow({forceH2:true},estimateTokens([body,markdown,...parts].join('\n\n')),record.quality.window);
     return {text:parts.join('\n\n'),resources:[{uri:'aic://task/TASK.md',text:body},{uri:'aic://task/handoffs/'+record.ordinal+'.md',text:markdown}]};

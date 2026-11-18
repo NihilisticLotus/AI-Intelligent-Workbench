@@ -16,7 +16,10 @@ export function PendingHandoff({task}:{task:Task}) {
 
 export async function confirmHandoff(taskId:string,id:string):Promise<HandoffSendOptions|null> {
   const record=await api.handoff(taskId,id);
-  return new Promise(resolve=>openDialog(close=><EditHandoff record={record} finish={value=>{close();resolve(value);}}/>));
+  const value=await new Promise<HandoffSendOptions|null>(resolve=>openDialog(close=><EditHandoff record={record} finish={value=>{close();resolve(value);}}/>));
+  // 取消时清理待确认的交接（检查点与说明文件）；清理失败不影响原会话，下次启动会再清理。
+  if(!value) await api.cancelHandoff(taskId,id).catch(()=>{});
+  return value;
 }
 function EditHandoff({record,finish}:{record:HandoffRecord;finish:(value:HandoffSendOptions|null)=>void}) {
   const [markdown,setMarkdown]=useState(record.markdown);
@@ -81,7 +84,7 @@ export function HandoffDivider({item,task}:{item:HandoffItem;task:Task}) {
       if ('pendingHandoffId' in result && result.pendingHandoffId) {
         const edited=await confirmHandoff(task.id,result.pendingHandoffId);
         if(!edited)return;
-        await api.handoffAction(task.id,item.id,kind,edited);
+        await api.handoffAction(task.id,item.id,kind,{...options,...edited});
       }
       setRecord(await api.handoff(task.id,item.id));
     } catch(e){setError(asApiError(e));} finally{setBusy(false);}
@@ -99,7 +102,7 @@ export function HandoffDivider({item,task}:{item:HandoffItem;task:Task}) {
   return <section className="handoff-divider">
     <button className="handoff-title" type="button" aria-expanded={expanded} onClick={()=>setExpanded(v=>!v)}>
       {item.receipt?<><strong>已自动交接 · {from}{modelLabel(party?.from)} → {to}{modelLabel(party?.to)}</strong>
-        <span>{item.receipt.level} · {item.receipt.quality.coveragePassed?'覆盖通过':'待核对'}</span></>:<strong>{failed?'交接未完成':item.steps.generate==='done'&&!item.steps.send?'已生成交接内容':'正在交接'}</strong>}<span aria-hidden="true">{expanded?'▴':'▾'}</span>
+        <span>{item.receipt.level} · {item.receipt.quality.coveragePassed?'覆盖通过':'待核对'}</span></>:<strong>{failed?'交接未完成':item.steps.send==='skipped'?'已取消交接':item.steps.generate==='done'&&!item.steps.send?'已生成交接内容':'正在交接'}</strong>}<span aria-hidden="true">{expanded?'▴':'▾'}</span>
     </button>
     {receipt && !historyAvailable && <p>{receipt.level==='H2'?'本次无法调用历史查询工具。':'本次不能回查省略的细节，已核实的事实已随交接发送。'}</p>}
     {!item.receipt||expanded?<ol className="handoff-steps" aria-label="交接进度" role="status">{(Object.keys(labels) as HandoffProgressStep[]).map(k=>

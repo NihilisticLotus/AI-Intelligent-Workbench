@@ -406,7 +406,7 @@ export const HandoffActionResult = z.union([z.object({taskId:Id,level:z.literal(
   z.object({taskId:Id,messageId:Id,pendingHandoffId:Id.optional()})]);
 export const HandoffRecord = HandoffPreview.extend({
   latestSent:z.boolean().optional(),
-  id:Id,ordinal:z.number().int().positive(),createdAt:Ts,edited:z.boolean(),state:z.enum(['prepared','sent','failed','returned']),
+  id:Id,ordinal:z.number().int().positive(),createdAt:Ts,edited:z.boolean(),state:z.enum(['prepared','sent','failed','returned','cancelled']),
 }).strict();
 export type HandoffRecord = z.infer<typeof HandoffRecord>;
 export const TaskFile = ToolFile.extend({ sessionId: Id.nullable(), name: z.string(), directory: z.string(), updatedAt: Ts, source: z.enum(['agent', 'independent']) }).strict();

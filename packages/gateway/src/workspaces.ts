@@ -175,6 +175,39 @@ export class WorkspaceManager {
       }
     });
   }
+  /** 删除本任务登记的检查点引用（取消未发送的交接时使用）。 */
+  dropCheckpoint(taskId: string, ref: string) {
+    return this.exclusive(taskId, async () => {
+      const record = await this.checkedRecord(taskId);
+      const row = this.db.get<{oid:string}>('SELECT oid FROM handoff_checkpoints WHERE task_id=? AND ref=?',taskId,ref);
+      if (!row) return;
+      await this.git.checked(['update-ref','-d',ref,row.oid],this.options(record));
+      this.db.run('DELETE FROM handoff_checkpoints WHERE task_id=? AND ref=?',taskId,ref);
+    });
+  }
+  /** 删除工作台写过且未被改动的说明文件；被 Agent 改过的保留。 */
+  removeTaskArtifacts(taskId: string, names: readonly string[]) {
+    return this.exclusive('artifacts:'+taskId, async () => {
+      const record = await this.checkedRecord(taskId);
+      if (record.state !== 'ready') return;
+      for (const name of names) if (!/^\.aic\/handoffs\/[1-9]\d*\.(json|md)$/.test(name)) fail('workspace.path','工作台说明文件名无效。');
+      const batch: WorkspaceTransferItem[] = [];
+      for (const name of names) {
+        const current = await this.artifactHash(record,name);
+        if (current) batch.push({path:name,expectedHash:current,source:null,sourceHash:null});
+      }
+      if (!batch.length) return;
+      const directory = await safePath(await this.root(),'workspace-transfers',true);
+      await mkdir(directory, {recursive:true});
+      const tmp = await mkdtemp(path.join(directory,taskId+'-'));
+      try { await this.guardedTransfer(record.path,batch,tmp); }
+      finally {
+        if (path.dirname(tmp) !== directory) fail('workspace.path','说明文件的临时目录位置不匹配。');
+        await rm(tmp,{recursive:true,force:true});
+      }
+      this.db.tx(() => { for (const item of batch) this.db.run('DELETE FROM workspace_artifacts WHERE task_id=? AND path=?',taskId,item.path); });
+    });
+  }
   async settle() { await Promise.allSettled([...this.pending.values()]); }
   constructor(private readonly db: Db, readonly git: Git, private readonly dataDir: string) {}
 
@@ -856,7 +889,11 @@ export class WorkspaceManager {
       const before=await this.head(record.projectPath), opts={cwd:record.path};
       // 即使最终树已删掉说明，中间提交也会随“保留提交记录”进入项目历史。
       const internalCommit = await this.git.checked(['rev-list','--full-history','-1',before+'..HEAD','--',consoleSpec],opts);
-      if (internalCommit.length) return fail('workspace.private_history','任务提交包含工作台专用目录 .aic，不能将该历史合并进项目。');
+      // 保留提交记录会把 .aic 带进项目历史，只能请用户改用压缩合并；压缩合并只发布最终树，可先从任务分支移除 .aic。
+      if (internalCommit.length && body.strategy!=='squash') {
+        const files=(await this.git.checked(['log','--format=','--name-only','-z',before+'..HEAD','--',consoleSpec],opts)).toString().split('\0').map(s=>s.trim()).filter(Boolean).map(workspaceRelative);
+        return {status:'manual_required',reason:'private_history',files:[...new Set(files)]};
+      }
       if ((await this.dirtyFiles(record.path)).length) {
         await this.git.checked(['add','--all','--','.',excludeConsole],opts);
         // 只排除 add 无法移除其他进程先前放入暂存区的任务说明。
@@ -867,6 +904,11 @@ export class WorkspaceManager {
         const staged=await this.git.run(['diff','--cached','--quiet'],opts);
         if(staged.code===1) await this.git.checked(['commit','-m',body.message],opts);
         else if(staged.code!==0) throw new GitError('failed','diff',staged.code);
+      }
+      if (body.strategy==='squash' && (await this.git.checked(['diff','--name-only','-z',before,'HEAD','--',consoleSpec],opts)).length) {
+        // 只改任务分支的暂存区：.aic 恢复到项目基准的样子，副本里的说明文件不动（仍被 .aic/.gitignore 忽略）。
+        await this.git.checked(['reset','-q',before,'--',consoleSpec],opts);
+        await this.git.checked(['commit','-m','移除工作台专用目录 .aic'],opts);
       }
       const merge=await this.git.run(['merge','--no-edit','-m','整合项目基准分支',before],opts);
       if(merge.code!==0) {

@@ -158,6 +158,10 @@ export class IndependentTaskRuntime {
       this.changed(taskId); return this.state(taskId);
     });
   }
+  portableEntries(taskId: string, sessionId: string) {
+    if (!this.db.get("SELECT id FROM sessions WHERE id=? AND task_id=? AND agent_id='independent'",sessionId,taskId)) throw Errors.notFound('找不到本任务的独立会话');
+    return this.store.entries(sessionId);
+  }
   history(taskId: string, after: number, limit: number): IndependentHistoryPage {
     this.row(taskId);
     const session = this.db.get('SELECT id FROM sessions WHERE task_id=? AND agent_id=? ORDER BY started_at DESC LIMIT 1', taskId, 'independent');

@@ -277,6 +277,12 @@ const MIGRATIONS: string[] = [
      UNIQUE(task_id,item_key));
    CREATE TABLE workspace_artifacts (task_id TEXT NOT NULL REFERENCES workspace_records(task_id) ON DELETE CASCADE, path TEXT NOT NULL, hash TEXT NOT NULL, PRIMARY KEY(task_id,path));
    CREATE TABLE task_memory_cursors (task_id TEXT PRIMARY KEY REFERENCES tasks(id) ON DELETE CASCADE, seq INTEGER NOT NULL);`,
+  // v21：保存交接时实际发送的材料和校验记录，预览不创建交接记录。
+  `CREATE TABLE handoffs (id TEXT PRIMARY KEY, task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+     from_session_id TEXT, to_session_id TEXT, level TEXT NOT NULL, content_md TEXT NOT NULL,
+     document_json TEXT NOT NULL, quality_json TEXT NOT NULL, edited_by_user INTEGER NOT NULL DEFAULT 0,
+     created_at INTEGER NOT NULL);
+   CREATE INDEX idx_handoffs_task ON handoffs(task_id,created_at);`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

@@ -327,6 +327,40 @@ export const AddTaskConstraint = z.union([
   z.object({ kind: z.literal('constraint'), content: z.string().min(1).max(65536) }).strict(),
 ]);
 export type AddTaskConstraint = z.infer<typeof AddTaskConstraint>;
+
+export const HandoffLevel = z.enum(['H2','H3','H4']);
+export type HandoffLevel = z.infer<typeof HandoffLevel>;
+export const HandoffTarget = z.object({ agent: AgentKind, model: z.string().min(1).max(512).optional(), effort: z.string().max(200).optional() }).strict();
+export type HandoffTarget = z.infer<typeof HandoffTarget>;
+const handoffParty = z.object({ agent: AgentKind, model: z.string().nullable(), sessionId: Id.nullable() });
+const handoffFile = z.object({ path: z.string(), operation: z.string(), added: TokenCount, removed: TokenCount, oldPath: z.string().optional() });
+const handoffCommand = z.object({ seq: z.number().int(), command: z.string(), ok: z.boolean(), output: z.string() });
+export const HandoffNarrative = z.object({
+  attempts: z.array(z.string()).optional(), decisions: z.array(z.string()).optional(),
+  openIssues: z.array(z.string()).optional(), current: z.string().optional(),
+}).strict();
+export type HandoffNarrative = z.infer<typeof HandoffNarrative>;
+export const HandoffDocument = HandoffNarrative.extend({
+  meta: z.object({ taskId: Id, from: handoffParty, to: handoffParty, level: HandoffLevel, checkpoint: z.string().nullable(),
+    fromSeq: z.number().int().nullable(), toSeq: z.number().int().nullable() }),
+  intent: z.object({ goal: z.string(), constraints: z.array(z.string()) }),
+  userMessages: z.array(z.object({ seq: z.number().int(), text: z.string() })), corrections: z.array(z.string()),
+  tasks: z.array(z.object({ text: z.string(), status: z.enum(['pending','in_progress','completed']) })),
+  files: z.object({ changed: z.array(handoffFile), read: z.array(z.object({path:z.string(),count:z.number().int().positive()})) }),
+  vcs: z.object({ branch: z.string().nullable(), baseBranch: z.string().nullable(), baseRef: z.string().nullable(),
+    changed: z.array(handoffFile), commits: z.array(z.object({id:z.string(),title:z.string()})) }),
+  commands: z.object({ items: z.array(handoffCommand), lastTest: handoffCommand.nullable() }),
+  env: z.object({ workspace: z.string().nullable(), branch: z.string().nullable() }),
+}).strict();
+export type HandoffDocument = z.infer<typeof HandoffDocument>;
+export const HandoffQuality = z.object({
+  added: z.array(z.string()), inconsistent: z.array(z.string()), redactions: z.number().int().nonnegative(),
+  coveragePassed: z.boolean(), consistencyPassed: z.boolean(), window: z.number().positive(), estimatedTokens: z.number().nonnegative(),
+  probe: z.object({passed:z.number().int(),total:z.number().int()}).optional(),
+}).strict();
+export type HandoffQuality = z.infer<typeof HandoffQuality>;
+export const HandoffPreview = z.object({ document: HandoffDocument, markdown: z.string(), level: HandoffLevel, quality: HandoffQuality }).strict();
+export type HandoffPreview = z.infer<typeof HandoffPreview>;
 export const TaskFile = ToolFile.extend({ sessionId: Id.nullable(), name: z.string(), directory: z.string(), updatedAt: Ts, source: z.enum(['agent', 'independent']) }).strict();
 export type TaskFile = z.infer<typeof TaskFile>;
 export const EventEnvelope = z.discriminatedUnion('type', [
@@ -335,6 +369,7 @@ export const EventEnvelope = z.discriminatedUnion('type', [
   ev('task.deleted', z.object({ id: Id })),
   ev('task.changes_updated', WorkspaceChangeTotals),
   ev('task.memory_updated', z.object({}).strict()),
+  ev('task.file_restored', z.object({path:z.string()}).strict()),
   ev('session.started', z.object({
     agent: AgentKind, model: z.string().nullable(),
     /** 1.2 新增：会话使用的账号；resumed 表示这次是恢复原来的会话（H1） */

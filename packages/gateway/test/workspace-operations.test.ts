@@ -44,7 +44,7 @@ describe('非 git 应用与回滚保护',{timeout:60000},()=>{
     db.close();
     const file = path.join(data, 'test.db');
     const old = new DatabaseSync(file);
-    old.exec('DROP TABLE workspace_artifacts; DROP TABLE task_memory_cursors; DROP TABLE task_memory; ALTER TABLE workspace_operations DROP COLUMN legacy_applied; PRAGMA user_version=18;');
+    old.exec('DROP TABLE handoffs; DROP TABLE workspace_artifacts; DROP TABLE task_memory_cursors; DROP TABLE task_memory; ALTER TABLE workspace_operations DROP COLUMN legacy_applied; PRAGMA user_version=18;');
     old.close();
     db = openDb(file);
     manager = new WorkspaceManager(db, git, data);

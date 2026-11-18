@@ -155,6 +155,7 @@ export class TaskService {
     const secrets = [...await this.savedSecrets(body),...(this.secretsOf.get(id) ?? [])];
     return limitTaskSummary(body,secrets);
   }
+  sessionSecrets(id: string): readonly string[] { return this.secretsOf.get(id) ?? []; }
 
   /** 同一副本的变化合并写入；新变化到达时，当前发布结束后重新从账本渲染。 */
   private scheduleSummary(id: string) {
@@ -272,6 +273,7 @@ export class TaskService {
 
   async restoreWorkspaceFile(id: string, relative: string) {
     const result = await this.workspaceOperation(id, manager => manager.restoreFile(id, relative), true);
+    this.events.append({type:'task.file_restored',taskId:id,sessionId:null,data:{path:relative}});
     this.syncWorkspace(id); await this.refreshChanges(id); return result;
   }
 

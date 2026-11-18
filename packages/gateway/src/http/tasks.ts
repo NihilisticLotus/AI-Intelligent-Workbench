@@ -8,7 +8,8 @@ import { Errors } from '../util';
 import { parseQuery, readBody, type Env } from './app';
 import { taskUsage } from '../usage';
 import { taskFiles } from '../task-files';
-import { AddTaskConstraint } from '@aic/protocol';
+import { AddTaskConstraint, HandoffTarget } from '@aic/protocol';
+import { previewHandoff } from '../handoff/preview';
 
 export function taskRoutes(s: Services) {
   const r = new Hono<Env>();
@@ -16,6 +17,7 @@ export function taskRoutes(s: Services) {
   r.get('/tasks', (c) => c.json(s.tasks.list(parseQuery(c, TasksQuery))));
   r.post('/tasks', async (c) => c.json(await s.tasks.create(await readBody(c, CreateTaskBody)), 201));
   r.get('/tasks/:id', (c) => c.json(s.tasks.get(c.req.param('id'))));
+  r.post('/tasks/:id/handoff/preview', async c => c.json(await previewHandoff(s,c.req.param('id'),await readBody(c,HandoffTarget))));
   r.get('/tasks/:id/memory', c => c.json({items:s.tasks.memory.list(c.req.param('id'))}));
   r.post('/tasks/:id/memory', async c => {
     const id = c.req.param('id'), input = await readBody(c,AddTaskConstraint);

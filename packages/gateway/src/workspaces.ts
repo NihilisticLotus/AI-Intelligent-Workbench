@@ -374,15 +374,16 @@ export class WorkspaceManager {
     return [...new Set([...before.keys(), ...after.keys()])].filter(p => before.get(p) !== after.get(p));
   }
 
-  private async changes(record: WorkspaceRecord): Promise<{ result: WorkspaceChanges; tree: string }> {
+  private async changes(record: WorkspaceRecord, liveCopy = false): Promise<{ result: WorkspaceChanges; tree: string }> {
     if (!record.baseRef) return fail('workspace.base', '工作副本没有可比较的基准。');
     const opts = this.options(record);
-    const current = record.kind === 'copy' ? record.snapshotFiles.filter(f => !consolePath(f.path)) : await this.currentFiles(record);
+    const useSnapshot = record.kind === 'copy' && !liveCopy;
+    const current = useSnapshot ? record.snapshotFiles.filter(f => !consolePath(f.path)) : await this.currentFiles(record);
     // git 内容指纹让外部编辑立即失效；copy 以最新快照为准，快照完成即失效。
     const fingerprint = JSON.stringify([record.baseRef, record.snapshotAfter, current.map(f => [f.path, f.hash, f.size])]);
     const cached = this.changesCache.get(record.taskId);
     if (cached && cached.until > Date.now() && cached.fingerprint === fingerprint) return cached.value;
-    const tree = record.kind === 'copy' ? record.snapshotAfter! : await this.buildTree(record, current);
+    const tree = useSnapshot ? record.snapshotAfter! : await this.buildTree(record, current);
     const baseEntries = (await this.git.checked(['ls-tree','-rlz', record.baseRef], opts)).toString().split('\0').filter(Boolean);
     const baseSizes = new Map<string, number>();
     for (const entry of baseEntries) {
@@ -435,6 +436,21 @@ export class WorkspaceManager {
   }
   diff(taskId: string): Promise<WorkspaceChanges> {
     return this.exclusive(taskId, async () => (await this.changes(await this.checkedRecord(taskId))).result);
+  }
+  handoffChanges(taskId: string) {
+    return this.exclusive(taskId,async()=>{
+      const record=await this.checkedRecord(taskId);
+      const {result}=await this.changes(record,true);
+      const commits:{id:string;title:string}[]=[];
+      if (record.kind==='worktree' && record.baseRef) {
+        const out=await this.git.checked(['log','-8','--format=%H%x00%s','--no-decorate',record.baseRef+'..HEAD'],this.options(record));
+        for(const row of out.toString().trimEnd().split('\n').filter(Boolean)) {
+          const split=row.indexOf('\0');
+          commits.push({id:row.slice(0,split),title:row.slice(split+1)});
+        }
+      }
+      return {files:result.files,commits};
+    });
   }
   fileDiff(taskId: string, relative: string): Promise<WorkspaceFileDiff> {
     workspaceRelative(relative);

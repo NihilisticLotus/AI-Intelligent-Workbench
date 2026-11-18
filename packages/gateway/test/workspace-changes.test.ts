@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { existsSync, readFileSync, writeFileSync, utimesSync, unlinkSync, renameSync, mkdirSync, symlinkSync } from 'node:fs';
 import path from 'node:path';
 import { Task, WorkspaceChanges, WorkspaceFileDiff } from '@aic/protocol';
-import { startGw, makeProject, type TestGw } from './helpers';
+import { startGw, makeProject, WsClient, type TestGw } from './helpers';
 
 let t: TestGw | undefined;
 afterEach(async () => { await t?.stop(); t = undefined; });
@@ -91,11 +91,19 @@ describe('任务改动 REST 与还原', () => {
     expect((await f.get()).status).toBe(409); expect((await f.restore('modify.txt')).status).toBe(409);
   });
   it('正在等待审批的任务拒绝还原，不覆盖正在执行的副本',async()=>{
-    const f=await setup(); change(f.root); await t!.gw.services.tasks.prompt(f.task.id,'运行测试');
-    await expect.poll(()=>t!.gw.services.tasks.get(f.task.id).status).toBe('waiting');
-    expect((await f.restore('modify.txt')).status).toBe(409);
-    expect(readFileSync(path.join(f.root,'modify.txt'),'utf8')).toBe('新内容\n新增行\n');
-    await t!.gw.services.tasks.cancel(f.task.id); await t!.gw.services.tasks.idle();
+    const f=await setup(); change(f.root);
+    const client=await WsClient.connect(t!.port,f.token);
+    try {
+      await client.call({op:'subscribe',data:{lastSeq:0}});
+      await t!.gw.services.tasks.prompt(f.task.id,'运行测试');
+      await client.waitEvent(e=>e.taskId===f.task.id && e.type==='approval.requested');
+      expect(t!.gw.services.tasks.get(f.task.id).status).toBe('waiting');
+      expect((await f.restore('modify.txt')).status).toBe(409);
+      expect(readFileSync(path.join(f.root,'modify.txt'),'utf8')).toBe('新内容\n新增行\n');
+    } finally {
+      await t!.gw.services.tasks.cancel(f.task.id); await t!.gw.services.tasks.idle();
+      await client.close();
+    }
   });
   it('新接口逐一校验设备令牌、Host 和 Origin',async()=>{
     const f=await setup();

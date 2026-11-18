@@ -131,3 +131,7 @@
 | [ISSUE-0123](ISSUE-0123-handoff-history-approval-title.md) | 历史工具审批丢失同一次调用的名称 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0124](ISSUE-0124-handoff-approval-expiry.md) | 接收首轮审批到期仍会发布成功交接收据 | fixed | 验收未通过 | 2026-11-18 | 2026-11-18 |
 | [ISSUE-0125](ISSUE-0125-handoff-return-chain.md) | 原生切回后较早的交接分隔条缺少切回按钮 | fixed | bug | 2026-11-18 | 2026-11-18 |
+| [ISSUE-0126](ISSUE-0126-handoff-failed-session-selection.md) | 重新交接失败后继续到了错误的会话 | investigating | bug | 2026-11-18 | |
+| [ISSUE-0127](ISSUE-0127-handoff-environment-attachment-history.md) | 已发送环境附件的值未持续用于后续交接脱敏 | investigating | bug | 2026-11-18 | |
+| [ISSUE-0128](ISSUE-0128-workspace-deleted-owned-artifact.md) | 副本中已删除的项目自有说明被工作台重新创建 | investigating | bug | 2026-11-18 | |
+| [ISSUE-0129](ISSUE-0129-idle-watchdog-test-start.md) | 无回应提醒用例提前开始计时 | investigating | 验收未通过 | 2026-11-18 | |

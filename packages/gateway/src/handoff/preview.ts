@@ -1,3 +1,4 @@
+import { attachmentEnvironment } from './history';
 import { HandoffPreview, type HandoffDocument, type HandoffTarget, type HandoffNarrative, type HandoffLevel, type IndependentSelection } from '@aic/protocol';
 import type { Services } from '../services';
 import { readHandoffState } from './state';
@@ -36,7 +37,7 @@ export async function previewHandoff(s:Services,id:string,target:HandoffTarget,o
   for(const l of lines) values.push(l.text,l.output??'');
   if(options.narrative) values.push(...Object.values(options.narrative).flat());
   const keys=await s.secrets.forRedaction(values.join('\n'));
-  const envValues=[...environmentValues(lines.flatMap(line=>line.env && line.output ? [line.output] : [])),...(options.environment??[])];
+  const envValues=[...environmentValues(lines.flatMap(line=>line.env && line.output ? [line.output] : [])),...await attachmentEnvironment(s,id),...(options.environment??[])];
   const paths=raw.files.changed.flatMap(file=>file.oldPath?[file.path,file.oldPath]:[file.path]);
   paths.push(...raw.files.read.map(file=>file.path));
   const aliases=pathAliases(s.db,id,envValues,paths);

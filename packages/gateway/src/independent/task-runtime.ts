@@ -1,3 +1,4 @@
+import { sourceSession } from '../handoff/session';
 // 正式任务宿主：配置、记账、上下文、工具与审批均由 Gateway 持有，不借用第三方 Agent 认证。
 import {
   IndependentTaskOptions, IndependentTaskState, IndependentApprovalDetail, IndependentHistoryPage,
@@ -164,7 +165,7 @@ export class IndependentTaskRuntime {
   }
   history(taskId: string, after: number, limit: number): IndependentHistoryPage {
     this.row(taskId);
-    const session = this.db.get('SELECT id FROM sessions WHERE task_id=? AND agent_id=? ORDER BY started_at DESC LIMIT 1', taskId, 'independent');
+    const session = sourceSession(this.db,taskId,'independent');
     const entries = session ? this.store.entries(String(session.id)) : [];
     const items = entries.filter((e) => e.seq > after).slice(0, limit).map((e) => {
       if (e.message.role !== 'assistant') return e;
@@ -173,7 +174,7 @@ export class IndependentTaskRuntime {
     return { items, nextCursor: items.length && items.at(-1)!.seq < entries.length ? items.at(-1)!.seq : null };
   }
   checkpoint(taskId: string, input: { throughSeq: number; summary: string; expectedTailHash: string }) {
-    const session = this.db.get('SELECT id FROM sessions WHERE task_id=? AND agent_id=? ORDER BY started_at DESC LIMIT 1', taskId, 'independent');
+    const session = sourceSession(this.db,taskId,'independent');
     if (!session) throw Errors.invalidState('任务还没有会话记录');
     const result = this.store.checkpoint(String(session.id), input.throughSeq, input.summary, input.expectedTailHash);
     this.changed(taskId); return result;

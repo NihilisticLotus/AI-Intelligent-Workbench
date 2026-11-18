@@ -91,11 +91,11 @@ describe('发送时交接',()=>{
     await switchAgent();await s.tasks.idle();
     expect(starts).toBe(1);expect(s.tasks.get(task.id).agent).toBe('codex');
   });
-  it('目标首轮失败后不支持原生恢复的来源仍能继续同一会话',async()=>{
+  it.each([false,true])('目标首轮失败后来源能继续同一会话（声明支持恢复：%s）',async resume=>{
     const fake=createFakeAdapter({speed:0});
     const turns:number[]=[];
     let succeeds=false,closed=0;
-    gw=await startGw({adapters:[{...fake,async spawn(options){
+    gw=await startGw({adapters:[{...fake,async probeCapabilities(c){return {...await fake.probeCapabilities(c),resume};},async spawn(options){
       const c=await fake.spawn(options);
       let n=0;
       c.close=async()=>{closed++;};
@@ -198,6 +198,28 @@ describe('发送时交接',()=>{
       expect(resumed).toEqual([first.agent_session_id]);expect(s.tasks.get(task.id).agent).toBe('fake');
       expect(await readFile(path.join(targetCwd,'Level.cs'),'utf8')).toBe('原版本');
     } finally {await ws.close();}
+  });
+  it('已发送环境附件的普通配置在以后的交接、历史和任务说明中继续打码',async()=>{
+    const fake=createFakeAdapter({speed:0});
+    let received='';
+    gw=await startGw({adapters:[fake,{...fake,id:'codex',async spawn(opts){
+      const c=await fake.spawn(opts);c.prompt=async input=>{received=JSON.stringify(input);return {stopReason:'end_turn'};};return c;
+    }}]});
+    const token=await gw.pair(),p=await makeProject(gw,token),s=gw.gw.services;
+    const scene='AutumnVillage',weather='ClearMorning';
+    const t=await s.tasks.create({projectId:p.id,agent:'fake',permission:'readonly',prompt:'检查场景',deferPrompt:true});
+    const file=s.attachments.upload(t.id,'.env.关卡',Buffer.from('SCENE='+scene+'\nWEATHER="'+weather+'" # 天气\n'));
+    await s.tasks.prompt(t.id,'检查本轮配置',[file.id]);await s.tasks.idle();
+    const text='已选场景 '+scene+'，天气 '+weather;
+    await s.tasks.updateMemory(t.id,()=>s.tasks.memory.constrain(t.id,{kind:'constraint',content:text}));
+    await s.tasks.prompt(t.id,text,[],{agent:'codex'});await s.tasks.idle();
+    const r=s.db.get<{id:string;to_session_id:string}>('SELECT id,to_session_id FROM handoffs WHERE task_id=?',t.id)!;
+    const {readHistory}=await import('../src/handoff/history');
+    const history=await readHistory(s,{taskId:t.id,handoffId:r.id,sessionId:r.to_session_id},{name:'get_events',arguments:{fromSeq:1,toSeq:99999}});
+    for(const content of [received,JSON.stringify(history),await readFile(path.join(s.workspaces.get(t.id)!.path,'.aic','TASK.md'),'utf8')]){
+      expect.soft(content).not.toContain(scene);expect.soft(content).not.toContain(weather);
+    }
+    expect(received).toContain('已选场景');expect(JSON.stringify(history)).toContain('已选场景');
   });
   it('交给另一 Agent 的带校验值二进制附件不能暴露命中的密钥字节',async()=>{
     const fake=createFakeAdapter({speed:0});

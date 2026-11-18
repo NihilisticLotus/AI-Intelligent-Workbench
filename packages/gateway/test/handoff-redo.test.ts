@@ -38,6 +38,59 @@ describe('在当前 Agent 重新交接',()=>{
     expect(services.db.all("SELECT id FROM handoffs WHERE task_id=? AND state='sent' AND level='H2'",id)).toHaveLength(2);
     expect(services.db.all("SELECT seq FROM events WHERE task_id=? AND type='message.user'",id)).toHaveLength(1);
   });
+  it('启动恢复识别刚建立的接收会话，保留只预览的交接',async()=>{
+    const {id,services:s,first}=await setup();
+    const pending=await s.tasks.handoffs!.prepare(id,{agent:'fake'},'仅预览',[],{},[]);
+    // 模拟已登记接收会话，尚未来得及把会话编号写回交接收据就退出。
+    s.db.run("UPDATE handoffs SET state='prepared',to_session_id=NULL WHERE id=?",first.id);
+    s.tasks.recoverOnStartup();
+    expect(s.tasks.handoffs!.get(id,first.id).state).toBe('failed');
+    expect(s.tasks.handoffs!.get(id,pending.record.id).state).toBe('prepared');
+    expect(s.tasks.get(id)).toMatchObject({agent:'fake',status:'interrupted'});
+    const progress=s.events.read({taskId:id,after:0,limit:500}).filter(e=>e.type==='handoff.progress' && e.data.handoffId===first.id);
+    expect(progress.at(-1)?.data).toMatchObject({step:'send',status:'failed'});
+  });
+  it('开始发送后接收段尚未登记，重启也要结束这次交接',async()=>{
+    const {id,services:s,first}=await setup();
+    const {record}=await s.tasks.handoffs!.prepare(id,{agent:'fake'},'切换后继续',[],{},[]);
+    s.tasks.handoffs!.progress(id,record.id,'send','running');
+    s.tasks.recoverOnStartup();
+    expect(s.tasks.handoffs!.get(id,record.id).state).toBe('failed');
+    expect(s.tasks.get(id)).toMatchObject({agent:'codex',status:'interrupted'});
+    expect(s.tasks.handoffs!.get(id,first.id).state).toBe('sent');
+    const progress=s.events.read({taskId:id,after:0,limit:500}).filter(e=>e.type==='handoff.progress' && e.data.handoffId===record.id);
+    expect(progress.at(-1)?.data).toMatchObject({step:'send',status:'failed'});
+  });
+  it('同一 Agent 重新交接失败后下一轮恢复原本的原生会话',async()=>{
+    const fake=createFakeAdapter({speed:0});
+    const turns:string[]=[];
+    const historyTokens:string[]=[];
+    let created=0;
+    const mock={...fake,id:'codex' as const,real:true,
+      async probeCapabilities(c:Parameters<typeof fake.probeCapabilities>[0]){return {...await fake.probeCapabilities(c),resume:true};},
+      async spawn(opts:Parameters<typeof fake.spawn>[0]){
+        const connection=await fake.spawn(opts);
+        const service=opts.mcpServers?.find(item=>item.name==='aic-history');
+        historyTokens.push(service?.env.find(entry=>entry.name==='AIC_HISTORY_TOKEN')?.value??'');
+        const id=opts.resume?.agentSessionId ?? 'native-'+(++created);
+        Object.assign(connection,{agentSessionId:id,resumed:!!opts.resume});
+        connection.prompt=async()=>{turns.push(id);return {stopReason:id==='native-2'?'refusal':'end_turn'};};
+        return connection;
+      }};
+    gateway=await startGw({adapters:[fake,mock]});
+    const token=await gateway.pair(),project=await makeProject(gateway,token),s=gateway.gw.services;
+    const t=await s.tasks.create({projectId:project.id,agent:'fake',permission:'readonly',prompt:'核对入口',deferPrompt:true});
+    await s.tasks.prompt(t.id,'首次交接',[],{agent:'codex'});await s.tasks.idle();
+    const first=s.db.get<{id:string;to_session_id:string}>('SELECT id,to_session_id FROM handoffs WHERE task_id=?',t.id)!;
+    await s.tasks.redoHandoff(t.id,first.id);await s.tasks.idle();
+    const preview=await gateway.api('POST','/tasks/'+t.id+'/handoff/preview',{token,body:{agent:'fake'}});
+    expect.soft(preview.json.document.meta.from.sessionId).toBe(first.to_session_id);
+    await s.tasks.prompt(t.id,'继续核对原计划');await s.tasks.idle();
+    expect(turns).toEqual(['native-1','native-2','native-1']);
+    expect(new Set(historyTokens).size).toBe(3);
+    for(const token of historyTokens.slice(0,2))expect(()=>s.history.authenticate('Bearer '+token)).toThrow();
+    expect(s.history.authenticate('Bearer '+historyTokens[2])).toMatchObject({taskId:t.id,handoffId:first.id});
+  });
   it('原会话报告小窗口后，在重新交接前能识别超窗的完整转写',async()=>{
     const {id,services,first,redo,received,starts}=await setup();
     const text='上一轮关卡核验的详细结果。'.repeat(700);

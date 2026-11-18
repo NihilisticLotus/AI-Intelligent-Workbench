@@ -22,6 +22,7 @@ import { PermissionBroker } from './permission-rules';
 import { TaskMemory } from './task-memory';
 import type { HandoffRecord, HandoffSendOptions, HandoffTarget, PromptInput } from '@aic/protocol';
 import type { HandoffExecution } from './handoff/execution';
+import { sourceSession } from './handoff/session';
 import type { HistoryAccess } from './handoff/history-access';
 import { taskSummaryBody, limitTaskSummary } from './task-summary';
 import type { PermissionOperation, PermissionContext, AlwaysAllowConfirmation, PermissionRulePreview } from '@aic/protocol';
@@ -98,7 +99,7 @@ export class TaskService {
   handoffs?: HandoffExecution;
   private summaryJobs = new Map<string, Promise<void>>();
   private dirtySummaries = new Set<string>();
-  savedSecrets: (content: string) => Promise<string[]> = async () => [];
+  cleanSummary = async (id:string, body:string, _environment:readonly string[] = []) => limitTaskSummary(body,this.sessionSecrets(id));
   readonly permissions: PermissionBroker;
   private runtimes = new Map<string, Runtime>();
   private parkedSources = new Map<string, Runtime>();
@@ -156,12 +157,15 @@ export class TaskService {
     this.idleTimer.unref?.();
   }
 
-  private async taskSummaryText(id: string) {
+  private async taskSummaryText(id: string, environment:readonly string[] = []) {
     const body = taskSummaryBody(this.memory.list(id));
-    const secrets = [...await this.savedSecrets(body),...(this.secretsOf.get(id) ?? [])];
-    return limitTaskSummary(body,secrets);
+    return this.cleanSummary(id,body,environment);
   }
-  sessionSecrets(id: string): readonly string[] { return this.secretsOf.get(id) ?? []; }
+  sessionSecrets(id:string): readonly string[] {
+    const current=this.secretsOf.get(id)??[];
+    const parked=this.parkedSources.get(id);
+    return parked ? [...new Set([...current,...parked.secrets])] : current;
+  }
 
   /** 同一副本的变化合并写入；新变化到达时，当前发布结束后重新从账本渲染。 */
   private scheduleSummary(id: string) {
@@ -170,7 +174,7 @@ export class TaskService {
     if (this.summaryJobs.has(id)) return;
     const job = Promise.resolve().then(async () => {
       while (this.dirtySummaries.delete(id)) {
-          const text = await this.taskSummaryText(id);
+        const text = await this.taskSummaryText(id);
         await this.workspaces!.writeTaskArtifacts(id,new Map([['.aic/TASK.md',text]]));
       }
     }).catch(() => {
@@ -204,11 +208,15 @@ export class TaskService {
     const approvals = this.db.all<{ id: string }>("SELECT id FROM approvals WHERE status = 'pending'");
     // Gateway 在目标首轮中退出：恢复任务选择，不自动重发用户消息或再次占用预算。
     this.db.tx(()=>{
-      const interrupted=this.db.all<{id:string;task_id:string;request_json:string}>("SELECT id,task_id,request_json FROM handoffs WHERE state='prepared' AND to_session_id IS NOT NULL");
+      const interrupted=this.db.all<{id:string;task_id:string;request_json:string}>(`SELECT h.id,h.task_id,h.request_json FROM handoffs h WHERE h.state='prepared'
+        AND (h.to_session_id IS NOT NULL OR EXISTS (SELECT 1 FROM sessions s WHERE s.task_id=h.task_id AND s.handoff_id=h.id)
+          OR EXISTS (SELECT 1 FROM events e WHERE e.task_id=h.task_id AND e.type='handoff.progress' AND e.replay=0
+            AND json_extract(e.payload,'$.handoffId')=h.id AND json_extract(e.payload,'$.step')='send' AND json_extract(e.payload,'$.status')='running'))`);
       for(const item of interrupted) {
         const source=JSON.parse(item.request_json).source as Pick<TaskRow,'agent'|'model'|'effort'|'profile_id'> | undefined;
         if(source)this.db.run("UPDATE tasks SET agent=?,model=?,effort=?,profile_id=?,status='interrupted' WHERE id=?",source.agent,source.model,source.effort,source.profile_id,item.task_id);
         this.db.run("UPDATE handoffs SET state='failed' WHERE id=?",item.id);
+        this.events.append({type:'handoff.progress',taskId:item.task_id,sessionId:null,data:{handoffId:item.id,step:'send',status:'failed'}});
       }
     });
     for (const a of approvals) this.finishApproval(a.id, 'expired', null, null);
@@ -836,7 +844,7 @@ export class TaskService {
       if (!this.independentRuntime) throw Errors.invalidState('独立 Agent 尚未装配');
       const project = this.db.get<{ path: string }>('SELECT path FROM projects WHERE id=?', row.project_id);
       if (!project) throw Errors.notFound('找不到任务的项目');
-      const previous = opts.handoff ? undefined : this.db.get<{ id: string }>('SELECT id FROM sessions WHERE task_id=? AND agent_id=? AND (? IS NULL OR id=?) ORDER BY started_at DESC,rowid DESC LIMIT 1', taskId, row.agent,opts.returnTo?.sessionId??null,opts.returnTo?.sessionId??null);
+      const previous = opts.handoff ? undefined : sourceSession(this.db,taskId,row.agent,opts.returnTo?.sessionId);
       if(opts.returnTo && !previous)throw Errors.notRecoverable('原独立会话不存在');
       const sessionId = previous?.id ?? newId('s');
       if (!previous) this.db.run("INSERT INTO sessions(id,task_id,agent_id,model,agent_session_id,parent_session_id,handoff_id,status,started_at) VALUES (?,?,'independent',?,?,?,?,'active',?)", sessionId, taskId, row.model, sessionId,opts.handoff?.parent??null,opts.handoff?.id??null, now());
@@ -874,19 +882,16 @@ export class TaskService {
       if (this.getRow(taskId).status === 'queued' && this.turnAborts.has(taskId)) this.setStatus(taskId, 'running');
       // 上一个会话：同一个任务、同一个 Agent，有 agent_session_id → 恢复（H1）。不限定账号：换账号后也先试着恢复，
       // 恢复不了时适配器会新建会话并提示“Agent 不记得之前的对话”，不会悄悄丢掉上下文
-      const prev = opts.handoff ? undefined : this.db.get<{ id: string; agent_session_id: string; profile_id: string | null; caps_json: string | null }>(
-        `SELECT id, agent_session_id, profile_id, caps_json FROM sessions WHERE task_id = ? AND agent_id = ? AND agent_session_id IS NOT NULL
-         AND (? IS NULL OR id=?) ORDER BY started_at DESC,rowid DESC LIMIT 1`,
-        taskId, row.agent,opts.returnTo?.sessionId??null,opts.returnTo?.sessionId??null,
-      );
+      const prev = opts.handoff ? undefined : sourceSession(this.db,taskId,row.agent,opts.returnTo?.sessionId,true);
       if (a.usesNativeConfig && prev?.profile_id && prev.profile_id !== profile?.id) {
         throw Errors.nativeConfiguration('这个旧任务曾使用工作台替换的认证，已停止继续调用', '请保留历史并用该软件自身配置新建任务；不会自动改用其他账号计费');
       }
       if(opts.returnTo && !prev)throw Errors.notRecoverable('原会话没有原生恢复标识');
-      const resume = (a.real || opts.returnTo) && prev ? { agentSessionId: prev.agent_session_id } : undefined;
+      const resume = (a.real || opts.returnTo) && prev?.agent_session_id ? { agentSessionId: prev.agent_session_id } : undefined;
       // H1：上次的会话不能在会话里换模型时，启动时就指定模型
       const launchModel = !!(a.real && a.launchModel && row.model && this.modelSwitchOf(prev?.caps_json ?? null, row.agent, profile?.id ?? null) === 'none');
-      const history = opts.handoff && this.history?.serverFor({ taskId, sessionId, handoffId: opts.handoff.id });
+      const handoffId=opts.handoff?.id ?? (resume ? prev?.handoff_id : null);
+      const history = handoffId && this.history?.serverFor({taskId,sessionId,handoffId});
       if (history) secrets.push(...history.env.filter(entry => entry.name === 'AIC_HISTORY_TOKEN').map(entry => entry.value));
       const redactor = new StreamRedactor(secrets);
       const conn = await a.spawn({
@@ -897,6 +902,8 @@ export class TaskService {
         ...(resume ? { resume } : {}), ...(signal ? { signal } : {}), ...(launchModel ? { launchModel: true } : {}),
       });
       opening = conn;
+      const linkedHandoff=opts.handoff || conn.resumed ? handoffId : null;
+      if(history && !linkedHandoff)this.history?.revoke(sessionId);
       if(opts.returnTo && !conn.resumed)throw Errors.notRecoverable('原会话无法原生恢复');
       if (opts.strictResume && resume && !conn.resumed) {
         throw Errors.notRecoverable('换账号后原来的会话找不到了', '同一个 Agent 换账号需要交接，会在之后的版本提供；现在可以换回原来的账号');
@@ -910,7 +917,7 @@ export class TaskService {
       }
       this.db.run(
         "INSERT INTO sessions (id, task_id, agent_id, profile_id, model, agent_session_id, parent_session_id, handoff_id, caps_json, status, started_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)",
-        sessionId, taskId, row.agent, profile?.id ?? null, actual?.model ?? row.model, conn.agentSessionId, opts.handoff?.parent ?? prev?.id ?? null, opts.handoff?.id ?? null, JSON.stringify(caps), now(),
+        sessionId, taskId, row.agent, profile?.id ?? null, actual?.model ?? row.model, conn.agentSessionId, opts.handoff?.parent ?? prev?.id ?? null, linkedHandoff ?? null, JSON.stringify(caps), now(),
       );
       this.events.append({
         type: 'session.started', taskId, sessionId,
@@ -927,7 +934,7 @@ export class TaskService {
       }
       return rt;
     } catch (e) {
-      if (opts.handoff) this.history?.revoke(sessionId);
+      this.history?.revoke(sessionId);
       await opening?.close().catch(() => {});
       release();
       throw e;
@@ -1145,11 +1152,11 @@ export class TaskService {
     }
   }
 
-  private async releaseForHandoff(taskId:string,agent:AgentKind) {
+  private async releaseForHandoff(taskId:string,agent:AgentKind,destination:AgentKind) {
     const source=this.runtimes.get(taskId);
     const capabilities=source && this.db.get<{caps_json:string|null}>('SELECT caps_json FROM sessions WHERE task_id=? AND id=?',taskId,source.sessionId);
     const caps=capabilities?.caps_json ? JSON.parse(capabilities.caps_json) : null;
-    if(source && agent!=='independent' && !source.conn.isClosed?.() && !caps?.resume && !caps?.loadSession) {
+    if(source && agent!=='independent' && !source.conn.isClosed?.() && (agent!==destination || (!caps?.resume && !caps?.loadSession))) {
       this.parkedSources.set(taskId,source);
       this.runtimes.delete(taskId);
     } else await this.dropRuntime(taskId,'handoff');
@@ -1213,10 +1220,11 @@ export class TaskService {
       let replacing=false;
       try {
         if(record.edited) await this.handoffs.publish(taskId,record);
-        const summary=await this.taskSummaryText(taskId);
+        const summary=await this.taskSummaryText(taskId,outgoing.values);
+        if(outgoing.values.length && this.workspaces?.get(taskId)) await this.workspaces.writeTaskArtifacts(taskId,new Map([['.aic/TASK.md',summary]]));
         const content=await this.handoffs.input(taskId,record,summary,text,outgoing,options.forceH2 && !reverseOf ? 'redo':'return');
         this.handoffs.progress(taskId,record.id,'send','running');
-        await this.releaseForHandoff(taskId,row.agent);
+        await this.releaseForHandoff(taskId,row.agent,destination);
         replacing=true;
         const rt=await this.startHandoffRuntime(taskId,record.id,target);
         const input=rt.conn.caps?.prompt.embeddedContext ? content : {text:[...content.resources.map(resource=>resource.text),content.text].join('\n\n')};
@@ -1273,7 +1281,7 @@ export class TaskService {
         await this.refreshChanges(taskId);
       }
       if(!confirmation.confirmedId && original && from.sessionId && (from.agent==='independent'||caps?.resume||caps?.loadSession)) {
-        await this.releaseForHandoff(taskId,this.get(taskId).agent);
+        await this.releaseForHandoff(taskId,this.get(taskId).agent,from.agent);
         try {
           const rt=await this.startRuntime(taskId,undefined,{noQueue:true,returnTo:{sessionId:from.sessionId,target,profileId:original.profile_id}});
           this.db.run('UPDATE tasks SET agent=?,model=?,effort=?,profile_id=? WHERE id=?',from.agent,rt.conn.config?.().model??original.model,rt.conn.config?.().effort??null,rt.profileId,taskId);

@@ -125,12 +125,19 @@ export class WorkspaceManager {
       if (receipt && (await fileInfo(record.path,name)).hash === receipt.hash) return receipt.hash;
       return undefined;
     } catch (error) {
-      return (error as NodeJS.ErrnoException).code === 'ENOENT' ? null : undefined;
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') return undefined;
+      // 路径在副本内被删除时，基准或暂存区里的项目文件仍归项目所有。
+      if (record.kind === 'worktree' && record.baseRef) {
+        const tracked = await this.git.checked(['ls-files','--cached','--with-tree='+record.baseRef,'-z','--',consoleSpec],this.options(record));
+        const reserved = tracked.toString().split('\0').filter(Boolean);
+        if (reserved.some(file => samePath(file,name) || isInside(file,name) || isInside(name,file))) return undefined;
+      }
+      return null;
     }
   }
   async artifactConflicts(taskId: string, name: string): Promise<boolean> {
     const record = this.get(taskId);
-    return !!record && record.state === 'ready' && (await this.artifactHash(record,name)) === undefined;
+    return !!record && record.state === 'ready' && (await this.artifactHash(await this.checkedRecord(taskId),name)) === undefined;
   }
   /** 只发布到登记副本。目标目录与文件由现有 Windows 句柄宿主校验。 */
   writeTaskArtifacts(taskId: string, files: ReadonlyMap<string,string>) {

@@ -1,4 +1,4 @@
-const sensitiveFile = /(?:^|[\s/\\'"=:(])\.env(?:\.[\w.-]+)?(?=$|[\s/\\'":,;)\]])/i;
+const sensitiveFile = /(?:^|[\s/\\'"=:(])\.env(?:\.[^\s/\\'":,;)\]]*)?(?=$|[\s/\\'":,;)\]])/i;
 export const isEnvSource = (source: string) => sensitiveFile.test(source);
 
 /** 环境文件中的赋值可能被随后消息引用；整份材料使用相同的打码集合。 */
@@ -10,7 +10,9 @@ export function environmentValues(outputs: string[]): string[] {
       if(literal) values.add(literal);
     }
     for (const match of output.matchAll(/^\s*(?:export\s+)?[\w.-]+\s*=\s*([^\r\n]+)/gm)) {
-      const value = match[1]!.trim().replace(/^["']|["']$/g,'');
+      const raw = match[1]!.trim();
+      const quoted = /^(["'])(.*?)\1(?:\s*#.*)?$/.exec(raw);
+      const value = quoted ? quoted[2] : raw.replace(/\s+#.*$/,'').trim();
       if (value) values.add(value);
     }
   }

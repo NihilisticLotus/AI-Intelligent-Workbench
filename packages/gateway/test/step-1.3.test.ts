@@ -104,13 +104,24 @@ describe('退出记录', () => {
 describe('无回应计时', () => {
   it('60 秒提醒、同 id 两分钟替换、10 分钟取消并暂停', async () => {
     const fake=createFakeAdapter({speed:0});
-    const {task,s}=await setup({ adapters:[{...fake,spawn:async (o)=>{const c=await fake.spawn(o);c.prompt=async (_,signal)=>new Promise((resolve)=>signal.addEventListener('abort',()=>resolve({stopReason:'cancelled'}),{once:true}));return c;}}] });
+    let started!: () => void;
+    const promptStarted = new Promise<void>(resolve => { started = resolve; });
+    const {task,s}=await setup({ adapters:[{...fake,async spawn(options) {
+      const connection = await fake.spawn(options);
+      connection.prompt = async (_,signal) => new Promise(resolve => {
+        signal.addEventListener('abort',()=>resolve({stopReason:'cancelled'}),{once:true});
+        started();
+      });
+      return connection;
+    }}] });
     // 虚拟时钟只验既有回合看门狗；使用旧 inplace 任务，避免虚拟时间驱动真实 git 子进程。
     s.db.run('UPDATE tasks SET workspace_kind=NULL WHERE id=?',task.id);
-    vi.useFakeTimers(); await s.tasks.prompt(task.id,'等待'); await vi.advanceTimersByTimeAsync(0); await vi.advanceTimersByTimeAsync(60_000);
+    vi.useFakeTimers(); await s.tasks.prompt(task.id,'等待'); await vi.advanceTimersByTimeAsync(0);
+    // 适配器实际收到消息后才开始计时，启动前的文件检查仍使用真实异步 I/O。
+    await promptStarted; await vi.advanceTimersByTimeAsync(60_000);
     const notices=()=>s.events.read({after:0,taskId:task.id,limit:1000}).filter((e): e is import('@aic/protocol').EventOf<'session.notice'> => e.type==='session.notice' && !!e.data.id);
     expect(notices()).toHaveLength(1);await vi.advanceTimersByTimeAsync(120_000);expect(notices()).toHaveLength(2);expect(notices()[0]!.data.id).toBe(notices()[1]!.data.id);
-    await vi.advanceTimersByTimeAsync(420_000);expect(s.tasks.get(task.id).status).toBe('paused');expect(s.events.read({after:0,taskId:task.id,limit:1000}).some((e)=>e.type==='error' && e.data.error.code==='agent.no_response')).toBe(true);
+    await vi.advanceTimersByTimeAsync(420_000);await s.tasks.idle();expect(s.tasks.get(task.id).status).toBe('paused');expect(s.events.read({after:0,taskId:task.id,limit:1000}).some((e)=>e.type==='error' && e.data.error.code==='agent.no_response')).toBe(true);
   });
   it('等待审批期间不计时，处理后重新计时', async () => {
     const fake=createFakeAdapter({speed:0});

@@ -57,7 +57,8 @@ export class HandoffExecution {
       if(row.type==='message.done')reply=data.text??reply;
       else reply+=data.text??'';
     }
-    const text=(await outgoingRedactor(this.s,taskId).clean(reply)).slice(0,2000);
+    const {clean}=await outgoingRedactor(this.s,taskId);
+    const text=(await clean(reply)).slice(0,2000);
     const doc=record.document;
     const known=[...new Set([...doc.files.changed.map(f=>f.path),...doc.files.read.map(f=>f.path)])];
     const matched=known.some(path=>text.includes(path)) || !!doc.current && text.includes(doc.current);
@@ -72,7 +73,7 @@ export class HandoffExecution {
       const {bytes}=await this.s.attachments.read(taskId,item.attachmentId!);
       values.push(...environmentValues([bytes.toString('utf8')]));
     }
-    const {clean}=outgoingRedactor(this.s,taskId,undefined,values);
+    const {clean}=await outgoingRedactor(this.s,taskId,undefined,values);
     const files:PromptAttachment[]=[];
     const texts:string[]=[];
     for(const [i,item] of inputs.entries()) {
@@ -126,7 +127,7 @@ export class HandoffExecution {
       }
       if(db.get("SELECT 1 FROM events WHERE task_id=? AND seq>? AND replay=0 AND type IN ('message.user','tool.end','plan.update','task.memory_updated','session.handoff','approval.resolved') LIMIT 1",taskId,record.document.meta.toSeq??0)) throw Errors.invalidState('任务历史已变化，请重新生成交接');
       if(options.markdown!==undefined && record.markdown!==options.markdown) {
-        const {clean}=outgoingRedactor(this.s,taskId,undefined,environment);
+        const {clean}=await outgoingRedactor(this.s,taskId,undefined,environment);
         const markdown=await clean(options.markdown);
         checkForcedWindow(options, estimateTokens(markdown), record.quality.window);
         db.run('UPDATE handoffs SET content_md=?,edited_by_user=1 WHERE task_id=? AND id=?',markdown,taskId,id);
@@ -167,7 +168,7 @@ export class HandoffExecution {
   }
 
   async input(taskId:string,record:HandoffRecord,summary:string,text:string,attachments:{texts:string[];values:string[]},action:'redo'|'return'='return') {
-    const {clean}=outgoingRedactor(this.s,taskId,undefined,attachments.values);
+    const {clean}=await outgoingRedactor(this.s,taskId,undefined,attachments.values);
     const user=await clean(text), body=await clean(summary), markdown=await clean(record.markdown);
     const instruction='请先用几句话复述目标、下一步和准备先读的文件，再继续本轮用户的任务。';
     const parts=user || attachments.texts.length ? ['## 本轮用户消息',user,...attachments.texts,instruction] : [action==='redo'?'工作台操作：用完整转写重新交接。请复述当前目标和下一步，等用户发送下一条消息。':'工作台操作：切回原 Agent。请复述交接信息，等用户发送下一条消息。'];

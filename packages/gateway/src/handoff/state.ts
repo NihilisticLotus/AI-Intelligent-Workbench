@@ -1,3 +1,4 @@
+import { sourceSession } from './session';
 import { EventEnvelope, type HandoffDocument, type HandoffTarget } from '@aic/protocol';
 import type { Services } from '../services';
 import { usableCapability } from '../independent/capabilities';
@@ -50,8 +51,11 @@ export async function readHandoffState(s:Services,id:string,destination:HandoffT
     const bound=s.db.get<{service_id:string;model_id:string}>('SELECT service_id,model_id FROM independent_task_models WHERE task_id=?',id);
     if(bound) independentWindow=usableCapability(s.independent.getModel(bound.service_id,bound.model_id),'contextWindow');
   }
+  const registered=sessions.some(session=>session.agent_id===task.agent);
+  const sourceId=registered ? sourceSession(s.db,id,task.agent)?.id??null
+    : events.findLast(e=>e.type==='session.started' && e.data.agent===task.agent)?.sessionId??null;
   const document:HandoffDocument={
-    meta:{taskId:id,from:{agent:task.agent,model:task.model,sessionId:sessions.findLast(s=>s.agent_id===task.agent && s.status==='active')?.id??events.findLast(e=>e.type==='session.started'&&e.data.agent===task.agent)?.sessionId??sessions.findLast(s=>s.agent_id===task.agent)?.id??null},
+    meta:{taskId:id,from:{agent:task.agent,model:task.model,sessionId:sourceId},
       to:{agent:destination.agent,model:destination.model??null,sessionId:null},checkpoint:null,level:'H2',fromSeq:events[0]?.seq??null,toSeq:events.at(-1)?.seq??null},
     intent:{goal:task.prompt,constraints}, userMessages,corrections,tasks,
     files:{changed:[...fileMap.values()],read:[...reads].sort((a,b)=>b[1]-a[1]).slice(0,20).map(([path,count])=>({path,count}))},

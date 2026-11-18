@@ -1,4 +1,6 @@
 // Gateway 入口：打开数据库、组装服务、监听 127.0.0.1（端口被占用时顺延）、托管网页、打开浏览器。
+import { outgoingRedactor } from './handoff/history';
+import { limitTaskSummary } from './task-summary';
 import { spawn } from 'node:child_process';
 import type { Server } from 'node:http';
 import { hostname } from 'node:os';
@@ -231,7 +233,6 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   const history = new HistoryAccess(db, () => port, events.bus);
   tasks.history = history;
   tasks.attachments = attachments;
-  tasks.savedSecrets = content => secrets.forRedaction(content);
   tasks.agentSvc = agentSvc;
   agentSvc.onQueueChange = ids => tasks.queueChanged(ids);
   tasks.recoverOnStartup();
@@ -264,6 +265,10 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
     bootId,
   };
 
+  tasks.cleanSummary = async (id,body,environment) => {
+    const {clean}=await outgoingRedactor(services,id,undefined,environment);
+    return limitTaskSummary(await clean(body));
+  };
   tasks.handoffs = new HandoffExecution(services);
   const webDist = opts.webDist ?? path.resolve(here, '../../../apps/web/dist');
   const app = createApp(services, { webDist });

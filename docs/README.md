@@ -35,7 +35,7 @@
 | 目录 | 说明 |
 |---|---|
 | [acceptance/](acceptance/) | 每一步的验收记录 |
-| [acceptance/step-1.6.md](acceptance/step-1.6.md) | 上下文与交接的分阶段验收、基线与当前进度 |
+| [acceptance/step-1.6.md](acceptance/step-1.6.md) | 上下文与交接的分阶段验收、第 12.13 节逐项结论及失败后续聊的双主题复核 |
 | [acceptance/step-1.5.md](acceptance/step-1.5.md) | 1.5 按批准范围收尾；1067 / 3、逐条完成标准、真实补验缺口与当前进度 |
 | [acceptance/step-1.4.md](acceptance/step-1.4.md) | 2026-11-13 第 10.15 节五项通过；853 通过 / 3 跳过，真实三轮与双主题证据、反向回归、当前进度；原生拖入未验证见 ISSUE-0070 |
 | [acceptance/step-1.3.md](acceptance/step-1.3.md) | 2026-11-12 已判定通过；完整历史、真实补验和遗留问题见末尾结论，1.4 接手的 ISSUE-0060～0062 已修复 |
@@ -57,3 +57,10 @@
 - [1.5 验收与当前进度](acceptance/step-1.5.md)
 
 - [ISSUE-0093：显式模型自动回退](issues/ISSUE-0093-explicit-model-fallback.md)
+
+### 2026-11-18 交接实现审查
+
+- [原会话恢复](issues/ISSUE-0126-handoff-failed-session-selection.md)
+- [历史环境附件脱敏](issues/ISSUE-0127-handoff-environment-attachment-history.md)
+- [工作副本保留项目自有说明的删除状态](issues/ISSUE-0128-workspace-deleted-owned-artifact.md)
+- [无回应计时用例的起点](issues/ISSUE-0129-idle-watchdog-test-start.md)

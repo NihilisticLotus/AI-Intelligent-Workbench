@@ -29,6 +29,19 @@ async function setup(run?: (o: SpawnOptions, signal: AbortSignal) => Promise<voi
   return { token, project, starts, prompts, git, create, services: t.gw.services };
 }
 describe('任务工作副本接入', () => {
+  it('项目自有说明在副本内删除后，更新账本仍保留删除并内联指令',async()=>{
+    const f=await setup();
+    const name='.aic/TASK.md';
+    mkdirSync(path.join(f.project.path,'.aic'));writeFileSync(path.join(f.project.path,name),'项目说明');
+    for(const args of [['init','-b','main'],['add',name],['commit','-m','登记自有说明']])await f.git.checked(args,{cwd:f.project.path});
+    const task=await f.create(true),root=f.services.workspaces.get(task.id)!.path;
+    unlinkSync(path.join(root,name));
+    await f.services.tasks.updateMemory(task.id,()=>f.services.tasks.memory.constrain(task.id,{kind:'constraint',content:'保留北门入口'}));
+    await f.services.tasks.prompt(task.id,'继续工作');await f.services.tasks.idle();
+    expect.soft(existsSync(path.join(root,name))).toBe(false);
+    expect(f.prompts[0]).toContain('保留北门入口');
+    expect(readFileSync(path.join(f.project.path,name),'utf8')).toBe('项目说明');
+  });
   it('项目已跟踪同名说明时保留两处项目文件，并把正确的账本内联给 Agent', async () => {
     const f = await setup();
     const name = '.aic/TASK.md', original = '项目自己的资产规则';

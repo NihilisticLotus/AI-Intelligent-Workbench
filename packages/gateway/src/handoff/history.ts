@@ -10,9 +10,10 @@ import { independentLines } from './transcript';
 export const HISTORY_BYTES=32*1024;
 
 /** 工具拿到的是本任务事件的可读投影。流式片段在打码前合并，用末条序号定位正文。 */
-function projectEvents(s:Services,taskId:string) {
+function projectEvents(s:Services,taskId:string,toolsOnly=false) {
   const rows=s.db.all<{seq:number;session_id:string|null;type:string;payload:string}>(
-    'SELECT seq,session_id,type,payload FROM events WHERE task_id=? AND replay=0 ORDER BY seq',taskId);
+    `SELECT seq,session_id,type,payload FROM events WHERE task_id=? AND replay=0
+     ${toolsOnly?"AND type IN ('tool.start','tool.update','tool.output','tool.end')":''} ORDER BY seq`,taskId);
   const items:{seq:number;type:string;text:string;env:boolean}[]=[];
   const streams=new Map<string,{text:string;at:number}>();
   const envTools=new Map<string,boolean>();
@@ -69,13 +70,30 @@ function boundedText(input:string,maxBytes=HISTORY_BYTES) {
   }
 }
 
-export function outgoingRedactor(s:Services,taskId:string,rows=projectEvents(s,taskId),extraValues:readonly string[]=[]) {
-  const envOutputs=rows.filter(row=>row.env && row.type==='tool.output').map(row=>row.text);
+/** 只读取本任务已经发送的环境文本附件，未发送的草稿不参与历史脱敏。 */
+export async function attachmentEnvironment(s:Services,taskId:string) {
+  const values=new Set<string>();
+  const sent=s.db.all<{id:string;name:string}>("SELECT id,name FROM attachments WHERE task_id=? AND used_at IS NOT NULL AND mime LIKE 'text/%'",taskId);
+  for (const item of sent) {
+    if (!isEnvSource(item.name)) continue;
+    const {bytes}=await s.attachments.read(taskId,item.id);
+    for (const value of environmentValues([bytes.toString('utf8')])) values.add(value);
+  }
+  return [...values];
+}
+
+export async function outgoingRedactor(s:Services,taskId:string,rows=projectEvents(s,taskId,true),extraValues:readonly string[]=[]) {
+  const envOutputs=rows.flatMap(row=>{
+    if (!row.env) return [];
+    if (row.type==='tool.output') return [row.text];
+    if (row.type==='tool.end') return [String(JSON.parse(row.text).summary??'')];
+    return [];
+  });
   for (const session of s.db.all<{id:string}>("SELECT id FROM sessions WHERE task_id=? AND agent_id='independent'",taskId)) {
     const portable=independentLines(s.independentRuntime.portableEntries(taskId,session.id));
     envOutputs.push(...portable.flatMap(line=>line.env && line.output ? [line.output] : []));
   }
-  const environment=[...environmentValues(envOutputs),...extraValues];
+  const environment=[...environmentValues(envOutputs),...await attachmentEnvironment(s,taskId),...extraValues];
   const aliases=pathAliases(s.db,taskId,environment);
   const clean=async(input:string,source?:string)=>{
     const r=new HandoffRedactor([...await s.secrets.forRedaction(input),...s.tasks.sessionSecrets(taskId)],environment,aliases);
@@ -90,7 +108,7 @@ export async function readHistory(s:Services,grant:HistoryGrant,q:HistoryQuery) 
   if(!record) throw Errors.notFound('本任务没有这次交接');
   const stored=JSON.parse(record.document_json);
   const rows=projectEvents(s,taskId);
-  const {clean,aliases,environment}=outgoingRedactor(s,taskId,rows);
+  const {clean,aliases,environment}=await outgoingRedactor(s,taskId,rows);
   if(q.name==='get_file_at') {
     const found=s.db.get("SELECT 1 FROM handoffs WHERE task_id=? AND json_extract(document_json,'$.meta.checkpoint')=? LIMIT 1",taskId,q.arguments.checkpoint);
     if(!found) throw Errors.forbidden('只能读取本任务已经登记的检查点');

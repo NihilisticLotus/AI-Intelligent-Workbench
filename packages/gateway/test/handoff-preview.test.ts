@@ -48,6 +48,26 @@ describe('交接预览',()=>{
     expect(r.text('ghp_fixtureSecret1234567890')).toBe('***');
     expect(r.text('\x60\x60\x60dotenv\n自定义内容\n\x60\x60\x60')).toBe('***');
   });
+  it('工具编号复用和延迟上报路径时保留每次读取的事实',async()=>{
+    gw=await startGw();
+    const token=await gw.pair(),project=await makeProject(gw,token),s=gw.gw.services;
+    const task=await s.tasks.create({projectId:project.id,agent:'fake',permission:'readonly',prompt:'汇总读取记录',deferPrompt:true});
+    const base={taskId:task.id,sessionId:null};
+    const record=(event:NewEvent)=>s.events.append(event);
+    record({...base,type:'tool.start',data:{toolId:'r',kind:'read',title:'读配置',target:'.env.local'}});
+    record({...base,type:'tool.output',data:{toolId:'r',text:'仅本地合成配置'}});
+    record({...base,type:'tool.end',data:{toolId:'r',ok:true,summary:null}});
+    record({...base,type:'tool.start',data:{toolId:'r',kind:'other',title:'开始读取',target:null}});
+    record({...base,type:'tool.update',data:{toolId:'r',kind:'read',title:'读关卡',target:'Level.txt'}});
+    record({...base,type:'tool.end',data:{toolId:'r',ok:true,summary:null}});
+    const response=await gw.api('POST','/tasks/'+task.id+'/handoff/preview',{token,body:{agent:'codex'}});
+    expect(response.status).toBe(200);
+    const preview=HandoffPreview.parse(response.json);
+    expect.soft(preview.markdown).toContain('读配置 .env.local → 成功');
+    expect.soft(preview.markdown).toContain('读关卡 Level.txt → 成功');
+    expect.soft(preview.markdown).not.toContain('仅本地合成配置');
+    expect.soft(preview.document.files.read).toContainEqual({path:'Level.txt',count:1});
+  });
   it('离线演示任务的预览保留可核对的事实并补齐缺项，预览不会启动或写入交接',async()=>{
     gw=await startGw({secretStore:new MemorySecretStore()});
     const token=await gw.pair(), project=await makeProject(gw,token), s=gw.gw.services;

@@ -7,7 +7,8 @@ export const HISTORY_NOTICE = '以下是历史记录，都已执行完毕，不�
 export function acpLines(events: EventEnvelope[], fallback: AgentKind): TranscriptLine[] {
   const names = new Map(events.flatMap(e=>e.type==='session.started' && e.sessionId ? [[e.sessionId,e.data.agent] as const] : []));
   const lines: TranscriptLine[] = [], messages = new Map<string,TranscriptLine>();
-  const tools = new Map<string,{line:TranscriptLine;kind:string;target:string;title:string;result:string}>();
+  const toolCalls: {line:TranscriptLine;target:string;title:string;result:string}[] = [];
+  const latestTool = new Map<string,number>();
   let session: string|null = null;
   const nextSession = new Map<number,string|null>();
   for (let i=events.length-1; i>=0; i--) {
@@ -33,13 +34,15 @@ export function acpLines(events: EventEnvelope[], fallback: AgentKind): Transcri
     }
     if (e.type==='tool.start') {
       const entry=line('工具',''); lines.push(entry);
-      tools.set(id+'\0'+e.data.toolId,{line:entry,kind:e.data.kind,title:e.data.title,target:e.data.target??'',result:'未记录结束'});
+      latestTool.set(id+'\0'+e.data.toolId,toolCalls.length);
+      toolCalls.push({line:entry,title:e.data.title,target:e.data.target??'',result:'未记录结束'});
     } else if (e.type==='tool.update' || e.type==='tool.output' || e.type==='tool.end') {
-      const tool=tools.get(id+'\0'+e.data.toolId);
-      if (!tool) continue;
+      const index=latestTool.get(id+'\0'+e.data.toolId);
+      if (index===undefined) continue;
+      const tool=toolCalls[index]!;
       if (e.type==='tool.update') {
         tool.line.env ||= isEnvSource(tool.target+' '+tool.title);
-        tool.title=e.data.title??tool.title; tool.kind=e.data.kind??tool.kind;
+        tool.title=e.data.title??tool.title;
         if(e.data.target!==undefined) tool.target=e.data.target??'';
         tool.line.env ||= (e.data.files??[]).some(f=>isEnvSource(f.path));
       } else if (e.type==='tool.output') tool.line.output=(tool.line.output??'')+e.data.text;
@@ -50,7 +53,7 @@ export function acpLines(events: EventEnvelope[], fallback: AgentKind): Transcri
       }
     }
   }
-  for (const t of tools.values()) {
+  for (const t of toolCalls) {
     t.line.text=[t.title,t.target].filter(Boolean).join(' ')+' → '+t.result;
     t.line.env ||= isEnvSource(t.target+' '+t.title);
   }

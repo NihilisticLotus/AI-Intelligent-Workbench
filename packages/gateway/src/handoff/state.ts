@@ -26,16 +26,24 @@ export async function readHandoffState(s:Services,id:string,destination:HandoffT
   }
   for(const file of changed) fileMap.set(file.path,file);
   const reads=new Map<string,number>();
-  const readTools=new Map<string,string>();
+  const activeTools=new Map<string,{kind:string;target:string|null}>();
   for (const e of events) {
+    if(e.type!=='tool.start' && e.type!=='tool.update' && e.type!=='tool.end') continue;
+    const key=e.sessionId+'\0'+e.data.toolId;
     if(e.type==='tool.start') {
-      const key=e.sessionId+'\0'+e.data.toolId;
-      readTools.delete(key);
-      if (e.data.kind==='read' && e.data.target) readTools.set(key,e.data.target);
+      activeTools.set(key,{kind:e.data.kind,target:e.data.target??null});
+      continue;
     }
-    if(e.type==='tool.end' && e.data.ok && !e.data.rejected) {
-      const name=readTools.get(e.sessionId+'\0'+e.data.toolId);
-      if(name) reads.set(name,(reads.get(name)??0)+1);
+    const tool=activeTools.get(key);
+    if(!tool) continue;
+    if(e.type==='tool.update') {
+      tool.kind=e.data.kind??tool.kind;
+      if(e.data.target!==undefined) tool.target=e.data.target;
+    } else {
+      activeTools.delete(key);
+      if(e.data.ok && !e.data.rejected && tool.kind==='read' && tool.target) {
+        reads.set(tool.target,(reads.get(tool.target)??0)+1);
+      }
     }
   }
   const userMessages=events.flatMap(e=>e.type==='message.user'?[{seq:e.seq,text:e.data.text}]:[]);

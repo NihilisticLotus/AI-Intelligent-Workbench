@@ -120,6 +120,7 @@ export const Hello = z.object({
   /** 1.1 新增：每次 Gateway 启动都会变的标识；客户端据此判断服务是否重启过 */
   bootId: z.string().optional(),
   lastExit: z.object({ clean: z.boolean(), at: Ts, reason: z.string().nullable() }).nullable().optional(),
+  lanConnection: z.boolean().optional(),
 });
 export type Hello = z.infer<typeof Hello>;
 

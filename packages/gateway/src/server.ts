@@ -3,6 +3,7 @@ import { outgoingRedactor } from './handoff/history';
 import { limitTaskSummary } from './task-summary';
 import { spawn } from 'node:child_process';
 import type { Server } from 'node:http';
+import type { Socket } from 'node:net';
 import { hostname } from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -137,13 +138,7 @@ async function listen(server: Server, start: number): Promise<number> {
   for (let i = 0; i < attempts; i++) {
     const port = start === 0 ? 0 : start + i;
     try {
-      await new Promise<void>((resolve, reject) => {
-        const onErr = (e: Error) => { server.off('listening', onOk); reject(e); };
-        const onOk = () => { server.off('error', onErr); resolve(); };
-        server.once('error', onErr);
-        server.once('listening', onOk);
-        server.listen(port, HOST);
-      });
+      await bind(server, port, HOST);
       const addr = server.address();
       return typeof addr === 'object' && addr ? addr.port : port;
     } catch (e) {
@@ -152,6 +147,16 @@ async function listen(server: Server, start: number): Promise<number> {
     }
   }
   throw new Error(`端口 ${start}～${start + attempts - 1} 都被占用了，请关闭占用端口的程序后重试（${String(lastErr)}）`);
+}
+
+function bind(server: Server, port: number, host: string): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    const onErr = (error: Error) => { server.off('listening', onOk); reject(error); };
+    const onOk = () => { server.off('error', onErr); resolve(); };
+    server.once('error', onErr);
+    server.once('listening', onOk);
+    server.listen(port, host);
+  });
 }
 
 /** 用系统默认浏览器打开地址。只接受我们自己拼出的本机地址，避免命令注入 */
@@ -195,6 +200,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
     devOrigin: opts.devOrigin ?? process.env.AIC_DEV_ORIGIN,
     ...opts.pairing,
     instanceId,
+    lanAddress: () => lan.activeAddress(),
   });
   const events = new EventStore(db, new EventBus());
   const git = opts.git ?? await Git.discover();
@@ -259,10 +265,11 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   };
   void cleanWorkspaces();
   const groups = new GroupService(db, tasks);
+  const lan = new LanSettings(db, realpathSync(dataDir), () => port, listenLan, log, opts.lan);
 
   const services: Services = {
     db, attachments, independent, independentDiscovery, independentRuntime, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks, workspaces,
-    history, port: () => port, lan: new LanSettings(db, realpathSync(dataDir), () => port, opts.lan),
+    history, port: () => port, lan,
     machine: { id: machineId, name: hostname(), os: process.platform === 'win32' ? 'windows' : process.platform },
     version: VERSION,
     bootId,
@@ -278,6 +285,23 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   const server = createAdaptorServer({ fetch: app.fetch }) as Server;
   const ws = attachWs(server, services);
 
+  async function listenLan(address: string) {
+    const listener = createAdaptorServer({ fetch: app.fetch }) as Server;
+    const sockets = new Set<Socket>();
+    listener.on('connection', (socket) => {
+      sockets.add(socket);
+      socket.once('close', () => sockets.delete(socket));
+    });
+    const detach = ws.addServer(listener);
+    try { await bind(listener, port, address); } catch (error) { detach(); throw error; }
+    return () => new Promise<void>((resolve) => {
+      detach();
+      listener.close(() => resolve());
+      // Node 的 closeAllConnections 不关闭升级为 WebSocket 的连接。
+      for (const socket of sockets) socket.destroy();
+    });
+  }
+
   try {
     port = await listen(server, opts.port ?? Number(process.env.AIC_PORT ?? DEFAULT_PORT));
   } catch (e) {
@@ -287,6 +311,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   }
   auth.setPort(port);
   lock.setPort(port);
+  await lan.restore();
   // 检测全部 Agent（后台进行；GET /agents 会等它完成）
   void agentSvc.startup().catch((e) => log(`检测 Agent 失败：${String(e)}`));
   const url = `http://${HOST}:${port}/`;
@@ -309,6 +334,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
       closed = true;
       clearInterval(cleanupTimer);
       independentDiscovery.close();
+      await lan.stop();
       ws.close();
       agentSvc.shutdown();
       const graceful = Promise.all([tasks.shutdown(), attachments.close(), workspaceCleanup, workspaces.settle()]);

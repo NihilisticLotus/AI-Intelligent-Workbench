@@ -1,12 +1,11 @@
 import { Hono } from 'hono';
 import { PutLanBody } from '@aic/protocol';
-import { isLoopback } from '../auth';
 import type { Services } from '../services';
 import { Errors } from '../util';
-import { readBody, type Ctx, type Env } from './app';
+import { isLocalRequest, readBody, type Ctx, type Env } from './app';
 
 function requireLocalAccess(c: Ctx) {
-  if (!isLoopback(c.get('ip'))) throw Errors.forbidden('请在这台电脑上管理局域网访问');
+  if (!isLocalRequest(c)) throw Errors.forbidden('请在这台电脑上管理局域网访问');
 }
 
 export function accessRoutes(s: Services) {

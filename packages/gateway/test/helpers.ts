@@ -23,12 +23,13 @@ export interface TestGw {
   stop(): Promise<void>;
 }
 
-export interface ReqOpts { token?: string; cookie?: string; key?: string; body?: unknown; headers?: Record<string, string> }
+export interface ReqOpts { token?: string; cookie?: string; key?: string; body?: unknown; headers?: Record<string, string>; loopback?: '127.0.0.2' }
 export interface Res { status: number; headers: Record<string, string | string[] | undefined>; json: any; text: string }
 
 export function rawRequest(port: number, method: string, p: string, o: ReqOpts = {}): Promise<Res> {
   return new Promise((resolve, reject) => {
-    const headers: Record<string, string> = { host: `127.0.0.1:${port}`, ...o.headers };
+    const host = o.loopback ?? '127.0.0.1';
+    const headers: Record<string, string> = { host: `${host}:${port}`, ...o.headers };
     if (o.token) headers.authorization = `Bearer ${o.token}`;
     if (o.cookie) headers.cookie = o.cookie;
     if (o.key) headers['x-aic-key'] = o.key;
@@ -38,7 +39,7 @@ export function rawRequest(port: number, method: string, p: string, o: ReqOpts =
       headers['content-type'] ??= 'application/json';
       headers['content-length'] = String(Buffer.byteLength(data));
     }
-    const req = request({ host: '127.0.0.1', port, method, path: p, headers }, (res) => {
+    const req = request({ host, port, method, path: p, headers }, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (c) => chunks.push(c));
       res.on('end', () => {

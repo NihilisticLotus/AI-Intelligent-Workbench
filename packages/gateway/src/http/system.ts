@@ -4,7 +4,8 @@ import { WorkspaceRetention, FeatureKey, PairingCompleteBody, PROTOCOL_VERSION, 
 import { TOKEN_IDLE_TTL_MS } from '../auth';
 import type { Services } from '../services';
 import type { Env } from './app';
-import { credsOf, readBody } from './app';
+import { credsOf, isLocalRequest, readBody } from './app';
+import { Errors } from '../util';
 
 export function systemRoutes(s: Services) {
   const r = new Hono<Env>();
@@ -31,7 +32,7 @@ export function systemRoutes(s: Services) {
         [FeatureKey.Worktrees]: false,
         [FeatureKey.Handoff]: true,
         [FeatureKey.TaskMemory]: true,
-        [FeatureKey.Lan]: false,
+        [FeatureKey.Lan]: true,
         [FeatureKey.SideChat]: false,
         [FeatureKey.AgentToggle]: true,
         [FeatureKey.Drafts]: true,
@@ -49,14 +50,19 @@ export function systemRoutes(s: Services) {
       lastSeq: s.events.lastSeq(),
       bootId: s.bootId,
       lastExit: s.lastExit,
+      lanConnection: c.get('lanConnection'),
     };
     return c.json(body);
   });
 
   // 重新生成配对码：只允许本机请求；配对码只打印在终端窗口里，不经网络返回
-  r.post('/pairing/start', (c) => c.json(s.auth.requestPairingCode(c.get('ip'))));
+  r.post('/pairing/start', (c) => {
+    if (!isLocalRequest(c)) throw Errors.forbidden('只能在这台电脑上重新生成配对码');
+    return c.json(s.auth.requestPairingCode(c.get('ip')));
+  });
 
   r.post('/pairing/complete', async (c) => {
+    if (!isLocalRequest(c)) throw Errors.forbidden('局域网设备需要在电脑上确认配对');
     const body = await readBody(c, PairingCompleteBody);
     // 同一个客户端带着仍然有效的凭据重新配对：新设备建好后吊销旧的（轮换），不让旧令牌闲置着继续有效
     const previous = s.auth.authenticate(credsOf(c), c.get('ip'));

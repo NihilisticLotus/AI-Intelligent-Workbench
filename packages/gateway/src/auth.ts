@@ -38,6 +38,8 @@ export interface AuthOptions {
   onPairingCode?: (code: string, expiresAt: number) => void;
   /** 实例标识：决定 Cookie 名，同机不同数据目录的 Gateway 互不覆盖 */
   instanceId?: string;
+  /** 仅在第二监听已经成功时返回地址。 */
+  lanAddress?: () => string | null;
 }
 
 export type DeviceRow = {
@@ -63,6 +65,11 @@ const cookieHash = (token: string, key: string) => sha256(`c:${token}:${key}`);
 export function isLoopback(ip: string | undefined | null): boolean {
   if (!ip) return false;
   return ip === '127.0.0.1' || ip === '::1' || ip === '::ffff:127.0.0.1';
+}
+
+/** 以 TCP 服务端地址区分监听，避免把从第二监听来的连接视为本机管理连接。 */
+export function isLanConnection(localAddress: string | undefined): boolean {
+  return !!localAddress && !isLoopback(localAddress);
 }
 
 export function parseCookies(header: string | undefined | null): Record<string, string> {
@@ -104,19 +111,29 @@ export class AuthService {
 
   // ---------- Host / Origin ----------
 
-  /** 只接受 127.0.0.1:<端口> 或 localhost:<端口>，防 DNS 重绑定 */
-  checkHost(host: string | undefined | null): boolean {
+  /** 每个监听只接受其生效地址，防 DNS 重绑定。 */
+  checkHost(host: string | undefined | null, lan = false): boolean {
     if (!host) return false;
     const h = host.toLowerCase();
+    if (lan) return h === this.lanHost();
     return h === `127.0.0.1:${this.port}` || h === `localhost:${this.port}`;
   }
 
   /** 没有 Origin 视为非浏览器客户端（由令牌把关）；有 Origin 时必须同源或是开发用的 Vite 地址 */
-  checkOrigin(origin: string | undefined | null): boolean {
+  checkOrigin(origin: string | undefined | null, lan = false): boolean {
     if (origin == null || origin === '') return true;
     const o = origin.toLowerCase().replace(/\/$/, '');
+    if (lan) {
+      const host = this.lanHost();
+      return host !== null && o === `http://${host}`;
+    }
     if (o === `http://127.0.0.1:${this.port}` || o === `http://localhost:${this.port}`) return true;
     return this.devOrigins.some((d) => d.toLowerCase() === o);
+  }
+
+  private lanHost(): string | null {
+    const address = this.opts.lanAddress?.();
+    return address ? `${address}:${this.port}` : null;
   }
 
   // ---------- 配对码 ----------

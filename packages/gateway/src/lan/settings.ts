@@ -1,7 +1,6 @@
-import { networkInterfaces } from 'node:os';
 import { PutLanBody, type LanInterface, type LanState } from '@aic/protocol';
 import type { Db } from '../db';
-import { Errors } from '../util';
+import { AppError, Errors } from '../util';
 import { firewallRuleName, LanFirewall, type FirewallTarget } from './firewall';
 import { listPrivateInterfaces } from './interfaces';
 import { networkProfiles } from './network-profile';
@@ -10,21 +9,30 @@ import { executeLanCommand, type LanExecutor } from './windows-executor';
 const SETTINGS_KEY = 'lan_settings';
 
 export interface LanDependencies {
-  readInterfaces: typeof networkInterfaces;
+  listInterfaces: () => Array<Omit<LanInterface, 'category'>>;
   execute: LanExecutor;
   supported: boolean;
   program: string;
 }
 
+type StopListener = () => Promise<void>;
+
 export class LanSettings {
   private readonly deps: LanDependencies;
   private readonly firewall: LanFirewall;
   private pending: Promise<unknown> = Promise.resolve();
+  private active: { address: string; stop: StopListener } | null = null;
+  private reason: string | null = null;
+  private stopping = false;
 
-  constructor(private readonly db: Db, dataDir: string, private readonly port: () => number, deps?: Partial<LanDependencies>) {
-    this.deps = { readInterfaces: networkInterfaces, execute: executeLanCommand, supported: process.platform === 'win32', program: process.execPath, ...deps };
+  constructor(private readonly db: Db, dataDir: string, private readonly port: () => number,
+    private readonly listen: (address: string) => Promise<StopListener>, private readonly log: (message: string) => void,
+    deps?: Partial<LanDependencies>) {
+    this.deps = { listInterfaces: listPrivateInterfaces, execute: executeLanCommand, supported: process.platform === 'win32', program: process.execPath, ...deps };
     this.firewall = new LanFirewall(firewallRuleName(dataDir), this.deps.execute);
   }
+
+  activeAddress(): string | null { return this.active?.address ?? null; }
 
   async state(): Promise<LanState> {
     const config = this.read();
@@ -37,13 +45,34 @@ export class LanSettings {
     const unavailableReason = !this.deps.supported ? '局域网访问需要 Windows 防火墙' : selected
       ? this.selectionError(interfaces, selected)
       : interfaces.length ? null : '没有可用的私有 IPv4 网卡';
-    return { enabled: false, requested: config.enabled, selected, interfaces, port: this.port(), firewall, unavailableReason };
+    return { enabled: this.active !== null, requested: config.enabled, selected, interfaces, port: this.port(), firewall,
+      unavailableReason: unavailableReason ?? this.reason };
   }
 
   put(body: PutLanBody): Promise<LanState> {
     return this.mutate(async () => {
-      if (body.enabled) await this.requirePrivate(body);
-      this.save(body);
+      if (body.enabled) {
+        await this.requirePrivate(body);
+        const config = this.read();
+        if (this.active?.address === body.address && config.enabled && config.name === body.name) return this.state();
+      }
+      this.reason = null;
+      await this.deactivate();
+      this.save({ enabled: false });
+      try {
+        if (body.enabled) {
+          await this.ensureFirewall(this.target(body), true);
+          await this.requirePrivate(body);
+          await this.activate(body.address);
+          this.save(body);
+        } else {
+          await this.removeFirewall();
+        }
+      } catch (error) {
+        await this.deactivate();
+        this.reason = error instanceof AppError ? error.message : '无法更改局域网设置';
+        throw error;
+      }
       return this.state();
     });
   }
@@ -51,21 +80,49 @@ export class LanSettings {
   updateFirewall(): Promise<LanState> {
     return this.mutate(async () => {
       const config = this.read();
-      if (config.enabled) {
-        await this.requirePrivate(config);
-        const target = this.target(config);
-        const status = await this.inspectFirewall(target);
-        if (status !== 'matched') await this.firewall.change(status === 'missing' ? 'add' : 'set', target);
-        if (await this.inspectFirewall(target) !== 'matched') throw Errors.conflict('Windows 防火墙规则与当前地址、程序或端口不匹配');
-      } else if (await this.inspectFirewall(null) !== 'missing') {
-        await this.firewall.change('delete');
-        if (await this.inspectFirewall(null) !== 'missing') throw Errors.conflict('仍能查到 Windows 防火墙规则，请重新删除');
+      try {
+        if (config.enabled) {
+          await this.requirePrivate(config);
+          await this.ensureFirewall(this.target(config), false);
+          await this.requirePrivate(config);
+          if (!this.active) await this.activate(config.address);
+        } else {
+          await this.removeFirewall();
+        }
+      } catch (error) {
+        await this.deactivate();
+        this.reason = error instanceof AppError ? error.message : '无法更新 Windows 防火墙规则';
+        throw error;
       }
+      this.reason = null;
       return this.state();
     });
   }
 
+  restore(): Promise<void> {
+    return this.mutate(async () => {
+      const config = this.read();
+      if (!config.enabled) return;
+      try {
+        await this.requirePrivate(config);
+        if (await this.inspectFirewall(this.target(config)) !== 'matched') {
+          throw Errors.conflict('防火墙规则需要更新，请在设备与访问中检查');
+        }
+        await this.activate(config.address);
+      } catch (error) {
+        this.reason = error instanceof AppError ? error.message : '无法恢复上次的局域网设置';
+        this.log(`局域网保持关闭：${this.reason}`);
+      }
+    });
+  }
+
+  stop(): Promise<void> {
+    this.stopping = true;
+    return this.deactivate();
+  }
+
   private read(): PutLanBody {
+    this.requireRunning();
     const row = this.db.get<{ value: string }>('SELECT value FROM meta WHERE key = ?', SETTINGS_KEY);
     if (row) {
       try {
@@ -77,13 +134,14 @@ export class LanSettings {
   }
 
   private save(config: PutLanBody) {
+    this.requireRunning();
     this.db.run('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
       SETTINGS_KEY, JSON.stringify(config));
   }
 
   private async interfaces(): Promise<LanInterface[]> {
     if (!this.deps.supported) return [];
-    const candidates = listPrivateInterfaces(this.deps.readInterfaces);
+    const candidates = this.deps.listInterfaces();
     if (!candidates.length) return [];
     const profiles = await networkProfiles(this.deps.execute);
     return candidates.map((item) => ({ ...item, category: profiles.get(item.name.toLowerCase()) ?? 'unknown' }));
@@ -115,6 +173,45 @@ export class LanSettings {
     const status = await this.firewall.state(target);
     if (status === 'unknown') throw Errors.conflict('无法查询 Windows 防火墙规则，请检查防火墙服务');
     return status;
+  }
+
+  private async ensureFirewall(target: FirewallTarget, interactive: boolean) {
+    const status = await this.inspectFirewall(target);
+    if (!interactive && status === 'matched') return;
+    await this.deactivate();
+    this.requireRunning();
+    await this.firewall.change(status === 'missing' ? 'add' : 'set', target);
+    if (await this.inspectFirewall(target) !== 'matched') throw Errors.conflict('Windows 防火墙规则与当前地址、程序或端口不匹配');
+  }
+
+  private async removeFirewall() {
+    if (!this.deps.supported || await this.inspectFirewall(null) === 'missing') return;
+    this.requireRunning();
+    await this.firewall.change('delete');
+    if (await this.inspectFirewall(null) !== 'missing') throw Errors.conflict('仍能查到 Windows 防火墙规则，请重新删除');
+  }
+
+  private async activate(address: string) {
+    this.requireRunning();
+    let stop: StopListener;
+    try { stop = await this.listen(address); } catch {
+      throw Errors.conflict('无法监听所选局域网地址，局域网访问保持关闭', '请检查网卡连接与端口占用');
+    }
+    if (this.stopping) {
+      await stop();
+      return;
+    }
+    this.active = { address, stop };
+  }
+
+  private deactivate(): Promise<void> {
+    const active = this.active;
+    this.active = null;
+    return active?.stop() ?? Promise.resolve();
+  }
+
+  private requireRunning() {
+    if (this.stopping) throw Errors.invalidState('工作台正在退出');
   }
 
   private mutate<T>(action: () => Promise<T>): Promise<T> {

@@ -5,7 +5,7 @@ import { bodyLimit } from 'hono/body-limit';
 import type { HttpBindings } from '@hono/node-server';
 import { API_BASE, ErrorCode } from '@aic/protocol';
 import type { z } from 'zod';
-import { KEY_HEADER_LC, type AuthService, type DeviceRow, type RequestCredentials } from '../auth';
+import { isLanConnection, isLoopback, KEY_HEADER_LC, type AuthService, type DeviceRow, type RequestCredentials } from '../auth';
 import { AppError, Errors, toApiError, zodMessage } from '../util';
 import type { Services } from '../services';
 import { attachmentError } from '../attachments';
@@ -16,11 +16,10 @@ import { taskRoutes } from './tasks';
 import { agentRoutes } from './agents';
 import { independentRoutes } from './independent';
 import { staticHandler } from './static';
-import { isLoopback } from '../auth';
 import { historyRoutes } from './history';
 import { errorLogText } from '../error-log';
 
-export type Env = { Bindings: HttpBindings; Variables: { device: DeviceRow; ip: string } };
+export type Env = { Bindings: HttpBindings; Variables: { device: DeviceRow; ip: string; lanConnection: boolean } };
 export type Ctx = Context<Env>;
 
 /** 不需要令牌的接口（配对本身） */
@@ -28,6 +27,7 @@ const PUBLIC_API = new Set([`${API_BASE}/pairing/start`, `${API_BASE}/pairing/co
 const MAX_BODY = 1024 * 1024; // 1 MB
 
 export const ipOf = (c: Ctx) => c.env?.incoming?.socket?.remoteAddress ?? '';
+export const isLocalRequest = (c: Ctx) => !c.get('lanConnection') && isLoopback(c.get('ip'));
 /** 请求里的凭据：Bearer，或浏览器的 Cookie + 设备密钥 */
 export const credsOf = (c: Ctx): RequestCredentials => ({
   cookie: c.req.header('cookie'), authorization: c.req.header('authorization'), key: c.req.header(KEY_HEADER_LC),
@@ -63,7 +63,9 @@ export function createApp(s: Services, opts: { webDist: string }) {
     c.header('Referrer-Policy', 'no-referrer');
     c.header('Cross-Origin-Opener-Policy', 'same-origin');
     c.header('Cross-Origin-Resource-Policy', 'same-origin');
-    if (!auth.checkHost(c.req.header('host'))) {
+    const lan = isLanConnection(c.env?.incoming?.socket?.localAddress);
+    c.set('lanConnection', lan);
+    if (!auth.checkHost(c.req.header('host'), lan)) {
       return fail(c, Errors.forbiddenHost('访问地址不正确', `请用 http://127.0.0.1:${s.port()} 打开 AI Console`));
     }
     await next();
@@ -72,14 +74,14 @@ export function createApp(s: Services, opts: { webDist: string }) {
   // 2. /api/v1/*：Origin 校验（不开 CORS）→ 请求体大小 → 令牌
   app.use(`${API_BASE}/*`, async (c, next) => {
     c.header('Cache-Control', 'no-store');
-    if (!auth.checkOrigin(c.req.header('origin'))) {
+    if (!auth.checkOrigin(c.req.header('origin'), c.get('lanConnection'))) {
       return fail(c, Errors.forbiddenOrigin('拒绝了来自其他网页的请求', '请直接在 AI Console 页面里操作'));
     }
     const ip = ipOf(c);
     c.set('ip', ip);
     if (c.req.path === API_BASE + '/internal/history/read' && c.req.method === 'POST') {
       const headers = c.req.raw.headers;
-      if (!isLoopback(ip) || headers.has('origin') || headers.has('cookie') ||
+      if (!isLocalRequest(c) || headers.has('origin') || headers.has('cookie') ||
           Array.from(headers.keys()).some(name => name.startsWith('sec-fetch-'))) {
         return fail(c, Errors.forbidden('历史查询只接受本机会话进程'));
       }

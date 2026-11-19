@@ -11,7 +11,7 @@ import {
   type ApproveResult, type CancelResult, type EventEnvelope, type PingResult, type PromptResult,
   type ServerFrame, type SubscribeResult, type SwitchResult,
 } from '@aic/protocol';
-import { KEY_HEADER_LC } from './auth';
+import { isLanConnection, KEY_HEADER_LC } from './auth';
 import type { Services } from './services';
 import { toApiError, zodMessage } from './util';
 import { errorLogText } from './error-log';
@@ -64,12 +64,13 @@ export function attachWs(server: Server, s: Services) {
   const byDevice = new Map<string, Set<WebSocket>>();
   let connSeq = 0;
 
-  server.on('upgrade', (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+  const upgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
     const url = new URL(req.url ?? '/', 'http://x');
     if (url.pathname !== WS_PATH) return reject(socket, 403, '没有这个地址');
     // 握手同样校验 Host / Origin / 凭据
-    if (!s.auth.checkHost(req.headers.host)) return reject(socket, 403, '访问地址不正确');
-    if (!s.auth.checkOrigin(req.headers.origin)) return reject(socket, 403, '拒绝了来自其他网页的连接');
+    const lan = isLanConnection(req.socket.localAddress);
+    if (!s.auth.checkHost(req.headers.host, lan)) return reject(socket, 403, '访问地址不正确');
+    if (!s.auth.checkOrigin(req.headers.origin, lan)) return reject(socket, 403, '拒绝了来自其他网页的连接');
     const ip = req.socket.remoteAddress ?? '';
     const key = req.headers[KEY_HEADER_LC];
     const device = s.auth.authenticate({
@@ -78,7 +79,12 @@ export function attachWs(server: Server, s: Services) {
     }, ip);
     if (!device) return reject(socket, 401, '还没有连接到 AI Console');
     wss.handleUpgrade(req, socket, head, (ws) => onConnection(ws, device.id));
-  });
+  };
+  function addServer(target: Server) {
+    target.on('upgrade', upgrade);
+    return () => { target.off('upgrade', upgrade); };
+  }
+  const detach = addServer(server);
 
   s.auth.onRevoke((deviceId) => {
     for (const ws of byDevice.get(deviceId) ?? []) ws.close(WS_CLOSE_UNAUTHORIZED, 'revoked');
@@ -196,7 +202,9 @@ export function attachWs(server: Server, s: Services) {
   }
 
   return {
+    addServer,
     close() {
+      detach();
       for (const c of wss.clients) c.terminate();
       wss.close();
     },

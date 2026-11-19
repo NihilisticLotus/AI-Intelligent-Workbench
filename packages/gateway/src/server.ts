@@ -41,6 +41,7 @@ import { attachWs } from './ws';
 import { gatewayLog, installCrashHandlers, readLastExit, lifecycle } from './crash-log';
 import { errorLogText } from './error-log';
 import { LanSettings, type LanDependencies } from './lan/settings';
+import { LanPairing, type LanPairingOptions } from './lan/pairing';
 
 export const VERSION = '0.1.0';
 
@@ -80,6 +81,7 @@ export interface GatewayOptions {
   pairing?: Pick<AuthOptions, 'pairingTtlMs' | 'limits' | 'onPairingCode'>;
   /** 离线验收注入网卡与防火墙执行器。 */
   lan?: Partial<LanDependencies>;
+  lanPairing?: LanPairingOptions;
   /**
    * 开发模式（默认看 AIC_DEV=1，且 NODE_ENV 不是 production）：把启动时的配对码写进数据目录的
    * dev-pairing-code.txt，供预览工具读取。只有启动时那一个码会写入；启动脚本 start.mjs 会清掉这些开发变量。
@@ -266,10 +268,14 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   void cleanWorkspaces();
   const groups = new GroupService(db, tasks);
   const lan = new LanSettings(db, realpathSync(dataDir), () => port, listenLan, log, opts.lan);
+  const lanPairing = new LanPairing(auth, events, () => {
+    const address = lan.activeAddress();
+    return address ? `http://${address}:${port}/` : null;
+  }, log, opts.lanPairing);
 
   const services: Services = {
     db, attachments, independent, independentDiscovery, independentRuntime, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks, workspaces,
-    history, port: () => port, lan,
+    history, port: () => port, lan, lanPairing,
     machine: { id: machineId, name: hostname(), os: process.platform === 'win32' ? 'windows' : process.platform },
     version: VERSION,
     bootId,
@@ -295,6 +301,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
     const detach = ws.addServer(listener);
     try { await bind(listener, port, address); } catch (error) { detach(); throw error; }
     return () => new Promise<void>((resolve) => {
+      lanPairing.closeLan();
       detach();
       listener.close(() => resolve());
       // Node 的 closeAllConnections 不关闭升级为 WebSocket 的连接。
@@ -335,6 +342,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
       clearInterval(cleanupTimer);
       independentDiscovery.close();
       await lan.stop();
+      lanPairing.stop();
       ws.close();
       agentSvc.shutdown();
       const graceful = Promise.all([tasks.shutdown(), attachments.close(), workspaceCleanup, workspaces.settle()]);

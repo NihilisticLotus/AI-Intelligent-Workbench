@@ -1,6 +1,9 @@
 // 握手、配对、设备
 import { Hono } from 'hono';
-import { WorkspaceRetention, FeatureKey, PairingCompleteBody, PROTOCOL_VERSION, HandoffSettings, type Hello, type PairingCompleteResult } from '@aic/protocol';
+import {
+  WorkspaceRetention, FeatureKey, PairingCompleteBody, PROTOCOL_VERSION, HandoffSettings,
+  LanPairingDecision, LanPairingRequestId, type Hello, type PairingCompleteResult, type RevokeLanResult,
+} from '@aic/protocol';
 import { TOKEN_IDLE_TTL_MS } from '../auth';
 import type { Services } from '../services';
 import type { Env } from './app';
@@ -46,7 +49,7 @@ export function systemRoutes(s: Services) {
         [FeatureKey.PageCapabilities]: false,
       },
       machine: s.machine,
-      device: { id: d.id, name: d.name, kind: d.kind },
+      device: { id: d.id, name: d.name, kind: d.kind, source: d.pairing_source },
       lastSeq: s.events.lastSeq(),
       bootId: s.bootId,
       lastExit: s.lastExit,
@@ -61,11 +64,21 @@ export function systemRoutes(s: Services) {
     return c.json(s.auth.requestPairingCode(c.get('ip')));
   });
 
-  r.post('/pairing/complete', async (c) => {
-    if (!isLocalRequest(c)) throw Errors.forbidden('局域网设备需要在电脑上确认配对');
+  r.post('/pairing/local-code', (c) => {
+    if (!isLocalRequest(c)) throw Errors.forbidden('只能在这台电脑上查看新的配对码');
+    return c.json(s.lanPairing.issue());
+  });
+
+  r.post('/pairing/complete', (c) => s.lanPairing.attempts.run(c.get('ip'), c.get('lanConnection') ? 'lan' : 'local', async () => {
     const body = await readBody(c, PairingCompleteBody);
     // 同一个客户端带着仍然有效的凭据重新配对：新设备建好后吊销旧的（轮换），不让旧令牌闲置着继续有效
     const previous = s.auth.authenticate(credsOf(c), c.get('ip'));
+    if (c.get('lanConnection')) {
+      const request = s.lanPairing.submit(c.get('ip'), c.req.header('user-agent') ?? '', body,
+        previous?.pairing_source === 'lan' ? previous.id : null);
+      return c.json(request, 202);
+    }
+    if (!isLocalRequest(c) || previous?.pairing_source === 'lan') throw Errors.forbidden('请从本机浏览器重新配对');
     const { device, token, key } = s.auth.completePairing(c.get('ip'), body, previous?.id ?? null);
     const out: PairingCompleteResult = { device };
     if (body.tokenDelivery === 'cookie') {
@@ -76,9 +89,33 @@ export function systemRoutes(s: Services) {
       out.token = token; // 桌面 / 手机应用自己保存到安全存储，以后用 Authorization: Bearer
     }
     return c.json(out);
+  }));
+
+  r.get('/pairing/requests/:id', (c) => {
+    if (!c.get('lanConnection')) throw Errors.forbidden('请在发起配对的设备上查看请求');
+    const id = LanPairingRequestId.safeParse(c.req.param('id'));
+    if (!id.success) throw Errors.notFound('找不到这条配对请求');
+    const { body, token } = s.lanPairing.status(id.data, c.get('ip'));
+    if (token) c.header('Set-Cookie', s.auth.sessionCookie(token, Math.floor(TOKEN_IDLE_TTL_MS / 1000)));
+    return c.json(body);
+  });
+
+  r.post('/pairing/requests/:id/decision', async (c) => {
+    if (!isLocalRequest(c)) throw Errors.forbidden('只能在这台电脑上确认配对');
+    const id = LanPairingRequestId.safeParse(c.req.param('id'));
+    if (!id.success) throw Errors.notFound('找不到这条配对请求');
+    const { allow } = await readBody(c, LanPairingDecision);
+    s.lanPairing.decide(id.data, allow);
+    return c.json({ ok: true });
   });
 
   r.get('/devices', (c) => c.json({ items: s.auth.listDevices(c.get('device').id), nextCursor: null }));
+
+  r.delete('/devices/lan', (c) => {
+    if (!isLocalRequest(c)) throw Errors.forbidden('只能在这台电脑上吊销全部局域网设备');
+    const result: RevokeLanResult = { revoked: s.auth.revokeLanDevices(c.get('device').id) };
+    return c.json(result);
+  });
 
   r.delete('/devices/:id', (c) => {
     const id = c.req.param('id');

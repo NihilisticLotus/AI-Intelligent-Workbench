@@ -118,9 +118,9 @@ export class WsClient {
     });
   }
 
-  static connect(port: number, token: string | null, headers: Record<string, string> = {}, protocols?: string[]): Promise<WsClient> {
+  static connect(port: number, token: string | null, headers: Record<string, string> = {}, protocols?: string[], loopback?: '127.0.0.2'): Promise<WsClient> {
     return new Promise((resolve, reject) => {
-      const ws = new WebSocket(`ws://127.0.0.1:${port}/api/v1/ws`, protocols ?? [], { headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers } });
+      const ws = new WebSocket(`ws://${loopback ?? '127.0.0.1'}:${port}/api/v1/ws`, protocols ?? [], { headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...headers } });
       const c = new WsClient(ws);
       ws.once('open', () => resolve(c));
       ws.once('unexpected-response', (_req, res) => reject(new Error(`握手失败 ${res.statusCode}`)));

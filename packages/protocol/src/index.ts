@@ -3,6 +3,7 @@ import { TaskWorkspace, WorkspaceGlobs } from './workspaces';
 // AI Console 共享协议：Gateway 与所有客户端（浏览器、以后的桌面软件和手机应用）共用的类型与校验。
 // 规则见 docs/plan-phase1.md 第 2 节：只通过 /api/v1 的 REST + WebSocket 对接；类型只在这里定义一次。
 import { z } from 'zod';
+import { DeviceSource, LanPairingPending, LanPairingRequest, LanPairingResolved } from './access';
 export * from './access';
 export * from './workspaces';
 export * from './permissions';
@@ -33,6 +34,7 @@ export const ApiError = z.object({
   code: z.string(),            // 机器可读，如 'auth.invalid_token'
   message: z.string(),         // 发生了什么
   hint: z.string().optional(), // 怎么处理
+  retryAt: Ts.optional(),
   actions: z.array(ErrorAction).default([]),
 });
 export type ApiError = z.infer<typeof ApiError>;
@@ -48,6 +50,7 @@ export const ErrorCode = {
   ForbiddenHost: 'auth.forbidden_host',       // Host 头不是 127.0.0.1:<端口> / localhost:<端口>
   Forbidden: 'auth.forbidden',                // 已登录但无权做这件事（例如非本机请求配对码）
   PairingInvalid: 'pairing.invalid_code',     // 配对码错误、过期或已用过
+  PairingLocked: 'pairing.locked',
   RateLimited: 'request.rate_limited',
   PayloadTooLarge: 'request.too_large',
   InvalidState: 'task.invalid_state',         // 任务当前状态不允许该操作（如正在执行时再次发送）
@@ -115,7 +118,7 @@ export const Hello = z.object({
   /** 功能开关：客户端据此决定显示哪些功能，后续阶段新增功能只加开关 */
   features: z.record(z.string(), z.boolean()),
   machine: z.object({ id: Id, name: z.string(), os: z.string() }),
-  device: z.object({ id: Id, name: z.string(), kind: z.enum(['browser', 'desktop', 'mobile']) }),
+  device: z.object({ id: Id, name: z.string(), kind: z.enum(['browser', 'desktop', 'mobile']), source: DeviceSource.optional() }),
   lastSeq: z.number().int().nonnegative(),
   /** 1.1 新增：每次 Gateway 启动都会变的标识；客户端据此判断服务是否重启过 */
   bootId: z.string().optional(),
@@ -414,6 +417,8 @@ export type HandoffRecord = z.infer<typeof HandoffRecord>;
 export const TaskFile = ToolFile.extend({ sessionId: Id.nullable(), name: z.string(), directory: z.string(), updatedAt: Ts, source: z.enum(['agent', 'independent']) }).strict();
 export type TaskFile = z.infer<typeof TaskFile>;
 export const EventEnvelope = z.discriminatedUnion('type', [
+  ev('pairing.requested', LanPairingRequest),
+  ev('pairing.resolved', LanPairingResolved),
   ev('task.created', z.object({ task: Task })),
   ev('task.updated', z.object({ task: Task })),
   ev('task.deleted', z.object({ id: Id })),
@@ -601,6 +606,7 @@ export const Device = z.object({
   lastIp: z.string().nullable(), lastSeen: Ts.nullable(), pairedAt: Ts,
   /** 是否就是发起这次请求的设备 */
   current: z.boolean(),
+  source: DeviceSource.optional(),
 });
 export type Device = z.infer<typeof Device>;
 
@@ -624,6 +630,13 @@ export const PairingCompleteResult = z.object({
   key: z.string().optional(),
 });
 export type PairingCompleteResult = z.infer<typeof PairingCompleteResult>;
+
+export const LanPairingStatus = z.discriminatedUnion('status', [
+  LanPairingPending,
+  z.object({ status: z.enum(['rejected', 'expired', 'unavailable', 'claimed']) }),
+  z.object({ status: z.literal('paired'), device: Device, key: z.string() }),
+]);
+export type LanPairingStatus = z.infer<typeof LanPairingStatus>;
 
 // ---------- 项目 ----------
 export const PatchProjectBody = z.object({

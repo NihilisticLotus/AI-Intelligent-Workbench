@@ -10,7 +10,7 @@
 import { createHash, randomBytes, randomInt, timingSafeEqual } from 'node:crypto';
 import {
   KEY_HEADER, sessionCookieName, WS_BEARER_PROTOCOL_PREFIX, WS_KEY_PROTOCOL_PREFIX,
-  type Device, type DeviceKind, type PairingCompleteBody,
+  type Device, type DeviceKind, type DeviceSource, type PairingCompleteBody,
 } from '@aic/protocol';
 import type { Db } from './db';
 import { Errors, newId, now } from './util';
@@ -45,6 +45,7 @@ export interface AuthOptions {
 export type DeviceRow = {
   id: string; name: string; kind: DeviceKind; token_hash: string;
   last_ip: string | null; last_seen: number | null; paired_at: number; revoked: number;
+  pairing_source: DeviceSource;
 };
 
 /** 从请求里取出的凭据（还没校验） */
@@ -193,15 +194,21 @@ export class AuthService {
     // 一次性：用过立即作废；成功配对后限流间隔复原
     this.pairing = null;
     this.interval = this.limits.startIntervalMs;
+    return this.issueDevice(ip, body, replacingDeviceId, 'local');
+  }
+
+  issueDevice(ip: string, body: Pick<PairingCompleteBody, 'tokenDelivery' | 'deviceName' | 'kind'>,
+    replacingDeviceId: string | null, source: DeviceSource): { device: Device; token: string; key?: string } {
+    const t = now();
     const token = randomBytes(32).toString('base64url');
     const key = body.tokenDelivery === 'cookie' ? randomBytes(32).toString('base64url') : undefined;
     const id = newId('d');
     this.db.tx(() => {
       this.db.run(
-        'INSERT INTO devices (id, name, kind, token_hash, last_ip, last_seen, paired_at, revoked) VALUES (?, ?, ?, ?, ?, ?, ?, 0)',
-        id, body.deviceName, body.kind, key ? cookieHash(token, key) : bearerHash(token), ip, t, t,
+        'INSERT INTO devices (id, name, kind, token_hash, last_ip, last_seen, paired_at, revoked, pairing_source) VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)',
+        id, body.deviceName, body.kind, key ? cookieHash(token, key) : bearerHash(token), ip, t, t, source,
       );
-      this.audit(id, 'device.paired', `${body.kind} ${body.deviceName} ${ip}`);
+      this.audit(id, 'device.paired', `${source} ${body.kind} ${ip}`);
     });
     if (replacingDeviceId && replacingDeviceId !== id) {
       try { this.revoke(replacingDeviceId, id, 'device.replaced'); } catch { /* 已经不在了 */ }
@@ -255,7 +262,7 @@ export class AuthService {
   deviceName(id: string | null): string | null { return id ? this.deviceRow(id)?.name ?? null : null; }
 
   toDevice(r: DeviceRow, currentId: string | null): Device {
-    return { id: r.id, name: r.name, kind: r.kind, lastIp: r.last_ip, lastSeen: r.last_seen, pairedAt: r.paired_at, current: r.id === currentId };
+    return { id: r.id, name: r.name, kind: r.kind, lastIp: r.last_ip, lastSeen: r.last_seen, pairedAt: r.paired_at, current: r.id === currentId, source: r.pairing_source };
   }
 
   listDevices(currentId: string | null): Device[] {
@@ -266,7 +273,15 @@ export class AuthService {
     const r = this.db.run('UPDATE devices SET revoked = 1 WHERE id = ? AND revoked = 0', id);
     if (r.changes === 0) throw Errors.notFound('找不到这个设备', '它可能已经被吊销');
     this.audit(byDevice, action, id);
-    for (const fn of this.revokeListeners) fn(id);
+    this.db.afterCommit(() => { for (const fn of this.revokeListeners) fn(id); });
+  }
+
+  revokeLanDevices(byDevice: string): number {
+    return this.db.tx(() => {
+      const ids = this.db.all<{ id: string }>("SELECT id FROM devices WHERE revoked = 0 AND pairing_source = 'lan'");
+      for (const { id } of ids) this.revoke(id, byDevice);
+      return ids.length;
+    });
   }
 
   onRevoke(fn: (deviceId: string) => void) { this.revokeListeners.add(fn); }

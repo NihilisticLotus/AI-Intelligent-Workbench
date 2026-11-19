@@ -11,9 +11,9 @@ import {
   type ApproveResult, type CancelResult, type EventEnvelope, type PingResult, type PromptResult,
   type ServerFrame, type SubscribeResult, type SwitchResult,
 } from '@aic/protocol';
-import { isLanConnection, KEY_HEADER_LC } from './auth';
+import { isLanConnection, KEY_HEADER_LC, type DeviceRow } from './auth';
 import type { Services } from './services';
-import { toApiError, zodMessage } from './util';
+import { Errors, toApiError, zodMessage } from './util';
 import { errorLogText } from './error-log';
 
 const WS_PATH = `${API_BASE}/ws`;
@@ -78,7 +78,7 @@ export function attachWs(server: Server, s: Services) {
       key: typeof key === 'string' ? key : null, protocols: req.headers['sec-websocket-protocol'],
     }, ip);
     if (!device) return reject(socket, 401, '还没有连接到 AI Console');
-    wss.handleUpgrade(req, socket, head, (ws) => onConnection(ws, device.id));
+    wss.handleUpgrade(req, socket, head, (ws) => onConnection(ws, device, lan));
   };
   function addServer(target: Server) {
     target.on('upgrade', upgrade);
@@ -90,7 +90,9 @@ export function attachWs(server: Server, s: Services) {
     for (const ws of byDevice.get(deviceId) ?? []) ws.close(WS_CLOSE_UNAUTHORIZED, 'revoked');
   });
 
-  function onConnection(ws: WebSocket, deviceId: string) {
+  function onConnection(ws: WebSocket, device: DeviceRow, lan: boolean) {
+    const deviceId = device.id;
+    const remote = lan || device.pairing_source === 'lan';
     const connId = ++connSeq;
     let set = byDevice.get(deviceId);
     if (!set) { set = new Set(); byDevice.set(deviceId, set); }
@@ -101,6 +103,7 @@ export function attachWs(server: Server, s: Services) {
     let filter: Set<string> | null = null;
     let lastSent = 0;
     let alive = true;
+    let releaseLocalPage: (() => void) | undefined;
     /** 每次 subscribe 加一；旧的补发循环看到代数变了就停 */
     let generation = 0;
 
@@ -110,7 +113,11 @@ export function attachWs(server: Server, s: Services) {
       if (ws.bufferedAmount > MAX_BUFFERED) { ws.terminate(); return; }
       ws.send(JSON.stringify(f));
     };
-    const wants = (e: EventEnvelope) => !filter || e.taskId === null || filter.has(e.taskId) || ALWAYS.has(e.type);
+    const wants = (e: EventEnvelope) => {
+      if (e.type === 'pairing.requested') return !remote && s.lanPairing.isPending(e.data.id);
+      if (e.type === 'pairing.resolved') return !remote;
+      return !filter || e.taskId === null || filter.has(e.taskId) || ALWAYS.has(e.type);
+    };
 
     const off = s.events.bus.on((e) => {
       if (!live || e.seq <= lastSent) return;
@@ -138,6 +145,7 @@ export function attachWs(server: Server, s: Services) {
       // 补发只读了 > lastSeq 的数据；实时阈值就是库里当前最大 seq，不能用客户端的 lastSeq 抬高
       lastSent = upToSeq;
       live = true;
+      if (!remote && device.kind === 'browser') releaseLocalPage ??= s.lanPairing.registerLocalPage();
       // 客户端的 lastSeq 比库里还大：数据库被重置或换了，让客户端清空本地状态重新拉快照
       const reset = lastSeq > upToSeq;
       sendNow({ kind: 'replayed', upToSeq, bootId: s.bootId, ...(reset ? { reset } : {}) });
@@ -145,6 +153,7 @@ export function attachWs(server: Server, s: Services) {
     };
 
     const exec = async (op: ClientOp): Promise<OpResult> => {
+      if (remote && op.op !== 'subscribe' && op.op !== 'ping') throw Errors.forbidden('这项操作暂时只能在这台电脑上执行');
       switch (op.op) {
         case 'subscribe': return subscribe(op.data.lastSeq, op.data.taskIds);
         case 'ping': { send({ kind: 'pong', ts: Date.now() }); const r: z.infer<typeof PingResult> = {}; return r; }
@@ -195,6 +204,7 @@ export function attachWs(server: Server, s: Services) {
       clearInterval(hb);
       off();
       generation++;
+      releaseLocalPage?.();
       set!.delete(ws);
       if (set!.size === 0) byDevice.delete(deviceId);
     });

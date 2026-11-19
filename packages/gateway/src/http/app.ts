@@ -24,10 +24,11 @@ export type Ctx = Context<Env>;
 
 /** 不需要令牌的接口（配对本身） */
 const PUBLIC_API = new Set([`${API_BASE}/pairing/start`, `${API_BASE}/pairing/complete`]);
+const PAIRING_STATUS_PATH = /^\/api\/v1\/pairing\/requests\/lp_[A-Za-z0-9_-]{32}$/;
 const MAX_BODY = 1024 * 1024; // 1 MB
 
 export const ipOf = (c: Ctx) => c.env?.incoming?.socket?.remoteAddress ?? '';
-export const isLocalRequest = (c: Ctx) => !c.get('lanConnection') && isLoopback(c.get('ip'));
+export const isLocalRequest = (c: Ctx) => !c.get('lanConnection') && isLoopback(c.get('ip')) && c.get('device')?.pairing_source !== 'lan';
 /** 请求里的凭据：Bearer，或浏览器的 Cookie + 设备密钥 */
 export const credsOf = (c: Ctx): RequestCredentials => ({
   cookie: c.req.header('cookie'), authorization: c.req.header('authorization'), key: c.req.header(KEY_HEADER_LC),
@@ -86,7 +87,7 @@ export function createApp(s: Services, opts: { webDist: string }) {
         return fail(c, Errors.forbidden('历史查询只接受本机会话进程'));
       }
       s.history.authenticate(c.req.header('authorization'));
-    } else if (!PUBLIC_API.has(c.req.path)) {
+    } else if (!PUBLIC_API.has(c.req.path) && !(c.req.method === 'GET' && PAIRING_STATUS_PATH.test(c.req.path))) {
       const device = auth.authenticate(credsOf(c), ip);
       if (!device) {
         return fail(c, Errors.unauthorized('还没有连接到 AI Console', '请从 AI Console 启动脚本打开，或重新生成配对码', [
@@ -94,6 +95,10 @@ export function createApp(s: Services, opts: { webDist: string }) {
         ]));
       }
       c.set('device', device);
+      // 远程写保护接入前，局域网的已认证入口只接受读取。
+      if (!isLocalRequest(c) && c.req.method !== 'GET' && c.req.method !== 'HEAD') {
+        return fail(c, Errors.forbidden('这项操作暂时只能在这台电脑上执行'));
+      }
     }
     await next();
   });

@@ -17,6 +17,7 @@ import type { GroupService, ProjectService } from './projects';
 import type { TaskService } from './tasks';
 import type { WorkspaceManager } from './workspaces';
 import type { LanSettings } from './lan/settings';
+import type { LanPairing } from './lan/pairing';
 
 export interface Services {
   db: Db;
@@ -28,6 +29,7 @@ export interface Services {
   lastExit: Hello['lastExit'];
   auth: AuthService;
   lan: LanSettings;
+  lanPairing: LanPairing;
   events: EventStore;
   agents: AgentRegistry;
   /** 1.2：检测缓存、能力缓存、登录、测试连接、并发上限 */

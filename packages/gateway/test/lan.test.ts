@@ -185,7 +185,9 @@ describe('局域网设置接口', () => {
       expect((await gw.api('PUT', '/access/lan', { loopback: alias, token, body: { enabled: false } })).status).toBe(403);
       expect((await gw.api('POST', '/access/lan/firewall', { loopback: alias, token })).status).toBe(403);
       const code = gw.gw.services.auth.newPairingCode().code;
-      expect((await gw.api('POST', '/pairing/complete', { loopback: alias, body: { code, deviceName: '离线模拟' } })).status).toBe(403);
+      const localCodeFromLan = await gw.api('POST', '/pairing/complete', { loopback: alias, body: { code, deviceName: '离线模拟' } });
+      expect(localCodeFromLan.status).toBe(400);
+      expect(localCodeFromLan.headers['set-cookie']).toBeUndefined();
 
       const connect = (headers: Record<string, string> = {}) => new Promise<WebSocket | number>((resolve, reject) => {
         const socket = new WebSocket(`ws://${host}/api/v1/ws`, { headers: { origin, authorization: `Bearer ${token}`, ...headers } });

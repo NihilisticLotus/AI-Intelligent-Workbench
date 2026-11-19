@@ -304,6 +304,8 @@ const MIGRATIONS: string[] = [
    CREATE INDEX idx_summary_requests_task ON handoff_summary_requests(task_id,ordinal);`,
   // 交接后的行为守卫与复述核对按会话读取事件（1.6 代码审查）
   `CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, seq);`,
+  // v26：原有配对全部来自本机，局域网配对单独标记。
+  `ALTER TABLE devices ADD COLUMN pairing_source TEXT NOT NULL DEFAULT 'local' CHECK (pairing_source IN ('local', 'lan'));`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

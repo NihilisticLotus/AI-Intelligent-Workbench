@@ -31,6 +31,13 @@
 | `npm test` | 1150 通过、3 跳过。适配器 104 通过 / 3 跳过，Gateway 811、协议 67、网页 168；跳过项为真实 Agent 冒烟。 |
 | `npm run build` | 通过；有已有的打包体积提示 |
 
+## 2026-11-19 阶段 1：网络探测、防火墙与设置接口
+
+- 只列出分配给外部网卡的私有 IPv4 地址。Windows 网络类别读取限时 10 秒，无法确认是专用网络时不能保存开启设置。防火墙规则按 Gateway 数据目录隔离，匹配选中地址、实际端口、Node 程序、专用网络和本地子网。只读规则通过 `netsh` 查询，并用 Windows 防火墙接口读取结构化属性以避开系统语言差异。[Windows 网络类别](https://learn.microsoft.com/en-us/powershell/module/netconnection/get-netconnectionprofile) · [Windows 防火墙命令](https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/netsh-advfirewall) · [防火墙规则属性](https://learn.microsoft.com/en-us/windows/win32/api/netfw/nn-netfw-inetfwrule)
+- 接口验证使用 `/api/v1/access/lan` 和 `/api/v1/access/lan/firewall`。读取需要设备鉴权，修改只接受回环来源。本阶段保存选择并提供单独的规则更新入口，实际监听留到阶段 2。
+- 新增 8 项离线测试，覆盖私网边界、网络类别、命令参数与规则匹配、真实路由上的鉴权和设置，以及替身模拟的 UAC 拒绝、失败及超时。临时撤掉公用网络检查和本机来源检查时，两条相关测试均由预期 403 变成实际 200，确认失败后已恢复检查。三段 PowerShell 脚本均通过 Windows PowerShell 的语法解析，解析过程没有执行脚本内容。
+- `npm run typecheck`、`npm test` 与 `npm run build` 均通过。默认全量 1158 通过、3 跳过（适配器 104 通过 / 3 跳过，Gateway 819、协议 67、网页 168）；构建保留已有的体积提示。本阶段无网页变更，未运行 Windows 网络命令、未监听局域网、未修改防火墙。
+
 ## 当前进度
 
-- 阶段 0 已通过；下一步是阶段 1（网络探测、防火墙和局域网设置接口）。阶段 1～7 尚未验收。
+- 阶段 0 已通过（`29335f4`）；阶段 1 已通过。下一步是阶段 2（第二监听、Host / Origin 与启动恢复）。阶段 2～7 尚未验收。

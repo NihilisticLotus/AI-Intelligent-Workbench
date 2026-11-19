@@ -39,6 +39,7 @@ const delay = (ms: number) => new Promise<void>((r) => { const t = setTimeout(r,
 import { attachWs } from './ws';
 import { gatewayLog, installCrashHandlers, readLastExit, lifecycle } from './crash-log';
 import { errorLogText } from './error-log';
+import { LanSettings, type LanDependencies } from './lan/settings';
 
 export const VERSION = '0.1.0';
 
@@ -76,6 +77,8 @@ export interface GatewayOptions {
   openBrowser?: boolean;
   devOrigin?: string;
   pairing?: Pick<AuthOptions, 'pairingTtlMs' | 'limits' | 'onPairingCode'>;
+  /** 离线验收注入网卡与防火墙执行器。 */
+  lan?: Partial<LanDependencies>;
   /**
    * 开发模式（默认看 AIC_DEV=1，且 NODE_ENV 不是 production）：把启动时的配对码写进数据目录的
    * dev-pairing-code.txt，供预览工具读取。只有启动时那一个码会写入；启动脚本 start.mjs 会清掉这些开发变量。
@@ -259,7 +262,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
 
   const services: Services = {
     db, attachments, independent, independentDiscovery, independentRuntime, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks, workspaces,
-    history, port: () => port,
+    history, port: () => port, lan: new LanSettings(db, realpathSync(dataDir), () => port, opts.lan),
     machine: { id: machineId, name: hostname(), os: process.platform === 'win32' ? 'windows' : process.platform },
     version: VERSION,
     bootId,

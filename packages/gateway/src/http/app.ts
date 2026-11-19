@@ -10,6 +10,7 @@ import { AppError, Errors, toApiError, zodMessage } from '../util';
 import type { Services } from '../services';
 import { attachmentError } from '../attachments';
 import { systemRoutes } from './system';
+import { accessRoutes } from './access';
 import { projectRoutes } from './projects';
 import { taskRoutes } from './tasks';
 import { agentRoutes } from './agents';
@@ -104,6 +105,7 @@ export function createApp(s: Services, opts: { webDist: string }) {
   });
 
   app.route(API_BASE, systemRoutes(s));
+  app.route(API_BASE, accessRoutes(s));
   app.route(API_BASE, projectRoutes(s));
   app.route(API_BASE, taskRoutes(s));
   app.route(API_BASE, historyRoutes(s));

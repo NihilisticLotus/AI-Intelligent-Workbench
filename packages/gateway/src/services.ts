@@ -16,6 +16,7 @@ import type { EventStore } from './events';
 import type { GroupService, ProjectService } from './projects';
 import type { TaskService } from './tasks';
 import type { WorkspaceManager } from './workspaces';
+import type { LanSettings } from './lan/settings';
 
 export interface Services {
   db: Db;
@@ -26,6 +27,7 @@ export interface Services {
   independentRuntime: IndependentTaskRuntime;
   lastExit: Hello['lastExit'];
   auth: AuthService;
+  lan: LanSettings;
   events: EventStore;
   agents: AgentRegistry;
   /** 1.2：检测缓存、能力缓存、登录、测试连接、并发上限 */

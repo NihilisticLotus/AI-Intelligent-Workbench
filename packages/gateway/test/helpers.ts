@@ -63,6 +63,10 @@ export async function startGw(extra: Partial<GatewayOptions> = {}, dataDir?: str
     dataDir: dir, port: 0, openBrowser: false, fakeSpeed: 0, log: () => {}, realAgents: false,
     webDist: path.join(dir, 'no-web'),
     ...extra,
+    lan: {
+      execute: async () => { throw new Error('离线测试没有注入局域网执行器'); },
+      ...extra.lan,
+    },
     pairing: {
       ...extra.pairing,
       limits: { startIntervalMs: 0, ...extra.pairing?.limits },

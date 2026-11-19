@@ -22,6 +22,34 @@ const ipv4 = (address: string, internal = false): NetworkInterfaceInfoIPv4 => ({
   address, netmask: '255.255.255.0', family: 'IPv4', mac: '', internal, cidr: `${address}/24`,
 });
 
+async function occupyPortWithAvailableSuccessor() {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const occupied = createServer();
+    occupied.listen(0, '127.0.0.1');
+    await once(occupied, 'listening');
+    const addressInfo = occupied.address();
+    const port = typeof addressInfo === 'object' && addressInfo ? addressInfo.port : 65535;
+    const probe = createServer();
+    try {
+      if (port < 65535) {
+        // Windows 随机分配到的端口旁边也可能落在系统保留范围，先验证顺延端口。
+        probe.listen(port + 1, '127.0.0.1');
+        await once(probe, 'listening');
+        await new Promise<void>((resolve) => probe.close(() => resolve()));
+        return { occupied, port };
+      }
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'EADDRINUSE' && code !== 'EACCES') {
+        await new Promise<void>((resolve) => occupied.close(() => resolve()));
+        throw error;
+      }
+    }
+    await new Promise<void>((resolve) => occupied.close(() => resolve()));
+  }
+  throw new Error('未找到可验证端口顺延的相邻回环端口');
+}
+
 describe('局域网探测与防火墙', () => {
   it('只列出私有网段的外部 IPv4，保留网卡名', () => {
     for (const valid of ['10.0.0.1', '10.255.255.254', '172.16.0.1', '172.31.255.254', '192.168.1.1']) expect(isPrivateIpv4(valid), valid).toBe(true);
@@ -157,14 +185,10 @@ describe('局域网设置接口', () => {
   });
 
   it('第二监听使用顺延后的同一端口，HTTP 和 WebSocket 校验地址与来源，关闭时只断开第二监听', async () => {
-    const taken = createServer();
-    taken.listen(0, '127.0.0.1');
-    await once(taken, 'listening');
-    const occupied = taken.address();
-    if (!occupied || typeof occupied === 'string') throw new Error('无法获得测试端口');
-    const { gw, token, body, setChangeResult } = await setup('Private', occupied.port);
+    const { occupied, port } = await occupyPortWithAvailableSuccessor();
     try {
-      expect(gw.port).toBeGreaterThan(occupied.port);
+      const { gw, token, body, setChangeResult } = await setup('Private', port);
+      expect(gw.port).toBe(port + 1);
       const host = `${alias}:${gw.port}`;
       const origin = `http://${host}`;
       const app = createApp(gw.gw.services, { webDist: gw.dataDir });
@@ -212,7 +236,7 @@ describe('局域网设置接口', () => {
         setChangeResult({ status: 'ok', stdout: '' });
         expect((await gw.api('POST', '/access/lan/firewall', { token })).json.firewall).toBe('missing');
       } finally { await localSocket.close(); }
-    } finally { await new Promise<void>((resolve) => taken.close(() => resolve())); }
+    } finally { await new Promise<void>((resolve) => occupied.close(() => resolve())); }
   });
 
   it('第二监听失败时回滚开关，本机继续服务，留下可重试清理的规则状态', async () => {

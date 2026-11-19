@@ -154,3 +154,4 @@
 | [ISSUE-0146](ISSUE-0146-handoff-edit-tool-hint.md) | 交接说明硬编码 Codex 的 apply_patch 工具名 | fixed | bug | 2026-11-19 | 2026-11-19 |
 | [ISSUE-0147](ISSUE-0147-lan-pairing-qr.md) | 局域网地址与配对码二维码暂缓 | deferred | 待办 | 2026-11-19 | |
 | [ISSUE-0148](ISSUE-0148-lan-port-test-exclusion.md) | Windows 相邻端口不可用导致顺延用例偶发失败 | fixed | bug | 2026-11-19 | 2026-11-19 |
+| [ISSUE-0149](ISSUE-0149-lan-phone-acceptance.md) | 局域网手机真机与 Windows 防火墙待验收 | open | 验收未通过（未验证） | 2026-11-19 | |

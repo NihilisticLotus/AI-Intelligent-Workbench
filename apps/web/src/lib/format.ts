@@ -75,7 +75,13 @@ export function durationText(ms: number): string {
 }
 
 /** 浏览器的设备名：用于配对时告诉 Gateway 这是哪台设备 */
-export function guessDeviceName(ua = typeof navigator === 'undefined' ? '' : navigator.userAgent): string {
-  const b = /Edg\//.test(ua) ? 'Edge' : /Firefox\//.test(ua) ? 'Firefox' : /Chrome\//.test(ua) ? 'Chrome' : /Safari\//.test(ua) ? 'Safari' : '浏览器';
-  return `${b} 浏览器（本机）`;
+export function guessDeviceName(ua = typeof navigator === 'undefined' ? '' : navigator.userAgent, source: 'local' | 'lan' = 'local'): string {
+  const browser = /Edg(?:A|iOS)?\//.test(ua) ? 'Edge'
+    : /(?:Firefox|FxiOS)\//.test(ua) ? 'Firefox'
+    : /(?:Chrome|CriOS)\//.test(ua) ? 'Chrome'
+    : /Safari\//.test(ua) ? 'Safari' : null;
+  const label = browser ? `${browser} 浏览器` : '浏览器';
+  if (source === 'local') return `${label}（本机）`;
+  const mobile = ua.match(/\b(iPhone|iPad|Android)\b/)?.[1];
+  return mobile ? `${mobile} · ${label}` : label;
 }

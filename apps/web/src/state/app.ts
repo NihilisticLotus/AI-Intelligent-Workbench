@@ -271,7 +271,7 @@ export async function completePairing(code: string): Promise<ApiError | null> {
   }
 }
 
-export const submitLanPairing = (code: string) => api.lanPairingComplete(code, guessDeviceName());
+export const submitLanPairing = (code: string) => api.lanPairingComplete(code, guessDeviceName(undefined, 'lan'));
 
 export async function finishLanPairing(result: Extract<LanPairingStatus, { status: 'paired' }>) {
   await creds.save({ device: result.device, key: result.key });

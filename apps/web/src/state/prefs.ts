@@ -10,6 +10,7 @@ export type SideTab = 'plan' | 'diff';
 export interface Prefs {
   theme: Theme;
   thought: ThoughtMode;
+  notificationSound: boolean;
   sidebarCollapsed: boolean;
   /** 侧栏任务归类：按项目 / 按分组 */
   sbView: 'project' | 'group';
@@ -26,7 +27,7 @@ export interface Prefs {
 }
 
 const defaults: Prefs = {
-  theme: 'dark', thought: 'collapsed', sidebarCollapsed: false, sbView: 'project', collapsed: [],
+  theme: 'dark', thought: 'collapsed', notificationSound: true, sidebarCollapsed: false, sbView: 'project', collapsed: [],
   sideOpen: true, sideWidth: 440, sideTab: 'plan',
   workView: 'chat', boardTab: 'summary', boardProject: '', boardGroup: '',
   detailOpen: [...defaultDetailSections],

@@ -3,7 +3,7 @@
 import {
   PromptResult, type HandoffTarget, type HandoffSendOptions, ErrorCode, type AgentKind, type AgentLoginBody, type AgentProfile, type ApiError, type CreateProfileBody, type Device,
   type EventEnvelope, type Group, type Hello, type PatchAgentBody, type PatchProfileBody, type PermissionLevel,
-  type Project, type Task,
+  type LanPairingStatus, type Project, type Task,
 } from '@aic/protocol';
 import { ApiRequestError, HttpClient, toApiError } from '../api/http';
 import { Credentials } from '../api/credentials';
@@ -19,6 +19,7 @@ import { createStore, useStore } from './store';
 import { createFlusher } from './flush';
 import { authenticatedStartup } from '../api/credentials';
 import { announce, navigate, routeStore } from './ui';
+import { isLanHostname, isRemoteAccess, pairCodeFromHash, updateAccessPrompts, type AccessPrompt } from '../lib/lan-access';
 
 export type BootState = 'loading' | 'unpaired' | 'ready' | 'error';
 
@@ -28,6 +29,7 @@ export interface AppState extends CoreState {
   bootError: ApiError | null;
   /** 配对页：已请求过新配对码（显示“看终端窗口里的配对码”和输入框） */
   pairRequested: boolean;
+  initialPairCode: string;
   hello: Hello | null;
   conn: ConnState;
   projects: Project[];
@@ -42,10 +44,13 @@ export interface AppState extends CoreState {
 }
 
 export const appStore = createStore<AppState>({
-  ...emptyCore(), boot: 'loading', bootError: null, pairRequested: false, hello: null, conn: 'idle',
+  ...emptyCore(), boot: 'loading', bootError: null, pairRequested: false, initialPairCode: '', hello: null, conn: 'idle',
   projects: [], groups: [], history: {}, devices: null, profiles: {}, independentCatalogVersion: 0,
 });
 export const useApp = <S>(sel: (s: AppState) => S) => useStore(appStore, sel);
+export const useRemoteAccess = () => useApp((s) => isRemoteAccess(s.hello));
+export const accessPromptStore = createStore<AccessPrompt[]>([]);
+export const dismissAccessPrompt = (id: string) => accessPromptStore.set((items) => items.filter(({ request }) => request.id !== id));
 const set = (fn: (s: AppState) => AppState) => appStore.set(fn);
 
 /** 设备凭据：存哪里、要哪种都由 Platform 决定，界面代码不碰 */
@@ -83,10 +88,19 @@ function sideEffects(before: AppState, batch: EventEnvelope[]) {
     void refreshAgents().catch(() => { /* 目录页保留错误提示，断线后由完整快照恢复。 */ });
   }
   for (const ev of batch) {
+    const prompts = accessPromptStore.get();
+    const next = updateAccessPrompts(prompts, ev);
+    if (next !== prompts) accessPromptStore.set(() => next);
+    if (next.length > prompts.length && ev.type === 'pairing.requested') {
+      void platform.notify({ title: '有新设备请求连接', body: ev.data.name, tag: ev.data.id });
+    }
+    if (next.length > prompts.length && ev.type === 'access.confirm_requested') {
+      void platform.notify({ title: '有远程操作等你确认', body: ev.data.deviceName, tag: ev.data.id });
+    }
     if (ev.type === 'approval.requested' && !before.approvals[ev.data.approval.id] && ev.data.approval.status === 'pending') {
       const a = ev.data.approval;
       announce(`新审批：${a.title}`);
-      if (!document.hasFocus()) void platform.notify({
+      void platform.notify({
         title: '有审批等你处理', body: a.title, tag: a.id,
         onClick: () => navigate({ page: 'task', taskId: a.taskId }),
       });
@@ -120,9 +134,8 @@ async function doBoot() {
   if (!creds.isLoaded) await creds.load();
   // 1) 地址栏带 #pair=<配对码>：先清掉地址栏里的配对码；已有有效凭据就直接进入，不重复配对
   //    （每次启动脚本都会带新码打开浏览器，重复配对会不断产生新设备、留下无人持有的旧令牌）
-  const m = /(?:^#|&)pair=([^&]+)/.exec(location.hash);
-  if (m) {
-    const code = decodeURIComponent(m[1]!);
+  const code = pairCodeFromHash(location.hash);
+  if (code !== null) {
     history.replaceState(null, '', location.pathname + location.search);
     routeStore.set(() => ({ page: 'home' }));
     let hello: Hello | null = null;
@@ -132,6 +145,10 @@ async function doBoot() {
       }
     }
     if (hello) { await startOrFail(hello); return; }
+    if (isLanHostname(location.hostname)) {
+      toUnpaired(code);
+      return;
+    }
     try {
       await pairWith(code);
     } catch (e) {
@@ -169,7 +186,7 @@ async function start(prefetched?: Hello) {
     core = applyTaskSnapshot(core, tasks, atSeq);
     core = applyApprovalSnapshot(core, approvals, atSeq);
     core = applyAgentSnapshot(core, agents, atSeq);
-    return { ...s, ...core, hello, projects, groups, boot: 'ready', bootError: null, pairRequested: false };
+    return { ...s, ...core, hello, projects, groups, boot: 'ready', bootError: null, pairRequested: false, initialPairCode: '' };
   });
   connectWs();
 }
@@ -215,18 +232,21 @@ async function resetAndRestart() {
   ws?.stop();
   ws = null;
   queue = [];
+  accessPromptStore.set(() => []);
   firstOnline = true;
   set((s) => ({ ...s, ...emptyCore(), history: {}, devices: null, profiles: {} }));
   await startOrFail();
 }
 
-function toUnpaired() {
+function toUnpaired(initialPairCode?: string) {
   imageCache.clear();
   ws?.stop();
   ws = null;
+  accessPromptStore.set(() => []);
   // 凭据已失效（或设备被吊销）：清掉本地保存的密钥 / 令牌
   void creds.clear();
-  set((s) => (s.boot === 'unpaired' ? s : { ...s, boot: 'unpaired', conn: 'idle' }));
+  set((s) => (s.boot === 'unpaired' && initialPairCode === undefined ? s :
+    { ...s, boot: 'unpaired', conn: 'idle', initialPairCode: initialPairCode ?? '' }));
 }
 
 // ---------- 配对 ----------
@@ -249,6 +269,13 @@ export async function completePairing(code: string): Promise<ApiError | null> {
   } catch (e) {
     return toApiError(e);
   }
+}
+
+export const submitLanPairing = (code: string) => api.lanPairingComplete(code, guessDeviceName());
+
+export async function finishLanPairing(result: Extract<LanPairingStatus, { status: 'paired' }>) {
+  await creds.save({ device: result.device, key: result.key });
+  await startOrFail();
 }
 
 // ---------- 任务历史 ----------
@@ -278,7 +305,8 @@ export const sendPrompt = (taskId: string, text: string, attachments?: string[],
   ws ? ws.request('prompt', { taskId, text, attachments, target, handoff }, target?180_000:undefined).then(value=>PromptResult.parse(value)) : notConnected();
 export const cancelTask = (taskId: string) => (ws ? ws.request('cancel', { taskId }) : notConnected());
 export const approve = (approvalId: string, optionId: string, note?: string, alwaysAllow?:import('@aic/protocol').AlwaysAllowConfirmation) =>
-  ws ? ws.request('approve',{approvalId,optionId,...(note?{note}:{}),...(alwaysAllow?{alwaysAllow}:{})}) : notConnected();
+  ws ? ws.request('approve', { approvalId, optionId, ...(note ? { note } : {}), ...(alwaysAllow ? { alwaysAllow } : {}) },
+    alwaysAllow && isRemoteAccess(appStore.get().hello) ? 125_000 : undefined) : notConnected();
 export const switchConfig = (taskId: string, patch: { model?: string; effort?: string; profileId?: string }) =>
   ws ? ws.request('switch', { taskId, ...patch }) : notConnected();
 

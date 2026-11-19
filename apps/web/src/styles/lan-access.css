@@ -1,0 +1,32 @@
+/* 设备与访问、配对和本机确认沿用工作台表面与状态颜色。 */
+.lan-row, .lan-list-heading, .lan-code { display: flex; flex-wrap: wrap; align-items: center; gap: var(--sp-2); min-width: 0; }
+.lan-list-heading { margin: var(--sp-4) 0 var(--sp-2); }
+.lan-list-heading h4 { margin: 0 auto 0 0; }
+.lan-access .set-row { grid-template-columns: minmax(112px, 160px) minmax(0, 1fr); }
+.lan-note { margin: var(--sp-2) 0; color: var(--fg-3); font-size: var(--fs-13); overflow-wrap: anywhere; }
+.lan-warning { margin-top: 0; }
+.lan-address, .lan-access .device-list .info { overflow-wrap: anywhere; }
+.lan-code { margin-top: var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--bg-1); border-radius: var(--r-ctl); }
+.lan-code-value { font-size: var(--fs-20); font-weight: 700; letter-spacing: .16em; }
+.lan-manual { display: grid; gap: var(--sp-1); margin-top: var(--sp-2); }
+.lan-audit { margin-top: var(--sp-4); border-top: 1px solid var(--line); }
+.lan-audit > summary { cursor: pointer; padding: var(--sp-3) 0; font-weight: 600; }
+.lan-audit-list { display: grid; margin: var(--sp-2) 0; padding: 0; list-style: none; gap: var(--sp-2); }
+.lan-audit-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--sp-1) var(--sp-2); padding: var(--sp-2) var(--sp-3); background: var(--bg-1); border-radius: var(--r-ctl); overflow-wrap: anywhere; }
+.lan-audit-list li > small { grid-column: 1 / -1; color: var(--fg-3); }
+.lan-switch { width: 44px; height: 25px; }
+.lan-switch::after { left: 4px; top: calc(50% - 7px); }
+.lan-switch[aria-checked="true"]::after { transform: translateX(22px); }
+.lan-pair-form { display: grid; gap: var(--sp-2); }
+.lan-pair-form > .btn { justify-self: start; }
+.lan-pair-result { border-inline-start: 3px solid var(--attn); padding-inline-start: var(--sp-2); }
+.lan-facts { margin-bottom: var(--sp-2); }
+
+@media (max-width: 767px) {
+  .lan-access .set-row { grid-template-columns: minmax(0, 1fr); }
+  .lan-access :is(.btn, .select), .lan-switch, .lan-pair-page :is(.btn, .input), .lan-dialog .btn, .lan-audit > summary { min-height: 44px; }
+  .lan-dialog .btn.icon { min-width: 44px; }
+  .lan-access :is(.select, .input) { font-size: 16px; }
+  dialog.lan-dialog { width: min(100%, calc(100vw - 20px)); max-height: calc(100dvh - 24px); }
+  .lan-pair-page { padding: max(var(--sp-4), env(safe-area-inset-top)) var(--sp-4) max(var(--sp-4), env(safe-area-inset-bottom)); }
+}

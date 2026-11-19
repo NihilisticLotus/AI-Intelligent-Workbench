@@ -18,6 +18,7 @@ import {
   type CreateIndependentServiceBody, type PatchIndependentServiceBody, type CreateIndependentModelBody,
   type PatchIndependentModelBody, type PatchIndependentOverridesBody, type DiscoverIndependentModelsBody, type ImportIndependentModelsBody,
 } from '@aic/protocol';
+import { AccessAuditEntry, LanPairingCode, LanPairingPending, LanPairingStatus, LanState, RevokeLanResult, type PutLanBody } from '@aic/protocol';
 
 /** 客户端自己产生的错误码（网络断开、超时等），不在服务端协议里 */
 export const ClientErrorCode = {
@@ -201,6 +202,22 @@ export class HttpClient {
   }
   devices() { return this.request('GET', '/devices', { parse: listOf(Device) }).then((r) => r.items); }
   revokeDevice(id: string) { return this.request('DELETE', `/devices/${encodeURIComponent(id)}`); }
+  revokeLanDevices() { return this.request('DELETE', '/devices/lan', { parse: RevokeLanResult }); }
+  lanState() { return this.request('GET', '/access/lan', { parse: LanState }); }
+  putLan(body: PutLanBody) { return this.request('PUT', '/access/lan', { body, parse: LanState }); }
+  updateLanFirewall() { return this.request('POST', '/access/lan/firewall', { parse: LanState }); }
+  accessAudit(cursor?: string) { return this.request('GET', '/access/audit', { query: { cursor }, parse: listOf(AccessAuditEntry) }); }
+  localPairingCode() { return this.request('POST', '/pairing/local-code', { parse: LanPairingCode }); }
+  lanPairingComplete(code: string, deviceName: string) {
+    return this.request('POST', '/pairing/complete', { body: { code, deviceName, kind: 'browser', tokenDelivery: 'cookie' }, parse: LanPairingPending });
+  }
+  lanPairingStatus(id: string) { return this.request('GET', `/pairing/requests/${encodeURIComponent(id)}`, { parse: LanPairingStatus }); }
+  decideLanPairing(id: string, allow: boolean) {
+    return this.request('POST', `/pairing/requests/${encodeURIComponent(id)}/decision`, { body: { allow }, parse: OkResult });
+  }
+  decideRemoteAction(id: string, allow: boolean) {
+    return this.request('POST', `/access/confirmations/${encodeURIComponent(id)}/decision`, { body: { allow }, parse: OkResult });
+  }
 
   projects() { return this.request('GET', '/projects', { parse: listOf(Project) }).then((r) => r.items); }
   environments() { return this.request('GET', '/environments', { parse: listOf(SavedEnvironment) }).then((r) => r.items); }

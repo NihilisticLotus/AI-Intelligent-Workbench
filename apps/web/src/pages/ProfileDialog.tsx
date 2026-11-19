@@ -2,7 +2,7 @@
 // 密钥输入框是 password 类型，只随这一次请求发给服务端；接口不会再返回明文，界面只显示末 4 位。
 import { useState } from 'react';
 import type { AgentInfo, AgentProfile, ApiError, AuthMethod, ProfileKind } from '@aic/protocol';
-import { createProfile, patchProfile } from '../state/app';
+import { createProfile, patchProfile, useRemoteAccess } from '../state/app';
 import { toast } from '../state/ui';
 import { SECRET_STORE_TEXT, parseModelList, profileKindText, validateProfileDraft, type ProfileDraft } from '../lib/agents';
 import { Dialog, ErrorNotice, asApiError } from '../components/ui';
@@ -16,6 +16,7 @@ export function ProfileDialog({ agent, kind, existing, close, loginMethods, onCr
   onCreatedSubscription: (p: AgentProfile, methodId: string) => void;
 }) {
   const editing = !!existing;
+  const remote = useRemoteAccess();
   const [d, setD] = useState<ProfileDraft>(() => ({
     kind,
     name: existing?.name ?? defaultName(agent, kind),
@@ -36,6 +37,7 @@ export function ProfileDialog({ agent, kind, existing, close, loginMethods, onCr
 
   const submit = async () => {
     if (busy) return;
+    if (remote && !existing) { setProblem('请到运行 AI Console 的电脑上添加账号'); return; }
     const p = validateProfileDraft(d, editing);
     if (p) { setProblem(p); return; }
     if (kind === 'subscription' && !editing && !methodId) { setProblem('这个 Agent 没有可以在界面里完成的订阅登录'); return; }
@@ -47,9 +49,9 @@ export function ProfileDialog({ agent, kind, existing, close, loginMethods, onCr
       if (existing) {
         const saved = await patchProfile(existing.id, {
           name: d.name.trim(),
-          ...(kind === 'customEndpoint' ? { baseUrl: d.baseUrl.trim(), models: models ?? [] } : {}),
-          ...(showAuthHeader ? { authHeader: d.authHeader } : {}),
-          ...(apiKey ? { apiKey } : {}),
+          ...(kind === 'customEndpoint' ? { models: models ?? [], ...(!remote ? { baseUrl: d.baseUrl.trim() } : {}) } : {}),
+          ...(showAuthHeader && !remote ? { authHeader: d.authHeader } : {}),
+          ...(apiKey && !remote ? { apiKey } : {}),
         });
         toast(apiKey && saved.secretHint ? `已保存，密钥结尾 …${saved.secretHint}` : '已保存');
         close();
@@ -85,6 +87,7 @@ export function ProfileDialog({ agent, kind, existing, close, loginMethods, onCr
           {editing ? '保存' : kind === 'subscription' ? '添加并登录' : '保存'}</button>
       </>}>
       {err ? <ErrorNotice error={err} /> : null}
+      {remote ? <p>请到运行 AI Console 的电脑上填写或修改 Key 与授权地址。</p> : null}
       {experimental ? (
         <div className="alert attn"><Icon name="warn" /><div className="body"><strong>实验功能</strong>
           <p>CodeBuddy 的 API Key 和自定义地址只有源码依据，还没有实测。保存后先点“测试”。</p></div></div>
@@ -110,12 +113,12 @@ export function ProfileDialog({ agent, kind, existing, close, loginMethods, onCr
         {kind === 'customEndpoint' ? (
           <>
             <div className="form-row"><label htmlFor="pf-url">地址</label>
-              <input id="pf-url" className="input mono" value={d.baseUrl} maxLength={500} spellCheck={false} inputMode="url"
+              <input id="pf-url" className="input mono" value={d.baseUrl} maxLength={500} spellCheck={false} inputMode="url" readOnly={remote}
                 placeholder="https://relay.example.com" onChange={(e) => up({ baseUrl: e.target.value })} />
             </div>
             {showAuthHeader ? (
               <div className="form-row"><label htmlFor="pf-h">鉴权方式</label>
-                <select id="pf-h" className="select" value={d.authHeader} onChange={(e) => up({ authHeader: e.target.value as ProfileDraft['authHeader'] })}>
+                <select id="pf-h" className="select" value={d.authHeader} disabled={remote} onChange={(e) => up({ authHeader: e.target.value as ProfileDraft['authHeader'] })}>
                   <option value="x-api-key">{agent.kind === 'codebuddy' ? 'API Key' : 'x-api-key 头（官方格式）'}</option>
                   <option value="bearer">{agent.kind === 'codebuddy' ? 'Auth Token' : 'Authorization: Bearer（多数中转用这个）'}</option>
                 </select>
@@ -123,15 +126,15 @@ export function ProfileDialog({ agent, kind, existing, close, loginMethods, onCr
             ) : null}
           </>
         ) : null}
-        {kind !== 'subscription' ? (
+        {!remote && kind !== 'subscription' ? (
           <div className="form-row"><label htmlFor="pf-key">{editing ? '新密钥' : '密钥'}</label>
             <input id="pf-key" className="input mono" type="password" value={d.apiKey} maxLength={4000} autoComplete="new-password" spellCheck={false}
               placeholder={editing ? (existing?.secretHint ? `留空表示不修改（现在结尾 …${existing.secretHint}）` : '留空表示不修改') : '粘贴密钥'}
               onChange={(e) => up({ apiKey: e.target.value })} />
           </div>
         ) : null}
-        {kind !== 'subscription' ? <p className="form-note"><Icon name="shield" size={13} /> {SECRET_STORE_TEXT}。保存后只显示结尾 4 位，任何接口都不会再返回完整密钥。</p> : null}
-        {kind !== 'subscription' && agent.kind === 'codex' ? <p className="form-note">Codex 还会在这个账号的独立目录里保存自己的 API 登录凭据。删除账号会移除工作台保存的密钥，Agent 的历史与独立目录会保留。</p> : null}
+        {!remote && kind !== 'subscription' ? <p className="form-note"><Icon name="shield" size={13} /> {SECRET_STORE_TEXT}。保存后只显示结尾 4 位，任何接口都不会再返回完整密钥。</p> : null}
+        {!remote && kind !== 'subscription' && agent.kind === 'codex' ? <p className="form-note">Codex 还会在这个账号的独立目录里保存自己的 API 登录凭据。删除账号会移除工作台保存的密钥，Agent 的历史与独立目录会保留。</p> : null}
         {kind === 'customEndpoint' ? (
           <div className="form-row top"><label htmlFor="pf-models">模型（可选）</label>
             <textarea id="pf-models" className="textarea mono" rows={3} value={d.models} spellCheck={false}

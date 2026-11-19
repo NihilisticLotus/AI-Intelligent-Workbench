@@ -9,12 +9,14 @@ import { TASK_SEND_ACTIONS } from '../lib/agents';
 import { appStore, cancelTask, sendPrompt, startLogin, useApp } from '../state/app';
 import { lastUserText } from '../state/core';
 import { requestAgentTest, requestOpenSwitcher } from './focus';
+import { isRemoteAccess } from '../lib/lan-access';
 
 // ---------------------------------------------------------------------
 // 对话框：原生 <dialog>，Esc 关闭，焦点由浏览器管理并在关闭后还原
 // ---------------------------------------------------------------------
-export function Dialog({ title, onClose, children, footer, wide, initialFocus }: {
+export function Dialog({ title, onClose, children, footer, wide, initialFocus, className }: {
   title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; wide?: boolean;
+  className?: string;
   /** 打开后聚焦的元素选择器（默认第一个可聚焦元素） */
   initialFocus?: string;
 }) {
@@ -31,7 +33,7 @@ export function Dialog({ title, onClose, children, footer, wide, initialFocus }:
     return () => { d.removeEventListener('cancel', onCancel); if (d.open) d.close(); opener?.focus?.(); };
   }, [initialFocus]);
   return (
-    <dialog ref={ref} className={'dlg' + (wide ? ' wide' : '')} aria-label={title}
+    <dialog ref={ref} className={'dlg' + (wide ? ' wide' : '') + (className ? ` ${className}` : '')} aria-label={title}
       onMouseDown={(e) => { if (e.target === ref.current) onClose(); }}>
       <div className="dlg-head"><h2>{title}</h2><span className="grow" />
         <button type="button" className="btn ghost icon sm" aria-label="关闭" onClick={onClose}><Icon name="x" /></button>
@@ -217,6 +219,7 @@ export function runErrorAction(a: string | ActionLike, onRetryOrCtx?: (() => voi
     case 'pair': case 're_pair': case 'pairing.start': location.hash = ''; location.reload(); return;
     // 1.2：真实 Agent 的错误按钮（protocol 的 ErrorActionKey；同时认几个常见的别名）
     case 'agents.login': case 'agent.login': case 'login': {
+      if (isRemoteAccess(appStore.get().hello)) { toast('请到运行 AI Console 的电脑上登录第三方 Agent', 'attn'); return; }
       const profileId = argStr(args, 'profileId');
       navigate(kind ? (profileId ? { page: 'agents', agent: kind, profileId } : { page: 'agents', agent: kind }) : { page: 'agents' });
       return;

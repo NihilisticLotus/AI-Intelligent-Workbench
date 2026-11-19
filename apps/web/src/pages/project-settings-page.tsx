@@ -1,11 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AgentKind, PermissionRuleDraft, PermissionRuleSet } from '@aic/protocol';
-import { api, saveProjectSettings, useApp } from '../state/app';
+import { api, saveProjectSettings, useApp, useRemoteAccess } from '../state/app';
 import { toast } from '../state/ui';
 import { asApiError } from '../components/ui';
+import { newOpId } from '../lib/ids';
 
 export function ProjectSettingsPage({projectId}:{projectId:string}) {
   const project=useApp(s=>s.projects.find(p=>p.id===projectId)),agents=useApp(s=>s.agents);
+  const remote = useRemoteAccess();
   const [name,setName]=useState(project?.name??''),[agent,setAgent]=useState(project?.defaultAgent??'');
   const [ignore,setIgnore]=useState(project?.ignoreGlobs?.join('\n')??''),[carry,setCarry]=useState(project?.carryGlobs?.join('\n')??'');
   const [rules,setRules]=useState<PermissionRuleSet|null>(null),[items,setItems]=useState<(PermissionRuleDraft&{uiKey:string})[]>([]);
@@ -48,7 +50,8 @@ export function ProjectSettingsPage({projectId}:{projectId:string}) {
           <td><button className="btn danger sm" aria-label={`删除第 ${index+1} 条规则`} disabled={busy} onClick={()=>setItems(old=>old.filter((_,i)=>i!==index))}>删除</button></td>
         </tr>)}
       </tbody></table>{!items.length?<p className="d-note">还没有项目规则，按任务权限决定是否审批。</p>:null}</div>}
-      <div className="changes-actions"><button className="btn" disabled={busy||!rules||items.length>=200} onClick={()=>setItems(old=>[...old,{action:'ask',tool:'shell',match:'*',path:null,uiKey:crypto.randomUUID()}])}>添加规则</button><button className="btn primary" disabled={busy||!rules} onClick={()=>void saveRules()}>保存规则</button><button className="btn ghost" disabled={busy} onClick={()=>void load()}>重新载入规则</button></div>
+      {remote ? <p className="d-note">保存权限规则需要在电脑上确认。</p> : null}
+      <div className="changes-actions"><button className="btn" disabled={busy||!rules||items.length>=200} onClick={()=>setItems(old=>[...old,{action:'ask',tool:'shell',match:'*',path:null,uiKey:newOpId('rule')}])}>添加规则</button><button className="btn primary" disabled={busy||!rules} onClick={()=>void saveRules()}>保存规则</button><button className="btn ghost" disabled={busy} onClick={()=>void load()}>重新载入规则</button></div>
     </section>
   </div></div></main>;
 }

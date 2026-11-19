@@ -7,6 +7,7 @@ import { attachmentLimit, clipboardFiles, screenshotName, visionWarning } from '
 import { Dialog, openDialog } from './ui';
 import { Icon } from './Icon';
 import { imageCache } from '../lib/image-cache';
+import { newOpId } from '../lib/ids';
 type Item = { key: string; file?: File; info?: AttachmentInfo; progress: number; error?: string };
 export function useAttachments(taskId: string | null) {
   const [items,setItems]=useState<Item[]>([]);const current=useRef(items);current.current=items;
@@ -25,7 +26,7 @@ export function useAttachments(taskId: string | null) {
     const added:Item[]=[];
     for(let file of files){const error=attachmentLimit(file.size,current.current.length+added.length);if(error){toast(error,'attn');continue;}
       if(!file.name||file.name==='image.png'||file.name==='clipboard.png')file=new File([file],screenshotName(new Date()),{type:file.type});
-      added.push({key:crypto.randomUUID(),file,progress:taskId?0:100});
+      added.push({key:newOpId('att'),file,progress:taskId?0:100});
     }
     current.current=[...current.current,...added];setItems(current.current);
     if(taskId)for(const item of added)void upload(item,taskId).catch(()=>{});

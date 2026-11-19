@@ -32,7 +32,7 @@ export interface Platform {
    */
   readonly tokenDelivery: 'cookie' | 'bearer';
 
-  /** 系统通知（审批到来等）；没有权限时静默忽略 */
+  /** 通知（审批到来等）；浏览器可在系统通知不可用时用页面提醒。 */
   notify(opts: { title: string; body: string; tag?: string; onClick?: () => void }): Promise<void>;
   restartGateway?(): Promise<boolean>;
   /** 选文件夹：浏览器版打开基于 /fs/browse 的对话框；桌面版可以用系统对话框。取消时返回 null */

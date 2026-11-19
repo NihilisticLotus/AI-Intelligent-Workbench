@@ -15,21 +15,81 @@ const ls = {
   remove(k: string) { try { localStorage.removeItem(PREFIX + k); } catch { /* 忽略 */ } },
 };
 
+type Notice = Parameters<Platform['notify']>[0];
+let noticeHost: ((notice: Notice) => void) | undefined;
+let audio: AudioContext | undefined;
+let titleBefore: string | undefined;
+let titleTimer: ReturnType<typeof setInterval> | undefined;
+
+export function canUseSystemNotifications(secure: boolean, available: boolean): boolean {
+  return secure && available;
+}
+
+export function installBrowserNotices(host: (notice: Notice) => void) {
+  noticeHost = host;
+  const unlock = () => {
+    if (ls.get('notificationSound') === 'false') return;
+    const Audio = window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Audio || audio?.state === 'running') return;
+    try { audio ??= new Audio(); void audio.resume().catch(() => {}); } catch { /* 浏览器可能禁用音频 */ }
+  };
+  document.addEventListener('pointerdown', unlock);
+  document.addEventListener('keydown', unlock);
+  window.addEventListener('focus', resetNoticeTitle);
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') resetNoticeTitle(); });
+}
+
+function resetNoticeTitle() {
+  if (titleTimer !== undefined) clearInterval(titleTimer);
+  titleTimer = undefined;
+  if (titleBefore !== undefined) document.title = titleBefore;
+  titleBefore = undefined;
+}
+
+function fallbackNotice(notice: Notice, foreground: boolean) {
+  noticeHost?.(notice);
+  if (!foreground && titleBefore === undefined) {
+    titleBefore = document.title;
+    const alertTitle = `有待处理事项 · ${titleBefore}`;
+    document.title = alertTitle;
+    if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      titleTimer = setInterval(() => { document.title = document.title === alertTitle ? titleBefore ?? '' : alertTitle; }, 1300);
+    }
+  }
+  if (!audio || audio.state !== 'running' || ls.get('notificationSound') === 'false') return;
+  const tone = audio.createOscillator();
+  const gain = audio.createGain();
+  const time = audio.currentTime;
+  tone.frequency.value = 660;
+  gain.gain.setValueAtTime(0.045, time);
+  gain.gain.exponentialRampToValueAtTime(0.001, time + 0.14);
+  tone.connect(gain);
+  gain.connect(audio.destination);
+  tone.onended = () => { tone.disconnect(); gain.disconnect(); };
+  tone.start(time);
+  tone.stop(time + 0.14);
+}
+
 export function createBrowserPlatform(baseUrl = ''): Platform {
   return {
     kind: 'browser',
     baseUrl,
     tokenDelivery: 'cookie',
-    async notify({ title, body, tag, onClick }) {
-      if (typeof Notification === 'undefined') return;
-      // 页面在前台时不弹系统通知，界面里已经能看到
-      if (document.visibilityState === 'visible' && document.hasFocus()) return;
-      try {
-        if (Notification.permission === 'default') await Notification.requestPermission();
-        if (Notification.permission !== 'granted') return;
-        const n = new Notification(title, { body, tag });
-        n.onclick = () => { window.focus(); onClick?.(); n.close(); };
-      } catch { /* 忽略 */ }
+    async notify(notice) {
+      if (typeof window === 'undefined' || typeof document === 'undefined') return;
+      const foreground = document.visibilityState === 'visible' && document.hasFocus();
+      if (canUseSystemNotifications(window.isSecureContext, typeof Notification !== 'undefined')) {
+        if (foreground) return;
+        try {
+          if (Notification.permission === 'default') await Notification.requestPermission();
+          if (Notification.permission === 'granted') {
+            const notification = new Notification(notice.title, { body: notice.body, tag: notice.tag });
+            notification.onclick = () => { window.focus(); notice.onClick?.(); notification.close(); };
+            return;
+          }
+        } catch { /* 权限或浏览器限制时走页面提醒 */ }
+      }
+      fallbackNotice(notice, foreground);
     },
     pickFolder() {
       if (!folderHost) return Promise.resolve(null);

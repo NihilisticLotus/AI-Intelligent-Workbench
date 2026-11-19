@@ -15,10 +15,13 @@ import { AgentsPage } from './pages/AgentsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ProjectSettingsPage } from './pages/project-settings-page';
 import { PairingPage } from './pages/PairingPage';
+import { LanPairingPage } from './pages/lan-pairing-page';
 import { NewTaskPage } from './pages/new-task-page';
 import { Icon } from './components/Icon';
 import { BoardView } from './components/board-view';
 import { WorkViewSwitch } from './components/work-view-switch';
+import { AccessPrompts } from './components/access-prompts';
+import { isLanHostname } from './lib/lan-access';
 
 export function App() {
   const bootState = useApp((s) => s.boot);
@@ -28,7 +31,7 @@ export function App() {
   return (
     <>
       {bootState === 'loading' ? <div className="boot" role="status">正在连接 AI Console…</div> : null}
-      {bootState === 'unpaired' ? <PairingPage /> : null}
+      {bootState === 'unpaired' ? (isLanHostname(location.hostname) ? <LanPairingPage /> : <PairingPage />) : null}
       {bootState === 'error' && bootError ? (
         <div className="pair-page"><div className="pair-card">
           <h1>打不开工作台</h1>
@@ -38,6 +41,7 @@ export function App() {
       ) : null}
       {bootState === 'ready' ? <Shell /> : null}
       <DialogHost />
+      {bootState === 'ready' ? <AccessPrompts /> : null}
       <MenuHost />
       <ErrorAlerts />
       <Toasts />

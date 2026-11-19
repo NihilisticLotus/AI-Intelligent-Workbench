@@ -1,36 +1,17 @@
-// 设置：外观（日间 / 夜间）、思考过程默认显示方式、设备列表（可吊销）、网络（独立 Agent 的代理网段开关）、关于。
-import { useEffect, useState } from 'react';
-import type { ApiError, Device } from '@aic/protocol';
-import { loadDevices, revokeDevice, useApp } from '../state/app';
+// 设置：外观、设备与访问、工作区、交接和关于。
+import { useApp } from '../state/app';
 import { setPref, usePref, type ThoughtMode } from '../state/prefs';
-import { ago } from '../lib/format';
-import { ErrorNotice, asApiError, confirmDialog, toastErrorOf } from '../components/ui';
 import { Icon } from '../components/Icon';
-import { toast } from '../state/ui';
 import { NetworkSettingsSection } from './network-settings';
 import { FeatureKey } from '@aic/protocol';
 import { HandoffSettingsSection } from './handoff-settings';
 import { WorkspaceSettingsSection } from './workspace-settings';
+import { DeviceAccessSection, NotificationSoundSetting } from './device-access-section';
 
 export function SettingsPage() {
   const theme = usePref('theme');
   const thought = usePref('thought');
-  const devices = useApp((s) => s.devices);
   const hello = useApp((s) => s.hello);
-  const [err, setErr] = useState<ApiError | null>(null);
-  const load = () => { setErr(null); loadDevices().catch((e) => setErr(asApiError(e))); };
-  useEffect(load, []);
-
-  const revoke = async (d: Device) => {
-    const ok = await confirmDialog({
-      title: `吊销“${d.name}”？`, ok: '吊销', danger: true,
-      body: d.current
-        ? <p style={{ margin: 0 }}>这就是你正在用的这台设备。吊销后这个页面会立刻失去访问权限，需要从 AI Console 启动脚本重新打开并配对。</p>
-        : <p style={{ margin: 0 }}>这台设备会立刻失去访问权限，要再用需要重新配对。</p>,
-    });
-    if (!ok) return;
-    try { await revokeDevice(d.id); toast(`已吊销“${d.name}”`); } catch (e) { toastErrorOf(e); }
-  };
 
   return (
     <main className="main">
@@ -54,29 +35,11 @@ export function SettingsPage() {
                 ))}
               </div>
             </div>
+            <NotificationSoundSetting />
             <p style={{ margin: 'var(--sp-2) 0 0', fontSize: 'var(--fs-12)', color: 'var(--fg-3)' }}>这些设置只保存在这台设备上。</p>
           </section>
 
-          <section className="set-sec" aria-labelledby="s-dev">
-            <h3 id="s-dev">设备</h3>
-            <p style={{ margin: '0 0 var(--sp-3)', fontSize: 'var(--fs-13)', color: 'var(--fg-2)' }}>
-              能访问这台电脑上 AI Console 的设备。目前只能从这台电脑访问；局域网访问在之后的版本提供。
-            </p>
-            {err ? <ErrorNotice error={err} onRetry={load} /> : null}
-            {devices === null && !err ? <p style={{ color: 'var(--fg-3)' }}>正在载入…</p> : null}
-            <ul className="device-list">
-              {devices?.map((d) => (
-                <li key={d.id}>
-                  <Icon name="devices" />
-                  <div className="info">
-                    <b>{d.name}{d.current ? '（这台设备）' : ''}</b>
-                    <span>配对于 {new Date(d.pairedAt).toLocaleDateString('zh-CN')}{d.lastSeen ? `，最近使用 ${ago(d.lastSeen)}前`.replace('刚刚前', '刚刚') : ''}{d.lastIp ? `，${d.lastIp}` : ''}</span>
-                  </div>
-                  <button type="button" className="btn sm danger" onClick={() => void revoke(d)} aria-label={`吊销 ${d.name}`}>吊销</button>
-                </li>
-              ))}
-            </ul>
-          </section>
+          <DeviceAccessSection />
 
           <NetworkSettingsSection />
           <WorkspaceSettingsSection />

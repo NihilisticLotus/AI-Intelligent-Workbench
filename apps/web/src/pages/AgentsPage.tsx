@@ -9,7 +9,7 @@ import {
 } from '@aic/protocol';
 import {
   cancelLogin, clearRetiredProfileSecret, deleteProfile, loadProfiles, patchAgent, patchProfile, redetectAgents, refreshProfileModels, sendLoginCode,
-  startLogin, testAgent, useApp,
+  startLogin, testAgent, useApp, useRemoteAccess,
 } from '../state/app';
 import type { LoginInfo } from '../state/core';
 import { navigate, routeStore, toast } from '../state/ui';
@@ -22,7 +22,7 @@ import {
   LOGIN_TERMINAL, agentStatusView, capsSummary, emptyModelsText, engineSourceText, formatTestLog, isEnabled, isLocalLogin, isRealAgent,
   loginAnnounceText, loginMethods, loginStep, profileDesc, profileKindText, safeAuthUrl, taskDefaults, workspaceConfigNote,
 } from '../lib/agents';
-import { AgentBadge, ErrorNotice, StatusMark, asApiError, confirmDialog, openDialog, openMenu, toastErrorOf } from '../components/ui';
+import { AgentBadge, Dialog, ErrorNotice, StatusMark, asApiError, confirmDialog, openDialog, openMenu, toastErrorOf } from '../components/ui';
 import { Icon } from '../components/Icon';
 import { agentTestRequestStore } from '../components/focus';
 import { ProfileDialog } from './ProfileDialog';
@@ -216,6 +216,7 @@ function AgentCard({ a, current, busy, test, onSelect, onLogin, onTest, onRedete
 }) {
   const st = agentStatusView(a);
   const real = isRealAgent(a.kind);
+  const remote = useRemoteAccess();
   const profiles = a.profiles ?? [];
   const engine = engineSourceText(a);
   const caps = capsSummary(a.caps);
@@ -247,7 +248,7 @@ function AgentCard({ a, current, busy, test, onSelect, onLogin, onTest, onRedete
       </dl>
       {real ? (
         <div className="acts">
-          {a.status === 'needs_login' && !a.usesNativeConfig ? <button type="button" className="btn sm attn" onClick={stop(onLogin)}>登录</button> : null}
+          {!remote && a.status === 'needs_login' && !a.usesNativeConfig ? <button type="button" className="btn sm attn" onClick={stop(onLogin)}>登录</button> : null}
           {a.status !== 'not_installed' ? (
             <button type="button" className="btn sm" onClick={stop(onTest)} aria-busy={test?.running} disabled={test?.running}>
               {test?.running ? '正在测试…' : '测试连接'}</button>
@@ -276,6 +277,7 @@ function AgentDetail({ a, focusProfileId, my, onLogin, onRedetect, redetecting, 
 }) {
   const real = isRealAgent(a.kind);
   const profilesOn = useApp((s) => !!s.hello?.features[FeatureKey.Profiles]);
+  const remote = useRemoteAccess();
   // 正在进行的登录：本页发起的优先；其次别的设备发起、还没结束的
   const login = useApp((s) => {
     if (my) return s.logins[my.loginId] ?? null;
@@ -289,7 +291,9 @@ function AgentDetail({ a, focusProfileId, my, onLogin, onRedetect, redetecting, 
       <h2><AgentBadge kind={a.kind} />{a.displayName}</h2>
       <div className="detail">
         <div>
-          {real && a.usesNativeConfig ? <NativeConfigSection a={a} onRedetect={onRedetect} redetecting={redetecting} /> : real ? <LoginSection a={a} my={my} login={login} onLogin={onLogin} onRedetect={onRedetect} redetecting={redetecting} /> : (
+          {real && a.usesNativeConfig ? <NativeConfigSection a={a} onRedetect={onRedetect} redetecting={redetecting} /> : real && remote ? (
+            <p className="muted-note">请到运行 AI Console 的电脑上登录第三方 Agent。</p>
+          ) : real ? <LoginSection a={a} my={my} login={login} onLogin={onLogin} onRedetect={onRedetect} redetecting={redetecting} /> : (
             <p className="muted-note">演示 Agent 不需要登录，也没有账号。它用来体验工作台：对话、审批、换模型都能试。</p>
           )}
           {real && !a.usesNativeConfig && profilesOn ? (
@@ -308,6 +312,7 @@ function AgentDetail({ a, focusProfileId, my, onLogin, onRedetect, redetecting, 
 /** 第三方认证只读；旧测试配置仅可清理工作台密钥，历史绑定继续保留。 */
 function NativeConfigSection({ a, onRedetect, redetecting }: { a: AgentInfo; onRedetect: () => void; redetecting: boolean }) {
   const list = useApp((s) => s.profiles[a.kind]);
+  const remote = useRemoteAccess();
   const [err, setErr] = useState<ApiError | null>(null);
   const [clearing, setClearing] = useState<string | null>(null);
   const load = () => { setErr(null); loadProfiles(a.kind).catch((e) => setErr(asApiError(e))); };
@@ -324,6 +329,7 @@ function NativeConfigSection({ a, onRedetect, redetecting }: { a: AgentInfo; onR
   return <>
     <h3>软件自身配置</h3>
     <p className="muted-note">API、登录和模型由 {a.displayName} 自己管理，工作台沿用这些设置。完成配置后，回到这里重新检测。</p>
+    {remote ? <p className="muted-note">请到运行 AI Console 的电脑上登录或管理密钥。</p> : null}
     <p className="muted-note">模型列表来自该软件报告的会话能力；已配置的自定义模型也需要由软件提供。工作台内换模型只作用于任务会话。</p>
     <button type="button" className="btn sm" disabled={redetecting} onClick={onRedetect}>重新检测</button>
     {err ? <ErrorNotice error={err} onRetry={load} /> : null}
@@ -333,7 +339,7 @@ function NativeConfigSection({ a, onRedetect, redetecting }: { a: AgentInfo; onR
       <p className="muted-note">这些配置来自旧版工作台，已停止使用。可单独清理工作台保存的密钥；配置身份、历史任务和目录保留，旧任务不会改用本机登录。此操作不清理 Agent 自己的凭据。</p>
       {retired.map((p) => <div className="acct" key={p.id}>
         <Icon name="key" /><div className="info"><b>{p.name}<span className="tag attn">已停用</span></b><span>{profileKindText[p.kind]} · {p.hasSecret ? '加密密钥已保留，不再使用' : '历史配置已保留'}</span></div>
-        {p.hasSecret ? <button type="button" className="btn sm" aria-label={`清理 ${p.name} 的工作台密钥`} disabled={!!clearing} aria-busy={clearing === p.id} onClick={() => void clearSecret(p)}>清理工作台密钥</button> : null}
+        {!remote && p.hasSecret ? <button type="button" className="btn sm" aria-label={`清理 ${p.name} 的工作台密钥`} disabled={!!clearing} aria-busy={clearing === p.id} onClick={() => void clearSecret(p)}>清理工作台密钥</button> : null}
       </div>)}
     </> : null}
     <p className="muted-note">AI Console 自有 API 服务归本页上方的独立 Agent 管理，可在新建任务中选择独立 Agent。</p>
@@ -449,7 +455,11 @@ function LoginProgress({ a, login, methodId, methodName, onRedetect }: { a: Agen
   };
   const copy = async () => {
     if (!url) return;
-    if (await platform.copyText(url)) toast('已复制授权链接'); else toast('复制失败，长按或右键链接复制', 'attn');
+    if (await platform.copyText(url)) toast('已复制授权链接');
+    else openDialog((close) => <Dialog title="手动复制授权链接" onClose={close} initialFocus="#login-copy-url">
+      <label htmlFor="login-copy-url">授权链接</label>
+      <input id="login-copy-url" className="input mono" readOnly value={url} onFocus={(event) => event.target.select()} />
+    </Dialog>);
   };
 
   return (
@@ -521,6 +531,7 @@ function ProfileSection({ a, focusProfileId, onLogin, onTest, test }: {
   test: TestState | null;
 }) {
   const list = useApp((s) => s.profiles[a.kind]);
+  const remote = useRemoteAccess();
   const [err, setErr] = useState<ApiError | null>(null);
   const load = () => { setErr(null); loadProfiles(a.kind).catch((e) => setErr(asApiError(e))); };
   useEffect(load, [a.kind]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -543,8 +554,8 @@ function ProfileSection({ a, focusProfileId, onLogin, onTest, test }: {
     { label: p.isDefault ? '✓ 默认账号' : '设为默认', disabled: p.isDefault, onSelect: () => { patchProfile(p.id, { isDefault: true }).then(() => toast(`默认账号改为“${p.name}”，新任务会用它`), (e) => setErr(asApiError(e))); } },
     ...(p.kind === 'customEndpoint' ? [{ label: '刷新模型列表', onSelect: () => { refreshProfileModels(p.id).then((x) => toast(`拿到 ${x.models.length} 个模型`), (e) => setErr(asApiError(e))); } }] : []),
     {
-      label: isLocalLogin(p) ? '删除（本机登录不能删除）' : p.isDefault ? '删除（先把别的账号设为默认）' : '删除…',
-      danger: true, disabled: isLocalLogin(p) || p.isDefault,
+      label: isLocalLogin(p) ? '删除（本机登录不能删除）' : p.isDefault ? '删除（先把别的账号设为默认）' : remote && p.hasSecret ? '请在电脑上删除含密钥的账号' : '删除…',
+      danger: true, disabled: isLocalLogin(p) || p.isDefault || remote && p.hasSecret,
       onSelect: async () => {
         const ok = await confirmDialog({
           title: `删除账号“${p.name}”？`, ok: '删除', danger: true,
@@ -572,7 +583,7 @@ function ProfileSection({ a, focusProfileId, onLogin, onTest, test }: {
               <b>{p.name}{p.isDefault ? <span className="tag">默认</span> : null}{p.experimental ? <span className="tag attn">实验</span> : null}</b>
               <span>{profileKindText[p.kind]} · {profileDesc(p)}</span>
             </div>
-            {p.kind === 'subscription' && p.loggedIn === false && methods.length ? (
+            {!remote && p.kind === 'subscription' && p.loggedIn === false && methods.length ? (
               <button type="button" className="btn sm attn" onClick={(e) => loginProfile(p, e.currentTarget)}>登录</button>
             ) : null}
             <button type="button" className="btn sm" aria-busy={testing} disabled={!!test?.running} onClick={() => onTest({ profileId: p.id })}>{testing ? '测试中…' : '测试'}</button>
@@ -580,13 +591,13 @@ function ProfileSection({ a, focusProfileId, onLogin, onTest, test }: {
           </div>
         );
       })}
-      <h3>添加账号</h3>
+      {remote ? <p className="muted-note">请到运行 AI Console 的电脑上添加账号或填写 Key。</p> : <><h3>添加账号</h3>
       <div className="method">
         <button type="button" disabled={!methods.length} title={methods.length ? undefined : '这个 Agent 没有可以在界面里完成的订阅登录'} onClick={() => openForm('subscription')}>
           <b>订阅登录</b><span>第二个订阅账号，在浏览器中授权</span></button>
         <button type="button" onClick={() => openForm('apiKey')}><b>官方 API Key{experimental ? '（实验）' : ''}</b><span>粘贴密钥，加密保存在本机</span></button>
         <button type="button" onClick={() => openForm('customEndpoint')}><b>自定义地址{experimental ? '（实验）' : ''}</b><span>兼容第三方中转</span></button>
-      </div>
+      </div></>}
     </>
   );
 }

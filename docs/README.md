@@ -42,6 +42,8 @@
 | [acceptance/step-1.3.md](acceptance/step-1.3.md) | 2026-11-12 已判定通过；完整历史、真实补验和遗留问题见末尾结论，1.4 接手的 ISSUE-0060～0062 已修复 |
 | [devlog/](devlog/) | 开发笔记，每月一个文件，只追加 |
 | [issues/](issues/README.md) | 问题收纳：总表 + 每个问题一个文件 |
+| [ISSUE-0147](issues/ISSUE-0147-lan-pairing-qr.md) | 局域网扫码暂缓，保留地址与配对码流程 |
+| [ISSUE-0148](issues/ISSUE-0148-lan-port-test-exclusion.md) | Windows 回环顺延测试的相邻端口夹具 |
 
 ### 2026-11-14 用量审查修复
 

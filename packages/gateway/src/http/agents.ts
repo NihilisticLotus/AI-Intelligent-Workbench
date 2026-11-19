@@ -8,6 +8,10 @@ import type { z } from 'zod';
 import type { Services } from '../services';
 import { Errors } from '../util';
 import { parseQuery, readBody, type Ctx, type Env } from './app';
+import { requireLocal } from './access-guard';
+
+const LOCAL_LOGIN = '请在这台电脑上登录第三方 Agent';
+const LOCAL_KEY = '请在这台电脑上填写或修改 Key 与授权地址';
 
 const kindOf = (c: Ctx) => {
   const r = AgentKind.safeParse(c.req.param('kind'));
@@ -30,17 +34,20 @@ export function agentRoutes(s: Services) {
   r.patch('/agents/:kind', async (c) => c.json(await s.agentSvc.patch(kindOf(c), await readBody(c, PatchAgentBody))));
 
   r.post('/agents/:kind/login', async (c) => {
+    requireLocal(c, LOCAL_LOGIN);
     const kind = kindOf(c);
     const out: z.infer<typeof AgentLoginResult> = await s.agentSvc.login(kind, await readBody(c, AgentLoginBody), c.get('device').id);
     return c.json(out, 202);
   });
 
   r.post('/agents/:kind/login/:loginId/cancel', (c) => {
+    requireLocal(c, LOCAL_LOGIN);
     s.agentSvc.cancelLogin(kindOf(c), c.req.param('loginId'));
     return c.json({ ok: true } satisfies OkResult);
   });
 
   r.post('/agents/:kind/login/:loginId/code', async (c) => {
+    requireLocal(c, LOCAL_LOGIN);
     const kind = kindOf(c);
     const body = await readBody(c, AgentLoginCodeBody);
     s.agentSvc.submitCode(kind, c.req.param('loginId'), body.code);
@@ -63,7 +70,9 @@ export function agentRoutes(s: Services) {
   });
 
   r.post('/profiles', async (c) => {
-    const p = await s.profiles.create(await readBody(c, CreateProfileBody), c.get('device').id);
+    const body = await readBody(c, CreateProfileBody);
+    if (body.apiKey !== undefined) requireLocal(c, LOCAL_KEY);
+    const p = await s.profiles.create(body, c.get('device').id);
     s.agentSvc.pushStatus(p.agent);
     return c.json(p, 201);
   });
@@ -71,6 +80,7 @@ export function agentRoutes(s: Services) {
   r.get('/profiles/:id', (c) => c.json(s.profiles.get(c.req.param('id'))));
 
   r.delete('/profiles/:id/secret', (c) => {
+    requireLocal(c, LOCAL_KEY);
     const p = s.profiles.clearRetiredSecret(c.req.param('id'), (id) => s.tasks.profileInUse(id), c.get('device').id);
     return c.json(p);
   });
@@ -79,6 +89,8 @@ export function agentRoutes(s: Services) {
     const id = c.req.param('id');
     const before = s.profiles.row(id);
     const body = await readBody(c, PatchProfileBody);
+    if (body.apiKey !== undefined || (body.baseUrl !== undefined && body.baseUrl !== before.base_url) ||
+      (body.authHeader !== undefined && body.authHeader !== (before.auth_header ?? 'x-api-key'))) requireLocal(c, LOCAL_KEY);
     if (body.configDir !== undefined && body.configDir !== before.config_dir && s.tasks.profileInUse(id)) {
       throw Errors.profileInUse('这个账号还有正在运行的会话', '请先停止使用这个账号的任务，再修改配置目录');
     }
@@ -95,6 +107,7 @@ export function agentRoutes(s: Services) {
   r.delete('/profiles/:id', async (c) => {
     const id = c.req.param('id');
     const row = s.profiles.row(id);
+    if (row.secret_id) requireLocal(c, LOCAL_KEY);
     const out = s.profiles.delete(id, (pid) => s.tasks.profileInUse(pid), c.get('device').id);
     if (row.is_default) await s.agentSvc.detect(row.agent, true).catch(() => {});
     s.agentSvc.pushStatus(row.agent);

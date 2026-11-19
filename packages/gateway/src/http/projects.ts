@@ -5,6 +5,7 @@ import { environments, saveEnvironment, deleteEnvironment } from '../environment
 import { browse } from '../fsbrowse';
 import type { Services } from '../services';
 import { parseQuery, readBody, type Env } from './app';
+import { confirmRemote } from './access-guard';
 
 export function projectRoutes(s: Services) {
   const r = new Hono<Env>();
@@ -14,11 +15,21 @@ export function projectRoutes(s: Services) {
 
   r.get('/projects', (c) => c.json({ items: s.projects.list(), nextCursor: null }));
   r.get('/projects/:id/rules',c=>c.json(s.tasks.permissions.get(c.req.param('id'))));
-  r.put('/projects/:id/rules',async c=>c.json(s.tasks.permissions.put(c.req.param('id'),await readBody(c,PutPermissionRulesBody))));
+  r.put('/projects/:id/rules', async (c) => {
+    const id = c.req.param('id');
+    const body = await readBody(c, PutPermissionRulesBody);
+    await confirmRemote(c, s, 'project.permissions', id);
+    return c.json(s.tasks.permissions.put(id, body));
+  });
   r.get('/approvals/:id/rule',async c=>c.json(await s.tasks.permissionRulePreview(c.req.param('id'))));
   r.post('/projects', async (c) => c.json(s.projects.create(await readBody(c, CreateProjectBody)), 201));
   r.patch('/projects/:id', async (c) => c.json(s.projects.patch(c.req.param('id'), await readBody(c, PatchProjectBody))));
-  r.delete('/projects/:id', (c) => { s.projects.delete(c.req.param('id')); return c.json({ ok: true }); });
+  r.delete('/projects/:id', async (c) => {
+    const id = c.req.param('id');
+    await confirmRemote(c, s, 'project.delete', id);
+    s.projects.delete(id);
+    return c.json({ ok: true });
+  });
 
   r.get('/fs/browse', (c) => {
     const q = parseQuery(c, FsBrowseQuery);

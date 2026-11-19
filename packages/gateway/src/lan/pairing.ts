@@ -6,6 +6,7 @@ import {
 import type { AuthService } from '../auth';
 import type { EventStore } from '../events';
 import { AppError, Errors } from '../util';
+import type { AccessAudit } from './audit';
 
 const MINUTE = 60_000;
 const LOCK_DURATION = 15 * MINUTE;
@@ -95,15 +96,18 @@ export class LanPairing {
   private code: (LanPairingCode & { failures: number }) | null = null;
   private readonly requests = new Map<string, RequestEntry>();
   private readonly localPages = new Set<symbol>();
+  private readonly emptyListeners = new Set<() => void>();
 
   constructor(private readonly auth: AuthService, private readonly events: EventStore,
-    private readonly address: () => string | null, private readonly log: (message: string) => void, options: LanPairingOptions = {}) {
+    private readonly address: () => string | null, private readonly log: (message: string) => void,
+    private readonly audit: AccessAudit, options: LanPairingOptions = {}) {
     this.clock = options.clock ?? Date.now;
     this.ttl = options.requestTtlMs ?? REQUEST_TTL;
     this.attempts = new PairingAttempts(this.clock);
   }
 
   hasLocalPage(): boolean { return this.localPages.size > 0; }
+  onNoLocalPage(listener: () => void) { this.emptyListeners.add(listener); }
 
   registerLocalPage(): () => void {
     const id = Symbol();
@@ -111,6 +115,7 @@ export class LanPairing {
     return () => {
       if (!this.localPages.delete(id) || this.hasLocalPage()) return;
       for (const request of this.requests.values()) if (request.status === 'pending') this.resolve(request, 'unavailable');
+      for (const listener of this.emptyListeners) listener();
     };
   }
 
@@ -153,6 +158,7 @@ export class LanPairing {
       throw error;
     }
     this.log('有新设备请求连接，请在本机页面确认');
+    this.audit.write('pairing.requested', { id: replacing, ip }, 'requested');
     return { status: 'pending', id, expiresAt: info.expiresAt };
   }
 
@@ -173,6 +179,7 @@ export class LanPairing {
         if (!key) throw Errors.internal('没有生成浏览器设备密钥');
         request.status = 'claimed';
         clearTimeout(request.timer);
+        this.audit.write('pairing.claimed', { id: device.id, ip }, 'ok', device.id);
         return { body: { status: 'paired', device, key }, token };
       }
       default: return { body: { status: request.status } };
@@ -221,6 +228,7 @@ export class LanPairing {
   private resolve(request: RequestEntry, status: LanPairingResolution) {
     request.status = status;
     if (status !== 'allowed') clearTimeout(request.timer);
+    this.audit.write('pairing.resolved', { id: request.replacing, ip: request.info.ip }, status === 'rejected' ? 'denied' : status);
     try {
       this.events.append({ taskId: null, sessionId: null, type: 'pairing.resolved', data: { id: request.info.id, status } });
     } catch { this.log('无法记录局域网配对结果，请在设备与访问中核对'); }

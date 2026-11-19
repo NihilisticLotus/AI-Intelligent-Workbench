@@ -9,6 +9,7 @@ import type { Services } from '../services';
 import type { Env } from './app';
 import { credsOf, isLocalRequest, readBody } from './app';
 import { Errors } from '../util';
+import { auditAccess, confirmRemote } from './access-guard';
 
 export function systemRoutes(s: Services) {
   const r = new Hono<Env>();
@@ -64,9 +65,9 @@ export function systemRoutes(s: Services) {
     return c.json(s.auth.requestPairingCode(c.get('ip')));
   });
 
-  r.post('/pairing/local-code', (c) => {
+  r.post('/pairing/local-code', async (c) => {
     if (!isLocalRequest(c)) throw Errors.forbidden('只能在这台电脑上查看新的配对码');
-    return c.json(s.lanPairing.issue());
+    return c.json(await auditAccess(c, s, 'pairing.issue', undefined, () => s.lanPairing.issue()));
   });
 
   r.post('/pairing/complete', (c) => s.lanPairing.attempts.run(c.get('ip'), c.get('lanConnection') ? 'lan' : 'local', async () => {
@@ -80,6 +81,7 @@ export function systemRoutes(s: Services) {
     }
     if (!isLocalRequest(c) || previous?.pairing_source === 'lan') throw Errors.forbidden('请从本机浏览器重新配对');
     const { device, token, key } = s.auth.completePairing(c.get('ip'), body, previous?.id ?? null);
+    s.accessAudit.write('pairing.local', { id: device.id, ip: c.get('ip') }, 'ok', device.id);
     const out: PairingCompleteResult = { device };
     if (body.tokenDelivery === 'cookie') {
       // Cookie 单独不够：设备密钥只在这里返回一次，网页存进按源隔离的本地存储，之后放在 X-AIC-Key 头里
@@ -111,15 +113,17 @@ export function systemRoutes(s: Services) {
 
   r.get('/devices', (c) => c.json({ items: s.auth.listDevices(c.get('device').id), nextCursor: null }));
 
-  r.delete('/devices/lan', (c) => {
+  r.delete('/devices/lan', async (c) => {
     if (!isLocalRequest(c)) throw Errors.forbidden('只能在这台电脑上吊销全部局域网设备');
-    const result: RevokeLanResult = { revoked: s.auth.revokeLanDevices(c.get('device').id) };
+    const revoked = await auditAccess(c, s, 'device.revoke_lan', undefined, () => s.auth.revokeLanDevices(c.get('device').id));
+    const result: RevokeLanResult = { revoked };
     return c.json(result);
   });
 
-  r.delete('/devices/:id', (c) => {
+  r.delete('/devices/:id', async (c) => {
     const id = c.req.param('id');
-    s.auth.revoke(id, c.get('device').id);
+    await confirmRemote(c, s, 'device.revoke', id);
+    await auditAccess(c, s, 'device.revoke', id, () => s.auth.revoke(id, c.get('device').id));
     // 吊销的是自己：顺手清掉 Cookie
     if (id === c.get('device').id) c.header('Set-Cookie', s.auth.sessionCookie('', 0));
     return c.json({ ok: true });

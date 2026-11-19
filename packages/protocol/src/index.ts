@@ -3,7 +3,7 @@ import { TaskWorkspace, WorkspaceGlobs } from './workspaces';
 // AI Console 共享协议：Gateway 与所有客户端（浏览器、以后的桌面软件和手机应用）共用的类型与校验。
 // 规则见 docs/plan-phase1.md 第 2 节：只通过 /api/v1 的 REST + WebSocket 对接；类型只在这里定义一次。
 import { z } from 'zod';
-import { DeviceSource, LanPairingPending, LanPairingRequest, LanPairingResolved } from './access';
+import { AccessConfirmRequest, AccessConfirmResolved, DeviceSource, LanPairingPending, LanPairingRequest, LanPairingResolved } from './access';
 export * from './access';
 export * from './workspaces';
 export * from './permissions';
@@ -51,6 +51,7 @@ export const ErrorCode = {
   Forbidden: 'auth.forbidden',                // 已登录但无权做这件事（例如非本机请求配对码）
   PairingInvalid: 'pairing.invalid_code',     // 配对码错误、过期或已用过
   PairingLocked: 'pairing.locked',
+  AccessConfirmationRequired: 'access.confirmation_required',
   RateLimited: 'request.rate_limited',
   PayloadTooLarge: 'request.too_large',
   InvalidState: 'task.invalid_state',         // 任务当前状态不允许该操作（如正在执行时再次发送）
@@ -419,6 +420,8 @@ export type TaskFile = z.infer<typeof TaskFile>;
 export const EventEnvelope = z.discriminatedUnion('type', [
   ev('pairing.requested', LanPairingRequest),
   ev('pairing.resolved', LanPairingResolved),
+  ev('access.confirm_requested', AccessConfirmRequest),
+  ev('access.confirm_resolved', AccessConfirmResolved),
   ev('task.created', z.object({ task: Task })),
   ev('task.updated', z.object({ task: Task })),
   ev('task.deleted', z.object({ id: Id })),

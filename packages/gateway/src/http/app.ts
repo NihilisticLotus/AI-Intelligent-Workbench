@@ -2,10 +2,11 @@
 // 网页也是 /api/v1 的普通客户端，这里没有任何“只给本机网页”的捷径。
 import { Hono, type Context } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
+import { matchedRoutes } from 'hono/route';
 import type { HttpBindings } from '@hono/node-server';
 import { API_BASE, ErrorCode } from '@aic/protocol';
 import type { z } from 'zod';
-import { isLanConnection, isLoopback, KEY_HEADER_LC, type AuthService, type DeviceRow, type RequestCredentials } from '../auth';
+import { isLanConnection, isLocalDevice, KEY_HEADER_LC, type AuthService, type DeviceRow, type RequestCredentials } from '../auth';
 import { AppError, Errors, toApiError, zodMessage } from '../util';
 import type { Services } from '../services';
 import { attachmentError } from '../attachments';
@@ -28,7 +29,7 @@ const PAIRING_STATUS_PATH = /^\/api\/v1\/pairing\/requests\/lp_[A-Za-z0-9_-]{32}
 const MAX_BODY = 1024 * 1024; // 1 MB
 
 export const ipOf = (c: Ctx) => c.env?.incoming?.socket?.remoteAddress ?? '';
-export const isLocalRequest = (c: Ctx) => !c.get('lanConnection') && isLoopback(c.get('ip')) && c.get('device')?.pairing_source !== 'lan';
+export const isLocalRequest = (c: Ctx) => isLocalDevice(c.get('lanConnection'), c.get('ip'), c.get('device')?.pairing_source);
 /** 请求里的凭据：Bearer，或浏览器的 Cookie + 设备密钥 */
 export const credsOf = (c: Ctx): RequestCredentials => ({
   cookie: c.req.header('cookie'), authorization: c.req.header('authorization'), key: c.req.header(KEY_HEADER_LC),
@@ -95,12 +96,19 @@ export function createApp(s: Services, opts: { webDist: string }) {
         ]));
       }
       c.set('device', device);
-      // 远程写保护接入前，局域网的已认证入口只接受读取。
-      if (!isLocalRequest(c) && c.req.method !== 'GET' && c.req.method !== 'HEAD') {
-        return fail(c, Errors.forbidden('这项操作暂时只能在这台电脑上执行'));
-      }
     }
     await next();
+  });
+
+  app.use(`${API_BASE}/*`, async (c, next) => {
+    await next();
+    if (isLocalRequest(c) || c.req.method === 'GET') return;
+    const route = matchedRoutes(c).findLast((item) => item.method === c.req.method);
+    const action = route ? `${c.req.method} ${route.path.slice(API_BASE.length)}` : c.req.method;
+    const id = c.req.param('modelId') ?? c.req.param('serviceId') ?? c.req.param('id');
+    const status = c.res.status;
+    s.accessAudit.write(`http.${action}`, { id: c.get('device')?.id ?? null, ip: c.get('ip') || null },
+      status < 400 ? 'ok' : status === 403 ? 'denied' : 'failed', id);
   });
 
   // 3. 请求体大小（按实际读到的字节数，不只看 Content-Length）

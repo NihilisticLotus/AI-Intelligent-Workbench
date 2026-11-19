@@ -11,9 +11,9 @@ import {
   type ApproveResult, type CancelResult, type EventEnvelope, type PingResult, type PromptResult,
   type ServerFrame, type SubscribeResult, type SwitchResult,
 } from '@aic/protocol';
-import { isLanConnection, KEY_HEADER_LC, type DeviceRow } from './auth';
+import { isLanConnection, isLocalDevice, KEY_HEADER_LC, type DeviceRow } from './auth';
 import type { Services } from './services';
-import { Errors, toApiError, zodMessage } from './util';
+import { toApiError, zodMessage } from './util';
 import { errorLogText } from './error-log';
 
 const WS_PATH = `${API_BASE}/ws`;
@@ -78,7 +78,7 @@ export function attachWs(server: Server, s: Services) {
       key: typeof key === 'string' ? key : null, protocols: req.headers['sec-websocket-protocol'],
     }, ip);
     if (!device) return reject(socket, 401, '还没有连接到 AI Console');
-    wss.handleUpgrade(req, socket, head, (ws) => onConnection(ws, device, lan));
+    wss.handleUpgrade(req, socket, head, (ws) => onConnection(ws, device, lan, ip));
   };
   function addServer(target: Server) {
     target.on('upgrade', upgrade);
@@ -90,9 +90,11 @@ export function attachWs(server: Server, s: Services) {
     for (const ws of byDevice.get(deviceId) ?? []) ws.close(WS_CLOSE_UNAUTHORIZED, 'revoked');
   });
 
-  function onConnection(ws: WebSocket, device: DeviceRow, lan: boolean) {
+  function onConnection(ws: WebSocket, device: DeviceRow, lan: boolean, ip: string) {
     const deviceId = device.id;
-    const remote = lan || device.pairing_source === 'lan';
+    const remote = !isLocalDevice(lan, ip, device.pairing_source);
+    const actor = { id: device.id, name: device.name, ip, remote };
+    const lifetime = new AbortController();
     const connId = ++connSeq;
     let set = byDevice.get(deviceId);
     if (!set) { set = new Set(); byDevice.set(deviceId, set); }
@@ -115,7 +117,8 @@ export function attachWs(server: Server, s: Services) {
     };
     const wants = (e: EventEnvelope) => {
       if (e.type === 'pairing.requested') return !remote && s.lanPairing.isPending(e.data.id);
-      if (e.type === 'pairing.resolved') return !remote;
+      if (e.type === 'access.confirm_requested') return !remote && s.accessConfirmation.isPending(e.data.id);
+      if (e.type === 'pairing.resolved' || e.type === 'access.confirm_resolved' || e.type === 'agent.login') return !remote;
       return !filter || e.taskId === null || filter.has(e.taskId) || ALWAYS.has(e.type);
     };
 
@@ -153,13 +156,15 @@ export function attachWs(server: Server, s: Services) {
     };
 
     const exec = async (op: ClientOp): Promise<OpResult> => {
-      if (remote && op.op !== 'subscribe' && op.op !== 'ping') throw Errors.forbidden('这项操作暂时只能在这台电脑上执行');
       switch (op.op) {
         case 'subscribe': return subscribe(op.data.lastSeq, op.data.taskIds);
         case 'ping': { send({ kind: 'pong', ts: Date.now() }); const r: z.infer<typeof PingResult> = {}; return r; }
         case 'prompt': return s.tasks.prompt(op.data.taskId, op.data.text, op.data.attachments,op.data.target,op.data.handoff);
         case 'cancel': { await s.tasks.cancel(op.data.taskId); const r: z.infer<typeof CancelResult> = { taskId: op.data.taskId }; return r; }
-        case 'approve': return { approval: await s.tasks.approve(op.data.approvalId, op.data.optionId, op.data.note, deviceId,op.data.alwaysAllow) };
+        case 'approve': {
+          if (op.data.alwaysAllow) await s.accessConfirmation.require(actor, 'project.permissions', op.data.approvalId, lifetime.signal);
+          return { approval: await s.tasks.approve(op.data.approvalId, op.data.optionId, op.data.note, deviceId,op.data.alwaysAllow) };
+        }
         case 'switch': return { task: await s.tasks.switch(op.data.taskId, op.data) };
       }
     };
@@ -179,10 +184,16 @@ export function attachWs(server: Server, s: Services) {
       const key = op.op === 'subscribe' || op.op === 'ping' ? `c${connId}:${op.id}` : `d${deviceId}:${op.id}`;
       let p = cache.get(key);
       if (!p) {
+        const write = remote && op.op !== 'ping' && op.op !== 'subscribe';
+        const objectId = 'taskId' in op.data ? op.data.taskId : 'approvalId' in op.data ? op.data.approvalId : undefined;
         p = exec(op).then(
-          (result): AckFrame => ({ kind: 'ack', id: op.id, ok: true, result }),
+          (result): AckFrame => {
+            if (write) s.accessAudit.write(`ws.${op.op}`, actor, 'ok', objectId);
+            return { kind: 'ack', id: op.id, ok: true, result };
+          },
           (e): AckFrame => {
             const { status, body } = toApiError(e);
+            if (write) s.accessAudit.write(`ws.${op.op}`, actor, status === 403 ? 'denied' : 'failed', objectId);
             if (status >= 500) console.error('[ws] 处理指令出错', op.op, errorLogText(e));
             return { kind: 'ack', id: op.id, ok: false, error: body };
           },
@@ -204,6 +215,7 @@ export function attachWs(server: Server, s: Services) {
       clearInterval(hb);
       off();
       generation++;
+      lifetime.abort();
       releaseLocalPage?.();
       set!.delete(ws);
       if (set!.size === 0) byDevice.delete(deviceId);

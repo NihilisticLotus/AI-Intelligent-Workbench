@@ -18,6 +18,8 @@ import type { TaskService } from './tasks';
 import type { WorkspaceManager } from './workspaces';
 import type { LanSettings } from './lan/settings';
 import type { LanPairing } from './lan/pairing';
+import type { AccessAudit } from './lan/audit';
+import type { AccessConfirmation } from './lan/confirmation';
 
 export interface Services {
   db: Db;
@@ -30,6 +32,8 @@ export interface Services {
   auth: AuthService;
   lan: LanSettings;
   lanPairing: LanPairing;
+  accessAudit: AccessAudit;
+  accessConfirmation: AccessConfirmation;
   events: EventStore;
   agents: AgentRegistry;
   /** 1.2：检测缓存、能力缓存、登录、测试连接、并发上限 */

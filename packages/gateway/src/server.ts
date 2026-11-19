@@ -42,6 +42,8 @@ import { gatewayLog, installCrashHandlers, readLastExit, lifecycle } from './cra
 import { errorLogText } from './error-log';
 import { LanSettings, type LanDependencies } from './lan/settings';
 import { LanPairing, type LanPairingOptions } from './lan/pairing';
+import { AccessAudit } from './lan/audit';
+import { AccessConfirmation } from './lan/confirmation';
 
 export const VERSION = '0.1.0';
 
@@ -82,6 +84,8 @@ export interface GatewayOptions {
   /** 离线验收注入网卡与防火墙执行器。 */
   lan?: Partial<LanDependencies>;
   lanPairing?: LanPairingOptions;
+  /** 离线验收可缩短本机确认的等待时间。 */
+  accessConfirmationTtlMs?: number;
   /**
    * 开发模式（默认看 AIC_DEV=1，且 NODE_ENV 不是 production）：把启动时的配对码写进数据目录的
    * dev-pairing-code.txt，供预览工具读取。只有启动时那一个码会写入；启动脚本 start.mjs 会清掉这些开发变量。
@@ -238,8 +242,14 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
     log,
   });
   const attachments = new AttachmentService(db, dataDir);
+  const accessAudit = new AccessAudit(db, log);
+  accessAudit.prune();
   attachments.cleanup();
-  const cleanupTimer = setInterval(() => { try { attachments.cleanup(); } catch (e) { log('附件清理失败：' + String(e)); } void cleanWorkspaces(); }, 60 * 60_000);
+  const cleanupTimer = setInterval(() => {
+    try { attachments.cleanup(); } catch (e) { log('附件清理失败：' + String(e)); }
+    accessAudit.prune();
+    void cleanWorkspaces();
+  }, 60 * 60_000);
   cleanupTimer.unref?.();
   const history = new HistoryAccess(db, () => port, events.bus);
   tasks.history = history;
@@ -271,11 +281,12 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   const lanPairing = new LanPairing(auth, events, () => {
     const address = lan.activeAddress();
     return address ? `http://${address}:${port}/` : null;
-  }, log, opts.lanPairing);
+  }, log, accessAudit, opts.lanPairing);
+  const accessConfirmation = new AccessConfirmation(db, auth, events, lanPairing, accessAudit, log, opts.accessConfirmationTtlMs);
 
   const services: Services = {
     db, attachments, independent, independentDiscovery, independentRuntime, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks, workspaces,
-    history, port: () => port, lan, lanPairing,
+    history, port: () => port, lan, lanPairing, accessAudit, accessConfirmation,
     machine: { id: machineId, name: hostname(), os: process.platform === 'win32' ? 'windows' : process.platform },
     version: VERSION,
     bootId,
@@ -302,6 +313,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
     try { await bind(listener, port, address); } catch (error) { detach(); throw error; }
     return () => new Promise<void>((resolve) => {
       lanPairing.closeLan();
+      accessConfirmation.cancelAll();
       detach();
       listener.close(() => resolve());
       // Node 的 closeAllConnections 不关闭升级为 WebSocket 的连接。
@@ -342,6 +354,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
       clearInterval(cleanupTimer);
       independentDiscovery.close();
       await lan.stop();
+      accessConfirmation.cancelAll();
       lanPairing.stop();
       ws.close();
       agentSvc.shutdown();

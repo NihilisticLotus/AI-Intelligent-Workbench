@@ -16,6 +16,8 @@ export interface LanDependencies {
 }
 
 type StopListener = () => Promise<void>;
+type RuleAction = 'add' | 'set' | 'delete';
+type RuleAudit = (action: RuleAction, result: 'ok' | 'failed') => void;
 
 export class LanSettings {
   private readonly deps: LanDependencies;
@@ -49,7 +51,7 @@ export class LanSettings {
       unavailableReason: unavailableReason ?? this.reason };
   }
 
-  put(body: PutLanBody): Promise<LanState> {
+  put(body: PutLanBody, audit?: RuleAudit): Promise<LanState> {
     return this.mutate(async () => {
       if (body.enabled) {
         await this.requirePrivate(body);
@@ -61,12 +63,12 @@ export class LanSettings {
       this.save({ enabled: false });
       try {
         if (body.enabled) {
-          await this.ensureFirewall(this.target(body), true);
+          await this.ensureFirewall(this.target(body), true, audit);
           await this.requirePrivate(body);
           await this.activate(body.address);
           this.save(body);
         } else {
-          await this.removeFirewall();
+          await this.removeFirewall(audit);
         }
       } catch (error) {
         await this.deactivate();
@@ -77,17 +79,17 @@ export class LanSettings {
     });
   }
 
-  updateFirewall(): Promise<LanState> {
+  updateFirewall(audit?: RuleAudit): Promise<LanState> {
     return this.mutate(async () => {
       const config = this.read();
       try {
         if (config.enabled) {
           await this.requirePrivate(config);
-          await this.ensureFirewall(this.target(config), false);
+          await this.ensureFirewall(this.target(config), false, audit);
           await this.requirePrivate(config);
           if (!this.active) await this.activate(config.address);
         } else {
-          await this.removeFirewall();
+          await this.removeFirewall(audit);
         }
       } catch (error) {
         await this.deactivate();
@@ -175,20 +177,26 @@ export class LanSettings {
     return status;
   }
 
-  private async ensureFirewall(target: FirewallTarget, interactive: boolean) {
+  private async ensureFirewall(target: FirewallTarget, interactive: boolean, audit?: RuleAudit) {
     const status = await this.inspectFirewall(target);
     if (!interactive && status === 'matched') return;
     await this.deactivate();
     this.requireRunning();
-    await this.firewall.change(status === 'missing' ? 'add' : 'set', target);
+    await this.changeRule(status === 'missing' ? 'add' : 'set', target, audit);
     if (await this.inspectFirewall(target) !== 'matched') throw Errors.conflict('Windows 防火墙规则与当前地址、程序或端口不匹配');
   }
 
-  private async removeFirewall() {
+  private async removeFirewall(audit?: RuleAudit) {
     if (!this.deps.supported || await this.inspectFirewall(null) === 'missing') return;
     this.requireRunning();
-    await this.firewall.change('delete');
+    await this.changeRule('delete', null, audit);
     if (await this.inspectFirewall(null) !== 'missing') throw Errors.conflict('仍能查到 Windows 防火墙规则，请重新删除');
+  }
+
+  private async changeRule(action: RuleAction, target: FirewallTarget | null, audit?: RuleAudit) {
+    try { await this.firewall.change(action, target); }
+    catch (error) { audit?.(action, 'failed'); throw error; }
+    audit?.(action, 'ok');
   }
 
   private async activate(address: string) {

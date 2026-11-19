@@ -10,18 +10,24 @@ import { taskUsage } from '../usage';
 import { taskFiles } from '../task-files';
 import { AddTaskConstraint, HandoffTarget, HandoffReturnBody } from '@aic/protocol';
 import { previewHandoff } from '../handoff/preview';
+import { confirmRemote, requireLocal } from './access-guard';
 
 export function taskRoutes(s: Services) {
   const r = new Hono<Env>();
 
   r.get('/tasks', (c) => c.json(s.tasks.list(parseQuery(c, TasksQuery))));
-  r.post('/tasks', async (c) => c.json(await s.tasks.create(await readBody(c, CreateTaskBody)), 201));
+  r.post('/tasks', async (c) => {
+    const body = await readBody(c, CreateTaskBody);
+    if (body.permission === 'workspace' || body.permission === 'full') await confirmRemote(c, s, 'task.permission', body.projectId);
+    return c.json(await s.tasks.create(body), 201);
+  });
   r.get('/tasks/:id', (c) => c.json(s.tasks.get(c.req.param('id'))));
   r.post('/tasks/:id/handoff/preview', async c => c.json(await previewHandoff(s,c.req.param('id'),await readBody(c,HandoffTarget))));
   r.get('/tasks/:id/handoff/:handoffId',c=>c.json(s.tasks.handoffs!.get(c.req.param('id'),c.req.param('handoffId'))));
   r.get('/tasks/:id/handoff/:handoffId/restore',async c=>c.json(await s.tasks.previewReturn(c.req.param('id'),c.req.param('handoffId'))));
   r.post('/tasks/:id/handoff/:handoffId/return',async c=>{
     const {restoreRevision,...confirmation}=await readBody(c,HandoffReturnBody);
+    if (restoreRevision !== undefined) await confirmRemote(c, s, 'workspace.restore_handoff', c.req.param('id'));
     return c.json(await s.tasks.returnHandoff(c.req.param('id'),c.req.param('handoffId'),restoreRevision,confirmation));
   });
   r.delete('/tasks/:id/handoff/:handoffId',async c=>c.json(await s.tasks.cancelHandoff(c.req.param('id'),c.req.param('handoffId'))));
@@ -36,18 +42,50 @@ export function taskRoutes(s: Services) {
     return c.json(await s.tasks.updateMemory(id,()=>s.tasks.memory.remove(id,c.req.param('itemId'))));
   });
   r.post('/tasks/:id/queue', async c => c.json(s.tasks.moveQueuedTask(c.req.param('id'), (await readBody(c, MoveQueuedTaskBody)).position)));
-  r.delete('/tasks/:id',async c=>c.json(await s.tasks.deleteTask(c.req.param('id'))));
-  r.post('/tasks/:id/merge',async c=>c.json(await s.tasks.finishWorkspace(c.req.param('id'),'merge',await readBody(c,MergeWorkspaceBody))));
-  r.post('/tasks/:id/discard',async c=>c.json(await s.tasks.finishWorkspace(c.req.param('id'),'discard')));
-  r.post('/tasks/:id/rollback',async c=>c.json(await s.tasks.finishWorkspace(c.req.param('id'),'rollback')));
-  r.post('/tasks/:id/workspace/open',async c=>c.json(await s.tasks.finishWorkspace(c.req.param('id'),'open')));
+  r.delete('/tasks/:id', async (c) => {
+    const id = c.req.param('id');
+    if (s.workspaces.get(id)) await confirmRemote(c, s, 'workspace.delete_task', id);
+    return c.json(await s.tasks.deleteTask(id));
+  });
+  r.post('/tasks/:id/merge', async (c) => {
+    const id = c.req.param('id');
+    const body = await readBody(c, MergeWorkspaceBody);
+    await confirmRemote(c, s, s.workspaces.get(id)?.kind === 'copy' ? 'workspace.apply' : 'workspace.merge', id);
+    return c.json(await s.tasks.finishWorkspace(id, 'merge', body));
+  });
+  r.post('/tasks/:id/discard', async (c) => {
+    const id = c.req.param('id');
+    await confirmRemote(c, s, 'workspace.discard', id);
+    return c.json(await s.tasks.finishWorkspace(id, 'discard'));
+  });
+  r.post('/tasks/:id/rollback', async (c) => {
+    const id = c.req.param('id');
+    await confirmRemote(c, s, 'workspace.rollback', id);
+    return c.json(await s.tasks.finishWorkspace(id, 'rollback'));
+  });
+  r.post('/tasks/:id/workspace/open', async (c) => {
+    requireLocal(c, '请在这台电脑上打开资源管理器');
+    return c.json(await s.tasks.finishWorkspace(c.req.param('id'), 'open'));
+  });
   r.post('/tasks/:id/workspace/prepare', async (c) => { await readBody(c, PrepareWorkspaceBody); return c.json(await s.tasks.confirmWorkspace(c.req.param('id'))); });
   r.get('/tasks/:id/changes', async c => { const id = c.req.param('id'); return c.json(await s.tasks.workspaceOperation(id, manager => manager.diff(id))); });
   r.get('/tasks/:id/changes/file', async c => { const id = c.req.param('id'); return c.json(await s.tasks.workspaceOperation(id, manager => manager.fileDiff(id, c.req.query('path') ?? ''))); });
-  r.post('/tasks/:id/changes/restore', async c => { const body = await readBody(c, RestoreWorkspaceFileBody); return c.json(await s.tasks.restoreWorkspaceFile(c.req.param('id'), body.path)); });
+  r.post('/tasks/:id/changes/restore', async (c) => {
+    const id = c.req.param('id');
+    const body = await readBody(c, RestoreWorkspaceFileBody);
+    await confirmRemote(c, s, 'workspace.restore_file', id);
+    return c.json(await s.tasks.restoreWorkspaceFile(id, body.path));
+  });
   r.get('/tasks/:id/usage', (c) => c.json(taskUsage(s.db, c.req.param('id'))));
   r.get('/tasks/:id/files', (c) => c.json({ items: taskFiles(s.db, c.req.param('id')), nextCursor: null }));
-  r.patch('/tasks/:id', async (c) => c.json(await s.tasks.patch(c.req.param('id'), await readBody(c, PatchTaskBody))));
+  r.patch('/tasks/:id', async (c) => {
+    const id = c.req.param('id');
+    const body = await readBody(c, PatchTaskBody);
+    if (body.permission === 'workspace' || body.permission === 'full' || body.autoAllowLowRisk || body.autoMergeOnPass) {
+      await confirmRemote(c, s, 'task.permission', id);
+    }
+    return c.json(await s.tasks.patch(id, body));
+  });
   r.get('/tasks/:id/independent', (c) => c.json(s.independentRuntime.state(c.req.param('id'))));
   r.post('/tasks/:id/independent',async c=>c.json(await s.tasks.updateIndependent(c.req.param('id'),'configure',await readBody(c,IndependentTaskOptions)),201));
   r.put('/tasks/:id/independent', async (c) => {

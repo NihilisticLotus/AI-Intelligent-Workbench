@@ -73,6 +73,10 @@ export function isLanConnection(localAddress: string | undefined): boolean {
   return !!localAddress && !isLoopback(localAddress);
 }
 
+export function isLocalDevice(lan: boolean, ip: string, source?: DeviceSource): boolean {
+  return !lan && isLoopback(ip) && source !== 'lan';
+}
+
 export function parseCookies(header: string | undefined | null): Record<string, string> {
   const out: Record<string, string> = {};
   if (!header) return out;

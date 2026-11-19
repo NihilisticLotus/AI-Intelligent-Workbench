@@ -306,6 +306,7 @@ const MIGRATIONS: string[] = [
   `CREATE INDEX IF NOT EXISTS idx_events_session ON events(session_id, seq);`,
   // v26：原有配对全部来自本机，局域网配对单独标记。
   `ALTER TABLE devices ADD COLUMN pairing_source TEXT NOT NULL DEFAULT 'local' CHECK (pairing_source IN ('local', 'lan'));`,
+  `CREATE INDEX IF NOT EXISTS idx_audit_log_ts ON audit_log(ts);`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

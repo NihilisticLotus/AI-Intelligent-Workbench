@@ -3,7 +3,7 @@ import { FeatureKey, type AccessAuditEntry, type ApiError, type Device, type Lan
 import { asApiError, confirmDialog, ErrorNotice, toastErrorOf } from '../components/ui';
 import { Icon } from '../components/Icon';
 import { ago } from '../lib/format';
-import { canToggleLan, firewallLabel, networkCategory, networkChoice, operationLabel } from '../lib/lan-access';
+import { canToggleLan, firewallLabel, lanStatusText, lanSwitchOn, networkCategory, networkChoice, operationLabel } from '../lib/lan-access';
 import { useCountdown } from '../lib/use-countdown';
 import { platform } from '../platform';
 import { api, loadDevices, revokeDevice, useApp, useRemoteAccess } from '../state/app';
@@ -22,20 +22,22 @@ interface LanControlsProps {
 
 export function LanControls({ state, choice, remote, busy, onSelect, onToggle, onUpdate }: LanControlsProps) {
   const selectedIndex = state.interfaces.findIndex((item) => item.name === choice?.name && item.address === choice?.address);
+  const on = lanSwitchOn(state);
+  const leftover = !on && state.firewall === 'mismatch';
   return <>
     <div className="set-row">
       <span className="lbl" id="lan-state-label">局域网访问</span>
       <div className="lan-row">
-        {!remote ? <button type="button" role="switch" className="switch lan-switch" aria-labelledby="lan-state-label" aria-checked={state.enabled}
+        {!remote ? <button type="button" role="switch" className="switch lan-switch" aria-labelledby="lan-state-label" aria-checked={on}
           disabled={busy || !canToggleLan(state, choice, remote)} onClick={onToggle} /> : null}
-        <span role={busy ? 'status' : undefined}>{busy ? '正在处理…' : state.enabled ? '已开启' : '已关闭，只有这台电脑能访问'}</span>
+        <span role={busy ? 'status' : undefined}>{busy ? '正在处理…' : lanStatusText(state)}</span>
       </div>
     </div>
     {remote ? <div className="set-row"><span className="lbl">电脑上的网卡</span><span>{state.selected ? `${state.selected.name} · ${networkCategory[state.selected.category]}` : '局域网未开启'}</span></div> :
       <div className="set-row">
         <label className="lbl" htmlFor="lan-interface">网卡</label>
         <div>
-          <select className="select" id="lan-interface" value={selectedIndex < 0 ? '' : String(selectedIndex)} disabled={busy || state.enabled || !state.interfaces.length}
+          <select className="select" id="lan-interface" value={selectedIndex < 0 ? '' : String(selectedIndex)} disabled={busy || on || !state.interfaces.length}
             onChange={(event) => { const item = state.interfaces[Number(event.target.value)]; if (event.target.value !== '' && item) onSelect(item); }}>
             <option value="">请选择网卡</option>
             {state.interfaces.map((item, index) => <option key={`${item.name}/${item.address}`} value={index}>
@@ -49,7 +51,7 @@ export function LanControls({ state, choice, remote, busy, onSelect, onToggle, o
     {state.unavailableReason ? <p className="lan-note" role="status">{state.unavailableReason}</p> : null}
     <div className="set-row">
       <span className="lbl">Windows 防火墙</span>
-      <div className="lan-row"><span>{firewallLabel[state.firewall]}</span>
+      <div className="lan-row"><span>{leftover ? '有残留规则，点“更新规则”删除' : firewallLabel[state.firewall]}</span>
         {!remote ? <button type="button" className="btn sm" disabled={busy} onClick={onUpdate}>更新规则</button> : null}
       </div>
     </div>
@@ -103,7 +105,7 @@ export function DeviceAccessSection() {
     } finally { setBusy(false); }
   };
   const toggle = () => {
-    if (state?.enabled) void mutateLan(() => api.putLan({ enabled: false }));
+    if (state && lanSwitchOn(state)) void mutateLan(() => api.putLan({ enabled: false }));
     else if (choice) void mutateLan(() => api.putLan({ enabled: true, name: choice.name, address: choice.address }));
   };
   const issue = async () => {

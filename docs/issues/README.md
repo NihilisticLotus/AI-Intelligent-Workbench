@@ -155,3 +155,7 @@
 | [ISSUE-0147](ISSUE-0147-lan-pairing-qr.md) | 局域网地址与配对码二维码暂缓 | deferred | 待办 | 2026-11-19 | |
 | [ISSUE-0148](ISSUE-0148-lan-port-test-exclusion.md) | Windows 相邻端口不可用导致顺延用例偶发失败 | fixed | bug | 2026-11-19 | 2026-11-19 |
 | [ISSUE-0149](ISSUE-0149-lan-phone-acceptance.md) | 局域网手机真机与 Windows 防火墙待验收 | open | 验收未通过（未验证） | 2026-11-19 | |
+| [ISSUE-0150](ISSUE-0150-lan-requested-shown-off.md) | 启动时未能恢复的局域网被显示为“已关闭”，开关无法真正关闭 | fixed | bug | 2026-11-19 | 2026-11-19 |
+| [ISSUE-0151](ISSUE-0151-lan-pairing-client-clock.md) | 手机按本地时钟提前判定配对超时 | fixed | bug | 2026-11-19 | 2026-11-19 |
+| [ISSUE-0152](ISSUE-0152-desktop-keyboard-mode.md) | 桌面小窗口调整高度被当成软键盘 | fixed | bug | 2026-11-19 | 2026-11-19 |
+| [ISSUE-0153](ISSUE-0153-mobile-switch-circle.md) | 触屏断点内开关被压成圆点 | fixed | bug | 2026-11-19 | 2026-11-19 |

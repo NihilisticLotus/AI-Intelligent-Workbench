@@ -12,6 +12,8 @@ export function mobileViewport({ layoutHeight, visibleHeight, offsetTop, scale, 
 
 export function installMobileViewport() {
   const width = matchMedia(mobileWidth);
+  // 只有触屏设备会弹软键盘；桌面小窗口在输入时调整窗口高度不能当成键盘。
+  const touch = matchMedia('(pointer: coarse)');
   const viewport = window.visualViewport;
   const root = document.documentElement;
   let previousWidth = 0;
@@ -30,7 +32,7 @@ export function installMobileViewport() {
       previousWidth = innerWidth;
       restingHeight = innerHeight;
     }
-    const editing = !!document.activeElement?.matches('textarea, input:not([readonly]):not([type=radio]):not([type=checkbox]):not([type=button]):not([type=file]), [contenteditable=true]');
+    const editing = touch.matches && !!document.activeElement?.matches('textarea, input:not([readonly]):not([type=radio]):not([type=checkbox]):not([type=button]):not([type=file]), [contenteditable=true]');
     const next = mobileViewport({ layoutHeight: innerHeight, visibleHeight: viewport.height, offsetTop: viewport.offsetTop, scale: viewport.scale, restingHeight, editing });
     if (!next) return;
     if (!editing || next.height > restingHeight) restingHeight = next.height;

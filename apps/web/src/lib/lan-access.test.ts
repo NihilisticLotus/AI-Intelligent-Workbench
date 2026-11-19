@@ -32,6 +32,20 @@ describe('网页设备访问', () => {
     expect(networkChoice({ ...lan, interfaces: [publicNet, network] }, null)).toBeNull();
   });
 
+  it('启动时没能恢复的局域网仍显示为开启，开关用于关闭', () => {
+    const props = { busy: false, onSelect: vi.fn(), onToggle: vi.fn(), onUpdate: vi.fn() };
+    const pendingState: LanState = { ...lan, requested: true, selected: network, firewall: 'mismatch', unavailableReason: '防火墙规则需要更新，请在设备与访问中检查' };
+    const page = renderToStaticMarkup(createElement(LanControls, { ...props, state: pendingState, choice: network, remote: false }));
+    expect(page).toContain('aria-checked="true"');
+    expect(page).toContain('已开启，暂未生效');
+    expect(page).not.toContain('只有这台电脑能访问');
+    expect(page).toContain('防火墙规则需要更新');
+    expect(page).toMatch(/<select[^>]*disabled/);
+    expect(canToggleLan(pendingState, null, false)).toBe(true);
+    const leftover = renderToStaticMarkup(createElement(LanControls, { ...props, state: { ...lan, firewall: 'mismatch' }, choice: network, remote: false }));
+    expect(leftover).toContain('有残留规则');
+  });
+
   it('配对片段可预填，待确认状态按拒绝、超时和逐 IP 锁定时间显示', () => {
     expect(isLanHostname('127.0.0.2')).toBe(true);
     expect(isLanHostname('localhost')).toBe(false);
@@ -41,6 +55,8 @@ describe('网页设备访问', () => {
     expect(pollingOutcome(null, 1000, 500)).toBe('pending');
     expect(pollingOutcome(null, 1000, 1000)).toBe('expired');
     expect(pollingOutcome({ status: 'rejected' }, 1000, 1001)).toBe('rejected');
+    // 手机时钟比电脑快：服务端仍在等待就继续等，不按本地时钟提前判超时
+    expect(pollingOutcome({ status: 'pending', id: `lp_${'a'.repeat(32)}`, expiresAt: 1000 }, 1000, 5000)).toBe('pending');
     expect(pairingResultMessage.unavailable).toContain('已断开');
     expect(secondsUntil(2500, 1000)).toBe(2);
   });

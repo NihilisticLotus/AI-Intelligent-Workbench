@@ -16,8 +16,9 @@ export function secondsUntil(time: number, now = Date.now()): number {
   return Math.max(0, Math.ceil((time - now) / 1000));
 }
 
+/** 服务端仍回复等待时继续等：手机与电脑的时钟可能不一致，只有查询失败时才按本地时钟判超时。 */
 export function pollingOutcome(result: LanPairingStatus | null, deadline: number, now = Date.now()): LanPairingStatus['status'] {
-  if (result && result.status !== 'pending') return result.status;
+  if (result) return result.status;
   return deadline <= now ? 'expired' : 'pending';
 }
 
@@ -42,8 +43,18 @@ export const firewallLabel: Record<LanState['firewall'], string> = {
   missing: '未安装规则', matched: '防火墙规则正常', mismatch: '防火墙规则需要更新', unknown: '无法读取防火墙规则',
 };
 
+/** 开关按“用户是否要求开启”显示：启动时没能恢复的局域网仍算开启，关掉后重启才不会自动再开。 */
+export function lanSwitchOn(state: LanState): boolean {
+  return state.enabled || state.requested;
+}
+
+export function lanStatusText(state: LanState): string {
+  if (state.enabled) return '已开启';
+  return state.requested ? '已开启，暂未生效' : '已关闭，只有这台电脑能访问';
+}
+
 export function canToggleLan(state: LanState | null, choice: LanInterface | null, remote: boolean): boolean {
-  return !!state && !remote && (state.enabled || choice?.category === 'private');
+  return !!state && !remote && (lanSwitchOn(state) || choice?.category === 'private');
 }
 
 export const operationLabel: Record<AccessOperation, string> = {

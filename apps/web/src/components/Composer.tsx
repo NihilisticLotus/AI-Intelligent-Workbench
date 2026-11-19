@@ -13,7 +13,7 @@ import {
 import { AgentBadge, ErrorNotice, asApiError, choiceDialog, confirmDialog, openMenu, toastErrorOf, useAgentName } from './ui';
 import { Icon } from './Icon';
 import { AgentPicker } from './AgentPicker';
-import { Attachments, useAttachments, useAttachmentInput } from './Attachments';
+import { Attachments, PhotoAttachment, useAttachments, useAttachmentInput } from './Attachments';
 import { visionWarning } from '../lib/attachments';
 import { platform } from '../platform';
 import { useNow, useDismiss } from './hooks';
@@ -180,6 +180,7 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
             }} />
           <div className="compose-bar">
             <button type="button" className="btn ghost icon sm" aria-label="添加附件" title="选择文件或粘贴、拖入图片" disabled={sending} onClick={()=>attachmentInput.input.current?.click()}><Icon name="clip" /></button>
+            <PhotoAttachment add={attachments.add} disabled={sending} />
             <Switcher task={task} config={config} online={online && !sending && !handoffSending} />
             <span className="grow" />
             <PermChip task={task} online={online} />

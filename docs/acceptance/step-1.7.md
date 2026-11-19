@@ -73,6 +73,39 @@
 - 首次全量测试在 Windows 的回环端口顺延夹具上遇到相邻端口 `EACCES`。夹具改为先确认相邻端口可用，仍严格断言实际端口只顺延一位。专项与全量复跑通过，见 [ISSUE-0148](../issues/ISSUE-0148-lan-port-test-exclusion.md)。
 - 新增网页状态渲染、配对分支、确认队列和浏览器降级共四项测试。移除公用网络按钮限制、允许非安全上下文直接走系统通知后，两项用例均反向失败，恢复后通过。`npm run typecheck`、`npm test`、`npm run build` 通过。默认离线测试 1173 通过、3 跳过（适配器 104 通过 / 3 跳过，Gateway 830、协议 67、网页 172）。构建保留已有体积提示。
 
+## 2026-11-19 阶段 6：移动端基线盘点
+
+Chrome 157 使用 `app` 预览参数、隔离数据和回环替身，按 375×812、390×844、412×915、768×1024 和深浅主题查看 18 个页面或对话框，共 144 组。桌面留档使用 1440×900。[桌面对话基线](assets/step-1.7/phase6-before-desktop.png)
+
+| 分级 | 页面 / 控件 | 基线现象与截图 | 状态 |
+|---|---|---|---|
+| 挡住使用 | 底部导航、任务列表 | 派发后叠加两条提示覆盖底部导航，点任务列表无响应。项目和任务更多按钮依赖悬停。[首页](assets/step-1.7/phase6-before-home.png) · [任务列表](assets/step-1.7/phase6-before-task-list.png) | 已修 |
+| 挡住使用 | 对话、输入框、模型选择器 | 375 像素下附件按钮被挤到 16×28，右侧面板入口被挤到 18×32。选择器的模型子菜单可覆盖 Agent 列表。输入是 14 像素，缩高时需保证发送和编辑同时可达。[对话](assets/step-1.7/phase6-before-conversation.png) · [选择器](assets/step-1.7/phase6-before-agent-picker.png) · [缩短视口](assets/step-1.7/phase6-before-keyboard.png) | 已修 |
+| 难用 | 配对、审批 | 平板配对与电脑确认仍有 28～42 像素控件，审批按钮和思考/工具标题过小。[配对](assets/step-1.7/phase6-before-pairing.png) · [确认](assets/step-1.7/phase6-before-pairing-confirmation.png) · [审批](assets/step-1.7/phase6-before-approval.png) | 已修 |
+| 难用 | 搜索、新建任务 | 搜索输入字号 13，结果行 37；新建任务输入字号 14，移除附件 28×28，添加附件 32×32。[搜索](assets/step-1.7/phase6-before-search.png) · [新建任务](assets/step-1.7/phase6-before-new-task.png) | 已修 |
+| 难用 | 详细、改动、应用及回滚 | 展开、选项卡、文件和还原操作过矮。应用和回滚使用居中小对话框，关闭与确认高度 28～32。[详细](assets/step-1.7/phase6-before-details.png) · [改动](assets/step-1.7/phase6-before-changes.png) · [应用](assets/step-1.7/phase6-before-apply-dialog.png) · [回滚](assets/step-1.7/phase6-before-rollback-dialog.png) | 已修 |
+| 难用 | 看板 | 筛选输入 13 像素，视图切换、筛选和待办操作区偏小。[看板](assets/step-1.7/phase6-before-board.png) | 已修 |
+| 难用 | Agent 管理和服务表单 | 开关 34×20，测试连接高 28；表单字号 13，双列表单在手机上给输入只留 197 像素。[Agent](assets/step-1.7/phase6-before-agents.png) · [添加服务](assets/step-1.7/phase6-before-service-dialog.png) | 已修 |
+| 难用 | 设置和项目设置 | 数字输入只高 27；规则工具菜单字号 14，上下移动按钮宽 31。规则表格已有内层滚动容器。[设置](assets/step-1.7/phase6-before-settings.png) · [项目设置](assets/step-1.7/phase6-before-project-settings.png) | 已修 |
+| 不好看 | 抽屉、对话框和横屏边缘 | 基础界面使用固定 `vh` 与底部位置，控件未统一避开刘海和底部横条，窄屏的小居中弹窗浪费横向空间。[应用对话框](assets/step-1.7/phase6-before-apply-dialog.png) | 已修 |
+
+## 2026-11-19 阶段 6：手机端适配验收
+
+- 基线清单中的九项已修。触屏可直接打开项目和任务操作，通知置于顶部并透过触控。聊天工具条自动分行，Agent 和模型分两层选择。新建任务和对话均可选文件或打开图片菜单，分别走相册和相机入口。窄屏对话框从底部打开，中屏抽屉按可视高度布置。长差异和权限规则表在各自容器中滚动，项目规则可用按钮调整顺序。
+- Chrome 157 按 `.claude/launch.json` 的 `app` 参数在 17890 上运行。用 375×812、390×844、412×915、768×1024 及 360×780、430×932、812×375、915×412 检查深浅主题。21 个页面或对话框合计 336 组，核对页面无横向溢出，所测触控目标至少 44×44，底部导航 48×48，所测文本输入至少 16 像素。单选和勾选按可点的标签测量。
+- 两套主题各在四种规定尺寸和 812×375 横屏操作配对、新建、发消息、审批、看文件差异、停止、设置和吊销。375×310 模拟键盘压缩，聊天输入与发送按钮可见并能发送，新建任务文本和派发按钮也可见。用合成 PNG 检查图片入口，系统相机与相册面板仍待真机验证。
+- 在隔离的演示项目中打开展示账号及独立服务表单，未提交 Key。打开应用和回滚对话框，并在临时 Git 项目中走通合并。电脑允许前原文件保持原值，允许后变更写入原文件。1440×900 前后像素差异集中在会话时间和用时文字，布局一致。
+- 新增 5 项测试。临时抬高键盘判定阈值后，iOS 式视觉视口与 Chrome 式内容视口两条用例均失败。去掉相机采集属性后，图片输入测试按预期失败。恢复后二者共 5 项通过。默认离线全量测试 1178 通过、3 跳过（适配器 104 通过 / 3 跳过，Gateway 830、协议 67、网页 177），`npm run typecheck` 与 `npm run build` 均通过，构建保留已有体积提示。界面设计同步为 v0.3.42。
+
+| 区域 | 375 像素验收截图 |
+|---|---|
+| 配对、导航与任务 | [配对](assets/step-1.7/phase6-pairing.png) · [电脑确认](assets/step-1.7/phase6-pairing-confirmation.png) · [首页](assets/step-1.7/phase6-home.png) · [抽屉](assets/step-1.7/phase6-task-list.png) · [任务行](assets/step-1.7/phase6-task-row.png) · [搜索](assets/step-1.7/phase6-search.png) |
+| 新建、对话与审批 | [新建任务](assets/step-1.7/phase6-new-task.png) · [新建短视口](assets/step-1.7/phase6-new-keyboard.png) · [对话](assets/step-1.7/phase6-conversation.png) · [Agent 选择器](assets/step-1.7/phase6-agent-picker.png) · [对话短视口](assets/step-1.7/phase6-keyboard.png) · [审批](assets/step-1.7/phase6-approval.png) |
+| 详细、改动与写入 | [详细](assets/step-1.7/phase6-details.png) · [改动和差异](assets/step-1.7/phase6-changes.png) · [合并](assets/step-1.7/phase6-merge-dialog.png) · [应用](assets/step-1.7/phase6-apply-dialog.png) · [回滚](assets/step-1.7/phase6-rollback-dialog.png) |
+| 看板、Agent 与设置 | [看板](assets/step-1.7/phase6-board.png) · [Agent](assets/step-1.7/phase6-agents.png) · [账号表单](assets/step-1.7/phase6-profile-dialog.png) · [添加服务](assets/step-1.7/phase6-service-dialog.png) · [设置](assets/step-1.7/phase6-settings.png) · [项目设置](assets/step-1.7/phase6-project-settings.png) |
+
+[1440×900 修复前](assets/step-1.7/phase6-before-desktop.png) · [1440×900 修复后](assets/step-1.7/phase6-desktop.png)
+
 ## 当前进度
 
-- 阶段 0～5 已通过。阶段 4 见提交 `f465e58`。下一步是阶段 6（已开放页面移动端盘点与适配），阶段 6～7 尚未验收。
+- 阶段 0～6 已通过本机验收。下一步是阶段 7 的全量验收和文档收尾，真机和 Windows 真实防火墙仍待验收。

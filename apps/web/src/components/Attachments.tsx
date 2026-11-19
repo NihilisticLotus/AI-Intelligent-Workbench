@@ -1,10 +1,10 @@
 // 附件上传、暂存、预览共用；图片 URL 由带设备凭据的 GET 换成本页 Blob URL。
-import { useEffect, useRef, useState, type ClipboardEvent, type DragEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent } from 'react';
 import type { AgentInfo, AttachmentInfo } from '@aic/protocol';
 import { api } from '../state/app';
 import { toast } from '../state/ui';
 import { attachmentLimit, clipboardFiles, screenshotName, visionWarning } from '../lib/attachments';
-import { Dialog, openDialog } from './ui';
+import { Dialog, openDialog, openMenu } from './ui';
 import { Icon } from './Icon';
 import { imageCache } from '../lib/image-cache';
 import { newOpId } from '../lib/ids';
@@ -51,6 +51,22 @@ export function useAttachmentInput(add:(files:File[])=>void) {
     onDragLeave:()=>{if(--depth.current<=0){depth.current=0;setDragging(false);}},
     onDrop:(e:DragEvent)=>{e.preventDefault();depth.current=0;setDragging(false);add(Array.from(e.dataTransfer.files));},
   }};
+}
+export function PhotoAttachment({ add, disabled }: { add: (files: File[]) => void; disabled?: boolean }) {
+  const library = useRef<HTMLInputElement>(null);
+  const camera = useRef<HTMLInputElement>(null);
+  const acceptPhoto = (e: ChangeEvent<HTMLInputElement>) => {
+    add(Array.from(e.target.files ?? []));
+    e.target.value = '';
+  };
+  return <>
+    <input ref={library} type="file" accept="image/*" multiple hidden onChange={acceptPhoto} />
+    <input ref={camera} type="file" accept="image/*" capture="environment" hidden onChange={acceptPhoto} />
+    <button type="button" className="btn ghost icon photo-attachment" aria-label="添加图片" title="添加图片" aria-haspopup="menu" disabled={disabled} onClick={(e) => openMenu(e.currentTarget, [
+      { label: '从相册选取', onSelect: () => library.current?.click() },
+      { label: '拍照', onSelect: () => camera.current?.click() },
+    ])}><Icon name="camera" /></button>
+  </>;
 }
 function AttachmentImage({taskId,info,file,onClick}:{taskId:string|null;info?:AttachmentInfo;file?:File;onClick:(url:string)=>void}) {
   const [url,setUrl]=useState(''),[error,setError]=useState(false);

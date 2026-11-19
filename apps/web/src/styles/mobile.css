@@ -1,0 +1,119 @@
+/* 触屏工具和可视区域只在工作台的窄屏、中屏断点内调整。 */
+.btn.photo-attachment { display: none; }
+
+@media (max-width: 1279px) {
+  :root { --app-height: var(--visible-height, 100dvh); }
+  .app { position: relative; top: var(--visible-top, 0px); height: var(--app-height); padding-block-start: env(safe-area-inset-top); padding-inline: env(safe-area-inset-left) env(safe-area-inset-right); }
+  .pair-page { min-height: var(--app-height); padding: max(var(--sp-4), env(safe-area-inset-top)) max(var(--sp-4), env(safe-area-inset-right)) max(var(--sp-4), env(safe-area-inset-bottom)) max(var(--sp-4), env(safe-area-inset-left)); }
+  .pair-card { min-width: 0; }
+  .side { top: var(--visible-top, 0px); right: env(safe-area-inset-right); bottom: auto; height: var(--app-height); padding-block: env(safe-area-inset-top) env(safe-area-inset-bottom); }
+  .content-scroll, .side-body, .sb-scroll, .dlg-body { overscroll-behavior: contain; }
+
+  :is(.app, .pair-page, dialog.dlg) :is(button, .btn, a.sb-item, summary, [role=option]) { min-block-size: 44px; }
+  :is(.app, .pair-page, dialog.dlg) :is(button, .btn, a.sb-item) { min-inline-size: 44px; }
+  .app .btn.icon.xs { min-block-size: 44px; }
+  :is(.app, .pair-page, dialog.dlg) :is(input:not([type=radio]):not([type=checkbox]):not([type=file]), select, textarea) { min-block-size: 44px; font-size: 16px; max-inline-size: 100%; }
+  :is(.app, dialog.dlg) label:has(> input:is([type=checkbox], [type=radio])) { display: inline-flex; min-block-size: 44px; min-inline-size: 44px; align-items: center; }
+  :is(.app, dialog.dlg) :where(input, textarea, select) { scroll-margin-block: 8px; }
+  .main-head .btn, .compose-bar > .btn, .nt-bar > .btn { flex-shrink: 0; }
+  .app .btn, dialog.dlg .btn { height: auto; white-space: normal; }
+  :is(.app, dialog.dlg) .switch { align-self: center; }
+  .switch::after { top: calc(50% - 7px); }
+  .switch[aria-checked="true"]::after { transform: translateX(23px); }
+  .menu, .popover { max-width: calc(100vw - 16px); max-height: calc(var(--app-height) - 16px); overflow: auto; overscroll-behavior: contain; }
+  .menu button, .popover button { min-height: 44px; min-width: 44px; }
+  .menu button { overflow-wrap: anywhere; }
+  dialog.dlg { max-height: calc(var(--app-height) - 20px); overflow: hidden; }
+  .dlg-head, .dlg-foot { flex: none; }
+  .dlg-head h2, .dlg-body, .dlg-body .kv dd { min-width: 0; overflow-wrap: anywhere; }
+  .dlg-foot { flex-wrap: wrap; }
+  .dlg-body { min-height: 0; }
+  .form-row, .set-row { grid-template-columns: minmax(0, 1fr) minmax(0, 3fr); }
+  .form-row > *, .set-row > * { min-width: 0; }
+  .palette-list li { min-height: 44px; overflow-wrap: anywhere; }
+  .fs-list :is(a,button) { min-height: 44px; }
+  .toasts { top: calc(var(--visible-top, 0px) + env(safe-area-inset-top) + 8px); bottom: auto; right: max(8px, env(safe-area-inset-right)); max-width: calc(100vw - 16px); }
+  .toast { pointer-events: none; overflow-wrap: anywhere; }
+  .error-alerts { right: max(8px, env(safe-area-inset-right)); top: calc(var(--visible-top, 0px) + env(safe-area-inset-top) + 56px); bottom: auto; max-height: 45dvh; overflow-y: auto; }
+  .error-alerts .btn { min-height: 44px; min-width: 44px; }
+
+  /* 对话及输入。保留代码自己的横向滚动，工具条可分行。 */
+  .chat, .composer, .main-body, .msg > div, .msg .text, .approval, .attachment-item { min-width: 0; }
+  .msg, .sysnote, .alert .body, .approval, .d-note { overflow-wrap: anywhere; }
+  .msg pre, .approval pre, .tool .detail pre, .dlg-body pre { max-width: 100%; overflow-x: auto; }
+  .tool > summary, .thought > summary { align-items: center; }
+  .chat kbd, .approval kbd { display: none; }
+  .composer .compose-bar { flex-wrap: wrap; }
+  .composer .compose-bar :is(.aa-chip, .sc-chip) { width: 44px; }
+  .composer .compose-bar .perm-chip:not(.aa-chip):not(.mcp-chip):not(.sc-chip) + .aa-chip { margin-left: 0; }
+  .compose-bar .switcher-controls, .compose-bar .agent-picker { min-width: 0; max-width: 100%; }
+  .picker-trigger .muted { min-width: 0; overflow-wrap: anywhere; }
+  .compose-box textarea { max-height: 30dvh; }
+  .attachment-item { max-width: 100%; }
+  .attachment-name { min-width: 0; }
+  .approval .acts .btn { flex-shrink: 0; }
+
+  /* 任务列表、项目动作与搜索。 */
+  .app .proj-acts { display: flex; flex: none; }
+  .app .proj-toggle .count { display: none; }
+  .proj .tasks li { display: flex; align-items: stretch; }
+  .proj .tasks .task-row { flex: 1 1 0; min-width: 0; min-height: 44px; }
+  .proj .tasks li:hover .task-row .t { padding-right: 0; }
+  .proj .tasks .row-more { position: static; display: inline-flex; flex: none; align-self: center; }
+  .nt-bar { gap: 6px; }
+  .nt-box textarea { max-height: 40dvh; }
+
+  /* 详细、差异、合并和回滚。 */
+  .d-toggle .sub { min-width: 0; }
+  .change-file-head { flex-wrap: wrap; }
+  .change-file-head strong { min-width: 0; overflow-wrap: anywhere; }
+  .diff-scroll { max-height: min(60dvh, 60%); }
+  .changes-actions { display: flex; flex-wrap: wrap; gap: var(--sp-2); }
+
+  /* 看板、Agent、设置。长内容在各自的容器内换行或滚动。 */
+  .board-toolbar, .board-card-actions, .board-capacity, .device-list li { flex-wrap: wrap; }
+  .board-scroll { overscroll-behavior-x: contain; }
+  .board-card-title, .agents-page, .set-sec, .project-settings { overflow-wrap: anywhere; }
+  .board-card-title { max-width: 100%; }
+  .permission-table-wrap { max-width: 100%; overscroll-behavior-x: contain; }
+  .independent-fieldset, .independent-service-body, .profile-row, .page { min-width: 0; }
+}
+
+@media (max-width: 767px), (max-width: 1279px) and (pointer: coarse) {
+  .btn.photo-attachment { display: inline-flex; }
+  .compose-bar .photo-attachment { flex: none; }
+}
+
+@media (max-width: 767px) {
+  .app { --nav-height: calc(56px + env(safe-area-inset-bottom)); }
+  .app > .bottomnav { height: var(--nav-height); padding-bottom: env(safe-area-inset-bottom); }
+  .bottomnav :is(a, button) { width: 48px; min-width: 48px; }
+  .side, .app.sb-drawer :is(.sidebar, .sb-scrim) { top: var(--visible-top, 0px); bottom: auto; height: calc(var(--app-height) - var(--nav-height)); }
+  .side { left: env(safe-area-inset-left); width: auto; min-width: 0; padding-bottom: 0; }
+  .app.sb-drawer .sidebar { left: env(safe-area-inset-left); padding-top: env(safe-area-inset-top); }
+  dialog.dlg, dialog.dlg.wide, dialog.lan-dialog { position: fixed; inset: auto 0 max(0px, calc(100% - var(--app-height) - var(--visible-top, 0px))); margin: 0; width: 100%; max-width: 100%; max-height: calc(var(--app-height) - max(8px, env(safe-area-inset-top))); border-radius: var(--r-dialog) var(--r-dialog) 0 0; padding: 0 env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .form-row, .set-row, .lan-access .set-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
+  .field-note { margin-left: 0; }
+  .dlg-head, .dlg-body, .dlg-foot { padding-inline: var(--sp-4); }
+  .composer, .page { padding-inline: var(--sp-3); }
+  .composer { padding-bottom: var(--sp-2); }
+  .composer .compose-bar .grow { display: none; }
+  .compose-bar .btn.primary { margin-inline-start: auto; }
+  .tools-group { margin-left: 28px; }
+  .nt-bar .agent-picker { flex-basis: auto; }
+  .nt-send { margin-inline-start: auto; }
+  .off-row { flex-wrap: wrap; }
+  .off-row .sub { min-width: 96px; }
+}
+
+/* 软键盘打开时，保留编辑、发送和停止，给正在输入的文本让出高度。 */
+@media (max-width: 1279px) {
+  :root[data-keyboard] dialog.dlg[open] { position: fixed; inset: auto 0 max(0px, calc(100% - var(--app-height) - var(--visible-top, 0px))); margin-block: 0; }
+  :root[data-keyboard] .app:has(#prompt:focus, #nt-description:focus) .bottomnav { display: none; }
+  :root[data-keyboard] .composer:has(#prompt:focus) .compose-bar > :not(.btn.primary, [aria-label="停止 Agent"]) { display: none; }
+  :root[data-keyboard] .composer:has(#prompt:focus) .compose-bar .btn.primary { margin-inline-start: auto; }
+  :root[data-keyboard] .composer:has(#prompt:focus) .attachment-list { max-height: 48px; overflow: auto; }
+  :root[data-keyboard] .nt-page:has(#nt-description:focus) :is(.nt-hello, .nt-worktree, .nt-chips, .nt-quick, .nt-foot, .nt-rec, .nt-bar > :not(.nt-send)) { display: none; }
+  :root[data-keyboard] .nt-page:has(#nt-description:focus) .nt-center { padding-block: 8px; }
+  :root[data-keyboard] .nt-page:has(#nt-description:focus) #nt-description { min-height: 72px; max-height: 27dvh; }
+}

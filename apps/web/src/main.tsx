@@ -8,13 +8,16 @@ import './styles/interact.css';
 import './styles/app.css';
 import './styles/board.css';
 import './styles/lan-access.css';
+import './styles/mobile.css';
 import { App } from './App';
 import { applyThemeNow } from './state/prefs';
 import { installFolderPicker } from './components/FolderPicker';
 import { installBrowserNotices } from './platform/browser';
 import { toast } from './state/ui';
+import { installMobileViewport } from './platform/mobile-viewport';
 
 applyThemeNow();
+installMobileViewport();
 installFolderPicker();
 installBrowserNotices(({ title, body }) => toast(`${title} · ${body}`, 'attn'));
 

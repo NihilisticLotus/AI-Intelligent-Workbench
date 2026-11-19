@@ -22,6 +22,7 @@ const P: Record<string, string> = {
   unlock: '<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 017.5-2"/>',
   refresh: '<path d="M20 11a8 8 0 00-14.5-4.5L4 8M4 4v4h4M4 13a8 8 0 0014.5 4.5L20 16M20 20v-4h-4"/>',
   clip: '<path d="M20 11l-8.5 8.5a5 5 0 01-7-7L13 4a3.5 3.5 0 015 5l-8.5 8.5a2 2 0 01-3-3L14 7"/>',
+  camera: '<path d="M3 7h4l2-3h6l2 3h4v13H3z"/><circle cx="12" cy="13" r="4"/>',
   send: '<path d="M4 12l16-8-6 16-2-6z"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="1"/>',
   grid: '<path d="M3 9h18M3 15h18M9 3v18M15 3v18"/>',

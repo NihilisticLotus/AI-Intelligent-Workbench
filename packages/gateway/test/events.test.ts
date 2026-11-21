@@ -38,6 +38,20 @@ describe('EventStore', () => {
     expect(store.lastSeq()).toBe(0);
   });
 
+  it('订阅者在提交后派生新事件时，实时订阅与重放的顺序相同', () => {
+    const store = new EventStore(db, new EventBus());
+    const append = (messageId: string) => store.append({ type: 'message.done', taskId: 'task', sessionId: null, data: { messageId } });
+    store.bus.on(event => {
+      if (event.type === 'message.done' && event.data.messageId === '第一条') {
+        db.tx(() => { append('派生'); });
+      }
+    });
+    const seen: number[] = [];
+    store.bus.on(event => seen.push(event.seq));
+    db.tx(() => { append('第一条'); append('第二条'); });
+    expect(seen).toEqual(store.read({ after: 0, limit: 10 }).map(event => event.seq));
+  });
+
   it('数据库按版本号迁移，重开不重复执行', () => {
     expect(db.get<{ user_version: number }>('PRAGMA user_version')?.user_version).toBe(SCHEMA_VERSION);
     db.close();

@@ -8,6 +8,7 @@ export type SqlValue = SQLInputValue;
 export type Row = Record<string, unknown>;
 
 export interface Db {
+  readonly inTransaction: boolean;
   run(sql: string, ...params: SqlValue[]): { changes: number; lastInsertRowid: number };
   get<T = Row>(sql: string, ...params: SqlValue[]): T | undefined;
   all<T = Row>(sql: string, ...params: SqlValue[]): T[];
@@ -326,8 +327,18 @@ export function openDb(file: string): Db {
   };
   let depth = 0;
   let notifications: (() => void)[] = [];
+  let publishing: (() => void)[] | null = null;
+  function publish(batch: (() => void)[]) {
+    if (publishing) { for (const fn of batch) publishing.push(fn); return; }
+    publishing = batch;
+    try {
+      // 派生事件接在已提交批次之后，否则实时客户端可能按较大的 seq 跳过前面的事件。
+      for (const notify of batch) { try { notify(); } catch { console.error('[db] 提交后的通知失败'); } }
+    } finally { publishing = null; }
+  }
 
   const db: Db = {
+    get inTransaction() { return depth > 0; },
     run(sql, ...params) {
       const r = stmt(sql).run(...params);
       return { changes: Number(r.changes), lastInsertRowid: Number(r.lastInsertRowid) };
@@ -335,7 +346,7 @@ export function openDb(file: string): Db {
     get<T>(sql: string, ...params: SqlValue[]) { return stmt(sql).get(...params) as T | undefined; },
     all<T>(sql: string, ...params: SqlValue[]) { return stmt(sql).all(...params) as T[]; },
     exec(sql) { raw.exec(sql); },
-    afterCommit(fn) { if (depth > 0) notifications.push(fn); else fn(); },
+    afterCommit(fn) { if (depth > 0) notifications.push(fn); else publish([fn]); },
     tx(fn) {
       // 内层失败只回滚自己的修改与通知，调用方即使捕获错误也不会提交半次操作。
       if (depth > 0) {
@@ -352,7 +363,7 @@ export function openDb(file: string): Db {
       catch (e) { raw.exec('ROLLBACK'); notifications = []; throw e; }
       finally { depth = 0; }
       const committed = notifications; notifications = [];
-      for (const notify of committed) { try { notify(); } catch { console.error('[db] 提交后的通知失败'); } }
+      publish(committed);
       return result;
     },
     close() { cache.clear(); raw.close(); },

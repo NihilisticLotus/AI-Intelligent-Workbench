@@ -150,8 +150,7 @@ export class IndependentRequestLedger {
   accounting(taskId: string): IndependentRequestAccounting {
     if (this.scope === 'execution') this.budget(taskId);
     const committed = () => {
-      let done = false; this.db.afterCommit(() => { done = true; });
-      if (!done) throw Errors.invalidState('请求记账仍在外层事务中，提交前不能继续网络或报告结算成功');
+      if (this.db.inTransaction) throw Errors.invalidState('请求记账仍在外层事务中，提交前不能继续网络或报告结算成功');
     };
     return {
       reserve: (binding, attempt) => { if (binding.taskId !== taskId) throw Errors.conflict('请求不属于本任务'); const id = this.reserve(binding, attempt); committed(); return id; },

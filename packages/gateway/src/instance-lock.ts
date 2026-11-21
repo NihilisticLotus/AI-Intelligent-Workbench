@@ -3,8 +3,9 @@
 // 端口顺延只用于端口被其他程序占用的情况，不用于同一数据目录开第二个实例。
 import { closeSync, mkdirSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync } from 'node:fs';
 import { request } from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
 import path from 'node:path';
-import { API_BASE } from '@aic/protocol';
+import { API_BASE, ErrorCode } from '@aic/protocol';
 
 const LOCK_FILE = 'gateway.lock';
 /** 锁文件里还没写端口（实例还在启动）时，超过这个时间就当作残留 */
@@ -40,8 +41,9 @@ export function probeGateway(port: number, timeoutMs = 1500): Promise<boolean> {
       res.setEncoding('utf8');
       res.on('data', (c) => { if (body.length < 4096) body += c; });
       res.on('end', () => {
-        try { resolve(typeof (JSON.parse(body) as { code?: unknown }).code === 'string'); } catch { resolve(false); }
+        try { resolve(res.statusCode === 401 && JSON.parse(body)?.code === ErrorCode.Unauthorized); } catch { resolve(false); }
       });
+      res.on('error', () => resolve(false));
     });
     req.on('timeout', () => { req.destroy(); resolve(false); });
     req.on('error', () => resolve(false));
@@ -71,6 +73,22 @@ async function holderAlive(info: LockInfo | null, ageMs: number): Promise<boolea
 export async function acquireInstanceLock(dataDir: string): Promise<InstanceLock> {
   mkdirSync(dataDir, { recursive: true });
   const file = path.join(dataDir, LOCK_FILE);
+  // 操作系统持有写锁，进程退出自动释放。端口是否及时回应不能决定当前实例的所有权。
+  const owner = new DatabaseSync(path.join(dataDir, 'gateway-owner.db'));
+  try {
+    owner.exec('BEGIN IMMEDIATE');
+  } catch (error) {
+    owner.close();
+    if ((error as { errcode?: number }).errcode !== 5) throw error;
+    const { info } = readInfo(file);
+    throw new AlreadyRunningError(info?.pid ?? 0, info?.port ?? null);
+  }
+  try { return await claimMetadata(file, owner); }
+  catch (error) { owner.close(); throw error; }
+}
+
+/** 保留原版启动器使用的端口与进程记录，接手旧版的残留文件时同样持有写锁。 */
+async function claimMetadata(file: string, owner: DatabaseSync): Promise<InstanceLock> {
   let info: LockInfo = { pid: process.pid, port: null, startedAt: Date.now() };
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -83,6 +101,7 @@ export async function acquireInstanceLock(dataDir: string): Promise<InstanceLock
         process.off('exit', release);
         // 只删自己的锁
         try { if (readInfo(file).info?.pid === process.pid) unlinkSync(file); } catch { /* 已经没了 */ }
+        owner.close();
       };
       process.on('exit', release);
       return {

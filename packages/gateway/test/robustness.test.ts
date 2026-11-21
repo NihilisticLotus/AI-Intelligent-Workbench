@@ -1,18 +1,91 @@
 // 复核问题的回归测试：单实例锁、WebSocket 补发（重置 / 背压 / bootId）、任务运行时细节。
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:http';
+import { once } from 'node:events';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { CancelResult, PingResult, ServerFrame, type Approval, type EventEnvelope, type Task } from '@aic/protocol';
 import { createFakeAdapter } from '../src/agents/fake';
 import type { AgentAdapter } from '../src/agents/registry';
 import { AlreadyRunningError } from '../src/server';
+import { acquireInstanceLock } from '../src/instance-lock';
 import { allowEditApproval, isCommandApproval, makeProject, startGw, WsClient, type TestGw } from './helpers';
 
 const statusIs = (taskId: string, s: string) => (e: EventEnvelope) =>
   e.type === 'task.updated' && e.taskId === taskId && (e.data as { task: Task }).task.status === s;
 
 describe('单实例锁', () => {
+  it('两个启动器同时接手残留目录时只有一个取得所有权', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'aic-lock-race-'));
+    writeFileSync(path.join(dir, 'gateway.lock'), JSON.stringify({ pid: 999_999_9, port: null, startedAt: 0 }));
+    const attempts = await Promise.allSettled([acquireInstanceLock(dir), acquireInstanceLock(dir)]);
+    try {
+      expect(attempts.filter(result => result.status === 'fulfilled')).toHaveLength(1);
+      expect(attempts.find(result => result.status === 'rejected')?.reason).toBeInstanceOf(AlreadyRunningError);
+    } finally {
+      for (const result of attempts) if (result.status === 'fulfilled') result.value.release();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('已有实例暂时无法响应 HTTP 时仍独占目录，释放后可再次启动', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'aic-lock-busy-'));
+    const owner = await acquireInstanceLock(dir);
+    const server = createServer((_req, res) => { res.writeHead(503); res.end(); });
+    try {
+      server.listen(0, '127.0.0.1');
+      await once(server, 'listening');
+      owner.setPort((server.address() as import('node:net').AddressInfo).port);
+      const attempt = await acquireInstanceLock(dir).then(lock => { lock.release(); return null; }, error => error);
+      expect(attempt).toBeInstanceOf(AlreadyRunningError);
+      owner.release();
+      (await acquireInstanceLock(dir)).release();
+    } finally { await new Promise<void>(resolve => server.close(() => resolve())); owner.release(); rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('注册适配器中途失败会释放目录，立即重试可正常启动', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'aic-start-retry-'));
+    try {
+      await expect(startGw({ adapters: () => { throw new Error('模拟注册失败'); } }, dir)).rejects.toThrow('模拟注册失败');
+      const recovered = await startGw({}, dir);
+      await recovered.stop();
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it('第二个关闭调用也等待附件、端口和数据目录收尾', async () => {
+    const t = await startGw();
+    const attachments = t.gw.services.attachments;
+    const close = attachments.close.bind(attachments);
+    let finish!: () => void;
+    const pause = new Promise<void>(resolve => { finish = resolve; });
+    attachments.close = async () => { await pause; await close(); };
+    const first = t.gw.close();
+    let ended = false;
+    const second = t.gw.close().then(() => { ended = true; });
+    try {
+      await new Promise(resolve => setImmediate(resolve));
+      expect(ended).toBe(false);
+    } finally {
+      finish();
+      await Promise.all([first, second]);
+      await t.stop();
+    }
+  });
+
+  it('附件收尾报错仍释放端口和目录，调用方能收到错误', async () => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'aic-close-retry-'));
+    try {
+      const t = await startGw({}, dir);
+      const attachments = t.gw.services.attachments;
+      const original = attachments.close.bind(attachments);
+      attachments.close = async () => { await original(); throw new Error('模拟附件收尾故障'); };
+      await expect(t.gw.close()).rejects.toThrow('收尾失败');
+      const next = await startGw({ port: t.port }, dir);
+      try { expect(next.port).toBe(t.port); } finally { await next.stop(); }
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it('同一数据目录的第二个实例拒绝启动，且不会把第一个实例的任务改成“已中断”', async () => {
     const dir = mkdtempSync(path.join(tmpdir(), 'aic-lock-'));
     const t = await startGw({}, dir);

@@ -19,7 +19,7 @@ import { ProfileService } from './profiles';
 import { defaultSecretStore, SecretService, type SecretStore } from './secrets';
 import { AuthService, type AuthOptions } from './auth';
 import { openDb } from './db';
-import { acquireInstanceLock, AlreadyRunningError, probeGateway } from './instance-lock';
+import { acquireInstanceLock, AlreadyRunningError, probeGateway, type InstanceLock } from './instance-lock';
 import { EventBus, EventStore } from './events';
 import { createApp } from './http/app';
 import { GroupService, ProjectService } from './projects';
@@ -179,17 +179,27 @@ export function openBrowser(url: string) {
 }
 
 export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway> {
-  const log = opts.log ?? ((m: string) => console.log(m));
   const dataDir = opts.dataDir ?? defaultDataDir();
   // 单实例：必须在打开数据库、恢复任务状态之前确认没有别的实例在用这个数据目录
   const lock = await acquireInstanceLock(dataDir);
+  const rollback: Array<() => void | Promise<unknown>> = [() => lock.release()];
+  try { return await startGateway(opts, dataDir, lock, rollback); }
+  catch (error) {
+    for (const release of rollback.reverse()) {
+      try { await release(); } catch { /* 保留启动错误，继续释放其余资源。 */ }
+    }
+    throw error;
+  }
+}
+
+async function startGateway(opts: GatewayOptions, dataDir: string, lock: InstanceLock, rollback: Array<() => void | Promise<unknown>>): Promise<Gateway> {
+  const log = opts.log ?? ((m: string) => console.log(m));
   const lastExit = readLastExit(dataDir);
   const startedAt = Date.now();
   if (lastExit?.clean === false) gatewayLog(dataDir, 'WARN', lastExit.reason ?? '上次运行没有正常退出');
   lifecycle(dataDir, 'start', startedAt, '启动');
-  const db = (() => {
-    try { return openDb(path.join(dataDir, 'data.db')); } catch (e) { lock.release(); throw e; }
-  })();
+  const db = openDb(path.join(dataDir, 'data.db'));
+  rollback.push(() => db.close());
 
   let machineId = db.get<{ value: string }>("SELECT value FROM meta WHERE key = 'machine_id'")?.value;
   if (!machineId) { machineId = newId('mc'); db.run("INSERT INTO meta (key, value) VALUES ('machine_id', ?)", machineId); }
@@ -226,6 +236,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   const secrets = new SecretService(db, opts.secretStore ?? defaultSecretStore(db));
   const independent = new IndependentCatalog(db, secrets, events);
   const independentDiscovery = new IndependentDiscovery(db, independent, opts.metadataReader);
+  rollback.push(() => independentDiscovery.close());
   const agentSvc = new AgentService(db, events, agents, { dataDir, log, audit });
   const profiles = new ProfileService(db, secrets, {
     dataDir, audit,
@@ -242,6 +253,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
     log,
   });
   const attachments = new AttachmentService(db, dataDir);
+  rollback.push(() => tasks.shutdown(), () => attachments.close());
   const accessAudit = new AccessAudit(db, log);
   accessAudit.prune();
   attachments.cleanup();
@@ -251,6 +263,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
     void cleanWorkspaces();
   }, 60 * 60_000);
   cleanupTimer.unref?.();
+  rollback.push(() => clearInterval(cleanupTimer));
   const history = new HistoryAccess(db, () => port, events.bus);
   tasks.history = history;
   tasks.attachments = attachments;
@@ -276,6 +289,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
     return workspaceCleanup;
   };
   void cleanWorkspaces();
+  rollback.push(() => workspaceCleanup);
   const groups = new GroupService(db, tasks);
   const lan = new LanSettings(db, realpathSync(dataDir), () => port, listenLan, log, opts.lan,
     () => {
@@ -306,6 +320,10 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   const app = createApp(services, { webDist });
   const server = createAdaptorServer({ fetch: app.fetch }) as Server;
   const ws = attachWs(server, services);
+  rollback.push(() => {
+    if (server.listening) return new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); });
+  });
+  rollback.push(() => ws.close());
 
   async function listenLan(address: string) {
     const listener = createAdaptorServer({ fetch: app.fetch }) as Server;
@@ -326,18 +344,11 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
     });
   }
 
-  try {
-    port = await listen(server, opts.port ?? Number(process.env.AIC_PORT ?? DEFAULT_PORT));
-  } catch (e) {
-    db.close();
-    lock.release();
-    throw e;
-  }
+  port = await listen(server, opts.port ?? Number(process.env.AIC_PORT ?? DEFAULT_PORT));
+  rollback.push(() => lan.stop());
   auth.setPort(port);
   lock.setPort(port);
   await lan.restore();
-  // 检测全部 Agent（后台进行；GET /agents 会等它完成）
-  void agentSvc.startup().catch((e) => log(`检测 Agent 失败：${String(e)}`));
   const url = `http://${HOST}:${port}/`;
 
   const shouldOpen = opts.openBrowser ?? process.env.AIC_NO_BROWSER !== '1';
@@ -350,36 +361,44 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
     try { openBrowser(`${url}#pair=${code}`); } catch (e) { log(`打开浏览器失败：${String(e)}，请手动打开 ${url}`); }
   }
 
-  let closed = false;
+  // 完成同步初始化后再开始后台检测，启动失败时没有遗留的检测请求。
+  void agentSvc.startup().catch((e) => log(`检测 Agent 失败：${String(e)}`));
+  rollback.length = 0;
+  let closing: Promise<void> | undefined;
+  async function shutdown(opts: { deadlineMs?: number; reason?: string; code?: number }) {
+    const errors: unknown[] = [];
+    async function settle(action: () => unknown) {
+      try { await action(); } catch (error) { errors.push(error); }
+    }
+    clearInterval(cleanupTimer);
+    await settle(() => independentDiscovery.close());
+    await settle(() => lan.stop());
+    await settle(() => accessConfirmation.cancelAll());
+    await settle(() => lanPairing.stop());
+    await settle(() => ws.close());
+    await settle(() => agentSvc.shutdown());
+    const graceful = Promise.all([settle(() => tasks.shutdown()), settle(() => attachments.close()),
+      settle(() => workspaceCleanup), settle(() => workspaces.settle())]);
+    if (opts.deadlineMs !== undefined) {
+      const timedOut = await Promise.race([graceful.then(() => false), delay(opts.deadlineMs).then(() => true)]);
+      if (timedOut) {
+        await settle(() => processes.killAllSync());
+        await Promise.race([graceful, delay(2000)]);
+      }
+    } else {
+      await graceful;
+    }
+    await settle(() => processes.killAllSync());
+    await settle(() => new Promise<void>(resolve => { server.close(() => resolve()); server.closeAllConnections(); }));
+    await settle(() => db.close());
+    if (dev) await settle(() => rmSync(devCodeFile, { force: true }));
+    await settle(() => lifecycle(dataDir, 'exit', startedAt, errors.length ? '退出收尾失败' : opts.reason ?? '正常退出', errors.length ? 1 : opts.code ?? 0));
+    await settle(() => lock.release());
+    if (errors.length) throw new AggregateError(errors, '工作台退出时部分资源收尾失败');
+  }
   return {
     port, url, services,
-    async close(opts: { deadlineMs?: number; reason?: string; code?: number } = {}) {
-      if (closed) return;
-      closed = true;
-      clearInterval(cleanupTimer);
-      independentDiscovery.close();
-      await lan.stop();
-      accessConfirmation.cancelAll();
-      lanPairing.stop();
-      ws.close();
-      agentSvc.shutdown();
-      const graceful = Promise.all([tasks.shutdown(), attachments.close(), workspaceCleanup, workspaces.settle()]);
-      if (opts.deadlineMs !== undefined) {
-        // 两段式：正常收尾最多等 deadlineMs，到点就先同步结束所有 Agent 进程树，再给写库收尾一点时间
-        const timedOut = await Promise.race([graceful.then(() => false), delay(opts.deadlineMs).then(() => true)]);
-        processes.killAllSync();
-        if (timedOut) await Promise.race([graceful, delay(2000)]);
-      } else {
-        await graceful;
-      }
-      // 兜底：还活着的 Agent 进程一律结束进程树
-      processes.killAllSync();
-      await new Promise<void>((r) => { server.close(() => r()); server.closeAllConnections?.(); });
-      db.close();
-      if (dev) rmSync(devCodeFile, { force: true });
-      lifecycle(dataDir, 'exit', startedAt, opts.reason ?? '正常退出', opts.code ?? 0);
-      lock.release();
-    },
+    close(opts = {}) { return closing ??= shutdown(opts); },
   };
 }
 

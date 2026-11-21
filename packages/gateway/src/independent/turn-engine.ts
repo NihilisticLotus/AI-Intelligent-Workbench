@@ -107,7 +107,7 @@ export class IndependentTurnEngine {
         // 正式传输可等待实际连接收尾，不能在 abortable 先返回时释放会话运行资格。
         await this.model.waitForIdle?.(turn.binding);
         if (signal.aborted) return finish(stopped());
-        try { await this.model.checkBinding(turn.binding); } catch { return finish('configuration_changed'); }
+        if (!await check()) return finish(isStopped() ? stopped() : 'configuration_changed');
         if (error instanceof ModelTransportError && error.reason === 'context') return finish('context_limit');
         if (error instanceof ModelTransportError && error.reason === 'budget') return finish('request_budget');
         return finish('model_error');

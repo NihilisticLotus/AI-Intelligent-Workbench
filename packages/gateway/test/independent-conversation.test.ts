@@ -39,6 +39,21 @@ afterEach(async () => {
 });
 
 describe('完整独立会话与循环', () => {
+  it('模型失败后核对绑定时取消，迟到结果不会覆盖取消状态', async () => {
+    const { engine, model, store, create } = setup([]);
+    let release!: () => void;
+    const stalled = new Promise<void>(resolve => { release = resolve; });
+    model.checkBinding.mockImplementationOnce(() => {}).mockImplementation(() => stalled);
+    const turn = create(), abort = new AbortController();
+    const pending = engine.run(turn.id, abort.signal);
+    try {
+      await vi.waitFor(() => expect(model.checkBinding).toHaveBeenCalledTimes(2));
+      abort.abort();
+      await vi.waitFor(() => expect(store.get(turn.id).status).toBe('cancelled'), { timeout: 750 });
+    } finally { release(); await pending; }
+    expect(store.get(turn.id).status).toBe('cancelled');
+    expect(model.complete).toHaveBeenCalledTimes(1);
+  });
   it.each([false, true])('完整绑定时间变化 %s 时按实际身份决定私有续传，原始记录不变', (changed) => {
     const { store, create } = setup(); const first = create(), owner = store.acquire(first.id);
     store.claimModel(first.id, owner); store.assistant(first.id, owner, { ...finalReply, continuation: '合成私有续传' }); store.finish(first.id, owner, 'completed');

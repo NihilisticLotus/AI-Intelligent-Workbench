@@ -256,9 +256,13 @@ async function startGateway(opts: GatewayOptions, dataDir: string, lock: Instanc
   rollback.push(() => tasks.shutdown(), () => attachments.close());
   const accessAudit = new AccessAudit(db, log);
   accessAudit.prune();
-  attachments.cleanup();
+  const cleanAttachments = () => {
+    const failed = attachments.cleanup();
+    if (failed) log(`有 ${failed} 个过期附件暂时无法删除，下次清理时重试。`);
+  };
+  cleanAttachments();
   const cleanupTimer = setInterval(() => {
-    try { attachments.cleanup(); } catch (e) { log('附件清理失败：' + String(e)); }
+    try { cleanAttachments(); } catch (e) { log('附件清理失败：' + String(e)); }
     accessAudit.prune();
     void cleanWorkspaces();
   }, 60 * 60_000);

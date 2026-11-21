@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, linkSync, renameSync, symlinkSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync, linkSync, renameSync, symlinkSync, unlinkSync, rmdirSync } from 'node:fs';
 import path from 'node:path';
 import { createFakeAdapter } from '@aic/adapters';
 import { AttachmentService, sniffAttachment } from '../src/attachments';
@@ -19,6 +19,22 @@ async function upload(token: string, taskId: string, b: Buffer, name = '../截�
   return fetch(`http://127.0.0.1:${t!.port}/api/v1/tasks/${taskId}/attachments`, { method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'text/plain', 'x-aic-filename': encodeURIComponent(name), ...headers }, body: new Uint8Array(b) });
 }
 describe('附件接口和迁移 v5', () => {
+  it('单个过期附件无法删除时继续清理其余附件，障碍解除后可重试', async () => {
+    const { task, s } = await setup();
+    const add = () => s.attachments.upload(task.id, '合成附件', Buffer.from('演示'));
+    const blocked = add(), expired = add(), used = add();
+    const file = s.attachments.get(task.id, blocked.id).path, other = s.attachments.get(task.id, expired.id).path;
+    s.attachments.markUsed(task.id, [used.id]);
+    unlinkSync(file); mkdirSync(file);
+    const at = Date.now() + 25 * 60 * 60_000;
+    expect(s.attachments.cleanup(at)).toBe(1);
+    expect(existsSync(other)).toBe(false);
+    expect(s.db.get('SELECT id FROM attachments WHERE id=?', blocked.id)).toBeDefined();
+    rmdirSync(file);
+    expect(s.attachments.cleanup(at)).toBe(0);
+    expect(s.db.get('SELECT id FROM attachments WHERE id=?', blocked.id)).toBeUndefined();
+    expect(s.attachments.get(task.id, used.id).info.id).toBe(used.id);
+  });
   it('迁移只追加，并能重新打开已有数据库', async () => {
     const { s,task } = await setup(); expect(SCHEMA_VERSION).toBe(27); expect(s.db.get<{user_version:number}>('PRAGMA user_version')?.user_version).toBe(SCHEMA_VERSION);
     expect(s.db.all('PRAGMA table_info(attachments)').length).toBe(11);

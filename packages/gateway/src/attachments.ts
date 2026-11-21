@@ -104,9 +104,13 @@ export class AttachmentService {
   }
   markUsed(taskId: string, ids: string[]) { for (const id of ids) this.db.run('UPDATE attachments SET used_at = ? WHERE id = ? AND task_id = ?', Date.now(), id, taskId); }
   cleanup(at = Date.now()) {
+    let failed = 0;
     for (const r of this.db.all<Row>('SELECT * FROM attachments WHERE used_at IS NULL AND created_at < ?', at - 24 * 60 * 60_000)) {
-      rmSync(this.file(r.task_id, r.id), { force: true }); this.db.run('DELETE FROM attachments WHERE id = ?', r.id);
+      try { rmSync(this.file(r.task_id, r.id), { force: true }); }
+      catch { failed++; continue; }
+      this.db.run('DELETE FROM attachments WHERE id = ?', r.id);
     }
+    return failed;
   }
   deleteTask(taskId: string) {
     // 路径必须位于本服务的附件根目录下。

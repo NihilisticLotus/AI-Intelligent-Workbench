@@ -177,3 +177,10 @@
 | [ISSUE-0169](ISSUE-0169-folder-picker-pending-selection.md) | 目录读取未确认时可以把父目录误选为项目 | fixed | bug | 2026-11-21 | 2026-11-21 |
 | [ISSUE-0170](ISSUE-0170-launcher-incomplete-web-assets.md) | 双击启动忽略缺失的网页脚本或样式 | fixed | bug | 2026-11-21 | 2026-11-21 |
 | [ISSUE-0171](ISSUE-0171-queue-failed-reservation.md) | 任务登记排队状态失败会永久占用执行名额 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0172](ISSUE-0172-workspace-final-state.md) | 重启后工作副本的结束状态可能与任务不符 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0173](ISSUE-0173-attachment-cleanup-retry.md) | 一个无法删除的过期附件会打断启动清理 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0174](ISSUE-0174-independent-cancel-binding-check.md) | 独立模型失败后再核对绑定时无法及时停止任务 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0175](ISSUE-0175-approval-deadline.md) | 审批到期后仍可能被记为允许 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0176](ISSUE-0176-queue-order-notification.md) | 调序保存失败仍改变等待顺序 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0177](ISSUE-0177-change-target-selection.md) | 工具记录可能打开并允许还原另一个文件 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0178](ISSUE-0178-secret-reference-transaction.md) | 配置保存中断可能留下无归属的密文 | fixed | bug | 2026-11-21 | 2026-11-21 |

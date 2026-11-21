@@ -228,6 +228,7 @@ Chrome 157 使用 `app` 预览参数、隔离数据和回环替身，按 375×81
 
 ## 当前进度（2026-11-22）
 
+- 本次修复和配套验收范围为 `680e3aa..a1a39d6`。[ISSUE-0179](../issues/ISSUE-0179-lan-uac-preflight.md)
 - 最终 `npm run typecheck`、`npm test` 和 `npm run build` 通过。离线测试共 1,226 项通过（适配器 105、Gateway 857、协议 67、网页 197），3 项真实 Agent 冒烟按配置跳过。构建保留原有的主脚本体积提示。CodeBuddy 自定义模型和 Codex gpt-6 luna 本轮均为 0 次调用、0 元。
 - 使用 app 预览的 17890 端口、独立数据目录、回环网卡与防火墙替身，在 Chrome 操作了深浅两套主题，每套覆盖 375×812、390×844、412×915、768×1024、横屏 812×375 和桌面 1440×900。每次点击均到达权限检查，网页只显示一次原因，局域网保持关闭，没有页面级横向滚动。刷新后仍能看到原因。两种主题都验证了关闭后规则暂时无法清理、恢复权限后点“更新规则”成功删除。[深色设置页](assets/step-1.7/uac-disabled-dark.png) · [浅色设置页](assets/step-1.7/uac-disabled-light.png)
 - 等待用户在本机启用 UAC、重启并使用手机按上文步骤验收。真机型号、浏览器、实际权限弹窗、手机审批、系统软键盘和规则删除均待现场登记。[ISSUE-0149](../issues/ISSUE-0149-lan-phone-acceptance.md) · [扫码暂缓 ISSUE-0147](../issues/ISSUE-0147-lan-pairing-qr.md)

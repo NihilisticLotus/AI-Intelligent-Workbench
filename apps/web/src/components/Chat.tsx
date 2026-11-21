@@ -203,7 +203,7 @@ function Step({ st, task }: { st: TurnStep; task: Task }) {
   }
   return (
     <div className="tools-group">
-      {groups.map((g) => (isWebSearch(g[0]!) ? <SearchGroup key={g[0]!.id} tools={g} /> : <ToolRow key={g[0]!.id} t={g[0]!} />))}
+      {groups.map((g) => (isWebSearch(g[0]!) ? <SearchGroup key={g[0]!.id} tools={g} /> : <ToolRow key={g[0]!.id} t={g[0]!} taskId={task.id} />))}
     </div>
   );
 }
@@ -246,7 +246,7 @@ function Thought({ it }: { it: Extract<TimelineItem, { kind: 'agent' }> }) {
   );
 }
 
-function ToolRow({ t }: { t: ToolItem }) {
+function ToolRow({ t, taskId }: { t: ToolItem; taskId: string }) {
   const verb = toolVerb[t.kind] ?? '操作';
   const failed = t.state === 'failed';
   // 用户拒绝的不是故障：中性颜色、不自动展开
@@ -270,7 +270,7 @@ function ToolRow({ t }: { t: ToolItem }) {
         </span>
       </summary>
       <div className="detail">
-        {['edit', 'create', 'delete'].includes(t.kind) && t.target ? <button type="button" className="detail-link" onClick={() => openChanges(t.target!)}>在改动面板中查看</button> : null}
+        {['edit', 'create', 'delete'].includes(t.kind) && t.target ? <button type="button" className="detail-link" onClick={() => openChanges(taskId, t.target!)}>在改动面板中查看</button> : null}
         {t.title && t.target ? <div className="out-head">{t.title}</div> : null}
         {hasDetail ? (
           <>

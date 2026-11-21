@@ -94,7 +94,7 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
     { key: 'context', title: '上下文', summary: contextSummary(value, agentName, modelName), body: <><ContextDetails value={value} agent={agentName} model={modelName} config={config} /><TaskMemoryDetails key={task.id} id={task.id}/>{independentError ? <p className="d-note" role="alert">{independentError}</p> : null}</> },
     { key: 'usage', title: '会话 token 用量', summary: usage ? `${formatTokens(usage.total.totalTokens)} · ${usage.turns} 轮` : usageError ? '读取失败' : '正在读取', body: <UsageDetails usage={usage} independent={independent} config={config} error={usageError} /> },
     { key: 'connection', title: '连接', summary: '未报告', body: <ConnectionDetails agent={agent} historyAvailable={historyAvailable} /> },
-    { key: 'output', title: '输出', summary: isolated ? changes ? `${changes.files.length} 个文件` : changesError ? '读取失败' : '正在读取' : files ? `${files.length} 个文件` : fileError ? '读取失败' : '正在读取', body: <OutputDetails files={files} error={isolated ? changesError : fileError} changes={isolated ? changes : undefined} isolated={isolated} /> },
+    { key: 'output', title: '输出', summary: isolated ? changes ? `${changes.files.length} 个文件` : changesError ? '读取失败' : '正在读取' : files ? `${files.length} 个文件` : fileError ? '读取失败' : '正在读取', body: <OutputDetails taskId={task.id} files={files} error={isolated ? changesError : fileError} changes={isolated ? changes : undefined} isolated={isolated} /> },
   ];
   const tabs: Array<[SideTab, string]> = [['plan', '详细'], ['diff', '改动']];
   return <aside className="side" aria-label="详细面板"><div className="side-head">
@@ -106,5 +106,5 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
       <h3><button type="button" className="d-toggle" aria-expanded={open} aria-controls={'detail-body-' + section.key} onClick={() => setPref('detailOpen', open ? opened.filter((x) => x !== section.key) : [...opened, section.key])}><Icon name="right" /><span>{section.title}</span><span className="sub" title={section.summary}>{section.summary}</span></button></h3>
       <div className="d-body" id={'detail-body-' + section.key} hidden={!open}>{section.body}</div>
     </section>; })}
-  </div><div className="side-body" id="sp-diff" role="tabpanel" aria-labelledby="st-diff" hidden={tab !== 'diff'}><ChangesPanel task={task} changes={changes} error={changesError} refresh={() => setReload(n => n + 1)} /></div></aside>;
+  </div><div className="side-body" id="sp-diff" role="tabpanel" aria-labelledby="st-diff" hidden={tab !== 'diff'}><ChangesPanel key={task.id} task={task} changes={changes} error={changesError} refresh={() => setReload(n => n + 1)} /></div></aside>;
 }

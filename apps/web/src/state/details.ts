@@ -11,7 +11,7 @@ export function openDetail(section: DetailSection) {
   detailFocus.set(() => ({ section, sequence: ++sequence }));
 }
 
-export const changeFocus = createStore<string | null>(null);
-export function openChanges(path: string) {
-  setPref('sideTab', 'diff'); setPref('sideOpen', true); changeFocus.set(() => path);
+export const changeFocus = createStore<{taskId: string; path: string} | null>(null);
+export function openChanges(taskId: string, path: string) {
+  changeFocus.set(() => ({ taskId, path })); setPref('sideTab', 'diff'); setPref('sideOpen', true);
 }

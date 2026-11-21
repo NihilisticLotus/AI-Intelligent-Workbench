@@ -16,6 +16,7 @@ import {
   applyAgentSnapshot, applyApprovalSnapshot, applyEvents, applyTaskSnapshot, emptyCore, mergeRestTask, type CoreState,
 } from './core';
 import { createStore, useStore } from './store';
+import { discardSessionDrafts } from './drafts';
 import { createFlusher } from './flush';
 import { authenticatedStartup } from '../api/credentials';
 import { announce, navigate, routeStore } from './ui';
@@ -237,6 +238,7 @@ async function resyncAfterReconnect() {
 
 async function resetAndRestart() {
   historyGeneration++;
+  discardSessionDrafts();
   imageCache.clear();
   ws?.stop();
   ws = null;
@@ -249,6 +251,7 @@ async function resetAndRestart() {
 
 function toUnpaired(initialPairCode?: string) {
   historyGeneration++;
+  discardSessionDrafts();
   imageCache.clear();
   ws?.stop();
   ws = null;

@@ -10,6 +10,7 @@ import { useApp } from '../state/app';
 import { createStore, useStore } from '../state/store';
 import { clipSelection, locate, offsetIn, type AnnotationData } from '../lib/annotations';
 import type { DraftAnnotation } from '@aic/protocol';
+import { newOpId } from '../lib/ids';
 import { Icon } from './Icon';
 
 export interface Annotation extends AnnotationData {
@@ -24,7 +25,6 @@ const annotationStore = createStore<Record<string, Annotation[]>>({});
 /** 正在编辑的注释：isNew 为刚添加（显示简洁的评论框） */
 const editorStore = createStore<{ taskId: string; id: string; isNew: boolean } | null>(null);
 
-let seq = 0;
 /** 注释改动的监听（Composer 用来保存草稿）；restore 时不触发 */
 const listeners = new Set<(taskId: string) => void>();
 export function onAnnotationsChanged(fn: (taskId: string) => void) { listeners.add(fn); return () => { listeners.delete(fn); }; }
@@ -34,10 +34,7 @@ const setList = (taskId: string, f: (l: Annotation[]) => Annotation[]) => {
 };
 /** 草稿里读回来的注释：位置等对话渲染后再定位 */
 export function restoreAnnotations(taskId: string, list: readonly DraftAnnotation[]) {
-  const cur = annotationStore.get()[taskId];
-  if (cur?.length) return; // 本页已经有（例如刚切回来），以本页为准
   annotationStore.set((m) => ({ ...m, [taskId]: list.map((a) => ({ id: a.id, text: a.text, comment: a.comment, raw: a.raw ?? a.text, pos: a.pos ?? -1, range: null })) }));
-  for (const a of list) { const n = Number(a.id.replace(/^D+/, '')); if (n > seq) seq = n; }
 }
 export function draftAnnotations(taskId: string): DraftAnnotation[] {
   return getAnnotations(taskId).map(({ id, text, comment, raw, pos }) => ({ id, text, comment, raw, pos }));
@@ -206,7 +203,7 @@ function SelectionMenu({ container, taskId }: { container: React.RefObject<HTMLD
   }, [container]);
   if (!sel) return null;
   const add = () => {
-    const id = `an${++seq}`;
+    const id = newOpId('an');
     const raw = sel.range.toString();
     const pos = container.current ? offsetIn(container.current, sel.range) : -1;
     setList(taskId, (l) => [...l, { id, text: clipSelection(sel.text), comment: '', range: sel.range, raw: raw.length > 4000 ? '' : raw, pos }]);

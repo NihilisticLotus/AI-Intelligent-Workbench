@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState, type ChangeEvent, type ClipboardEvent, type DragEvent } from 'react';
 import type { AgentInfo, AttachmentInfo } from '@aic/protocol';
 import { api } from '../state/app';
+import { ApiRequestError } from '../api/http';
 import { toast } from '../state/ui';
 import { attachmentLimit, clipboardFiles, screenshotName, visionWarning } from '../lib/attachments';
 import { Dialog, openDialog, openMenu } from './ui';
@@ -35,7 +36,17 @@ export function useAttachments(taskId: string | null) {
     remove:(key:string)=>{jobs.current.get(key)?.abort();current.current=current.current.filter((x)=>x.key!==key);setItems(current.current);},
     clear:()=>{for(const c of jobs.current.values())c.abort();current.current=[];setItems([]);},
     retry:(key:string)=>{const item=current.current.find((x)=>x.key===key);if(item&&taskId)void upload(item,taskId).catch(()=>{});},
-    restore:async(ids:string[])=>{const found:Item[]=[];for(const id of ids){try{const info=await api.attachmentInfo(taskId!,id);found.push({key:id,info,progress:100});}catch{toast('草稿中的附件已过期，请重新添加','attn');}}if(alive.current)setItems((a)=>[...a,...found.filter((f)=>!a.some((x)=>x.info?.id===f.info!.id))]);},
+    restore: async (ids:string[]) => {
+      const found: Item[] = [];
+      for (const id of ids) {
+        try { const info = await api.attachmentInfo(taskId!,id); found.push({key:id,info,progress:100}); }
+        catch (error) {
+          if (!(error instanceof ApiRequestError && error.status === 404)) throw error;
+          toast('草稿中的附件已过期，请重新添加','attn');
+        }
+      }
+      if (alive.current) setItems(items => [...items, ...found.filter(file => !items.some(item => item.info?.id === file.info!.id))]);
+    },
     uploadFor:async(id:string)=>{const ids:string[]=[];for(const item of current.current)ids.push(await upload(item,id));return ids;},
     ids:items.flatMap((a)=>a.info?[a.info.id]:[]),
     uploading:!!taskId&&items.some((a)=>a.progress<100&&!a.info&&!a.error),

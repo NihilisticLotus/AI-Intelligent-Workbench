@@ -20,7 +20,7 @@ import { useNow, useDismiss } from './hooks';
 import { requestFocusApproval, switcherRequestStore, type SwitcherSection } from './focus';
 import { TaskError } from './Chat';
 import { AnnotationChip, clearAnnotations, draftAnnotations, onAnnotationsChanged, restoreAnnotations, useAnnotations } from './Annotations';
-import { clearDraft, loadDraft, localDraft, saveDraft } from '../state/drafts';
+import { clearDraft, keepDraftEdits, loadDraft, localDraft, pendingDraftEdits, saveDraft } from '../state/drafts';
 import { composeWithAnnotations } from '../lib/annotations';
 import { openIndependentConfig } from './independent-task-panel';
 import { selectTarget, useTarget, setHandoffSending, useHandoffSending } from '../state/handoff';
@@ -47,12 +47,15 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
   const conn = useApp((s) => s.conn);
   const online = conn === 'online' || conn === 'replaying';
   // 草稿（文字 + 注释）按任务保存在 Gateway：先用本页内存里的，再用服务端读回来的补上（state/drafts.ts）
-  const [text, setText] = useState(() => localDraft(task.id)?.text ?? '');
+  const [text, setText] = useState(() => pendingDraftEdits(task.id)?.text ?? localDraft(task.id)?.text ?? '');
   const [sending, setSending] = useState(false);
   const [sendErr, setSendErr] = useState<ApiError | null>(null);
   const ta = useRef<HTMLTextAreaElement>(null);
   const ready = useRef(false);
   const [draftReady,setDraftReady]=useState(false);
+  const [draftError, setDraftError] = useState<ApiError | null>(null);
+  const [draftAttempt, setDraftAttempt] = useState(0);
+  const editedAttachments = useRef(false);
 
   // 对话里选中文字添加的注释：发送时附在消息后面（Annotations.tsx）
   const annos = useAnnotations(task.id);
@@ -60,24 +63,36 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
   useEffect(() => {
     let alive = true;
     ready.current = false;
+    setDraftError(null);
+    setDraftReady(false);
     void loadDraft(task.id).then(async (d) => {
       if (!alive) return;
       if(d?.expiredAttachments)toast('草稿中的附件已过期，请重新添加','attn');
-      if (d && !localDraft(task.id)) {
-        if (d.text) setText((t) => t || d.text);
-        if (d.annotations.length) restoreAnnotations(task.id, d.annotations);
-      }
       const saved = localDraft(task.id) ?? d;
-      if(saved?.attachments?.length)await attachments.restore(saved.attachments);
+      const edits = pendingDraftEdits(task.id);
+      if (saved) {
+        setText(edits?.text ?? saved.text);
+        restoreAnnotations(task.id, edits?.annotations ?? saved.annotations);
+      }
+      const ids = [...new Set([...(saved?.attachments ?? []), ...(edits?.attachments ?? [])])];
+      if(ids.length)await attachments.restore(ids);
       if(!alive)return;
       ready.current = true;setDraftReady(true);
-    });
+    }).catch(error => { if (alive) setDraftError(asApiError(error)); });
     // 注释改了（添加、评论、删除）也保存
-    const off = onAnnotationsChanged((id) => { if (id === task.id && ready.current) saveDraft(id, { text: ta.current?.value ?? '', annotations: draftAnnotations(id), attachments: attachmentIds.current }); });
+    const off = onAnnotationsChanged((id) => {
+      if (id !== task.id) return;
+      if (ready.current) saveDraft(id, { text: ta.current?.value ?? '', annotations: draftAnnotations(id), attachments: attachmentIds.current });
+      else keepDraftEdits(id, { annotations: draftAnnotations(id) });
+    });
     return () => { alive = false; off(); };
-  }, [task.id]);
+  }, [task.id, draftAttempt]);
   useEffect(() => {
     if (draftReady) saveDraft(task.id, { text, annotations: draftAnnotations(task.id), attachments: attachments.ids });
+    else if (!ready.current && (attachments.ids.length || editedAttachments.current)) {
+      editedAttachments.current = true;
+      keepDraftEdits(task.id, { attachments: attachments.ids });
+    }
   }, [task.id, text, attachments.ids.join(','),draftReady]);
 
   const working = busyStatuses.has(task.status);
@@ -157,6 +172,8 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
           </div>
         ) : null}
         {blocking && !working ? <div className="composer-error"><TaskError error={blocking} task={task} compact /></div> : null}
+        {draftError ? <div className="composer-error" role="alert">草稿载入失败，已保留原稿。{draftError.message}
+          <button type="button" className="btn sm" onClick={() => setDraftAttempt(n => n + 1)}>重新载入草稿</button></div> : null}
         {sendErr ? <div className="composer-error"><ErrorNotice error={sendErr} ctx={{ taskId: task.id, kind: task.agent, busy: working }} onDismiss={() => setSendErr(null)} onAction={() => setSendErr(null)} /></div> : null}
         {pending.length ? (
           <div className="pending-strip" role="status">
@@ -173,7 +190,10 @@ export function Composer({ task, pending, config, blocking }: { task: Task; pend
           <AnnotationChip taskId={task.id} />
           <label htmlFor="prompt" className="sr-only">给 Agent 发消息</label>
           <textarea id="prompt" ref={ta} value={text} disabled={finished || sending} placeholder={finished?'任务已结束，请新建任务继续。':placeholder} maxLength={100_000}
-            onChange={(e) => setText(e.target.value)}
+            onChange={(e) => {
+              if (!ready.current) keepDraftEdits(task.id, { text: e.target.value });
+              setText(e.target.value);
+            }}
             onKeyDown={(e) => {
               // 输入法组字时的回车不算发送
               if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); void send(); }

@@ -531,7 +531,7 @@ export const ServerFrame = z.discriminatedUnion('kind', [
 export type ServerFrame = z.infer<typeof ServerFrame>;
 
 // ---------- REST 请求体 ----------
-export const CreateProjectBody = z.object({ name: z.string().min(1).max(200), path: z.string().min(1).max(1000) });
+export const CreateProjectBody = z.object({ name: z.string().trim().min(1).max(200), path: z.string().min(1).max(1000) });
 export const CreateTaskBody = z.object({
   projectId: Id, groupId: Id.nullable().optional(), prompt: z.string().max(100_000),
   title: z.string().max(200).optional(), agent: AgentKind, model: z.string().nullable().optional(),
@@ -548,8 +548,8 @@ export const PatchTaskBody = z.object({
   /** 1.2 新增 */
   profileId: Id.nullable().optional(),
 });
-export const CreateGroupBody = z.object({ name: z.string().min(1).max(100) });
-export const PatchGroupBody = z.object({ name: z.string().min(1).max(100).optional(), ord: z.number().int().optional() });
+export const CreateGroupBody = z.object({ name: z.string().trim().min(1).max(100) });
+export const PatchGroupBody = z.object({ name: z.string().trim().min(1).max(100).optional(), ord: z.number().int().optional() });
 export const EventsQuery = z.object({ after: z.coerce.number().int().nonnegative().default(0), limit: z.coerce.number().int().min(1).max(2000).default(500) });
 /** 分页：游标而不是页码 */
 export const Page = <T extends z.ZodTypeAny>(item: T) => z.object({ items: z.array(item), nextCursor: z.string().nullable() });
@@ -647,7 +647,7 @@ export type LanPairingStatus = z.infer<typeof LanPairingStatus>;
 
 // ---------- 项目 ----------
 export const PatchProjectBody = z.object({
-  name: z.string().min(1).max(200).optional(),
+  name: z.string().trim().min(1).max(200).optional(),
   defaultAgent: AgentKind.nullable().optional(),
   ignoreGlobs: WorkspaceGlobs.optional(), carryGlobs: WorkspaceGlobs.optional(),
 });

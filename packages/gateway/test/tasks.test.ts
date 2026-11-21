@@ -16,6 +16,14 @@ async function task(projectId: string, prompt: string, groupId?: string) {
 }
 
 describe('项目', () => {
+  it('项目和分组拒绝只有空白的名称，批量更新中途失败保留原配置', async () => {
+    const p = await makeProject(t, token, '原始项目名');
+    expect((await t.api('POST', '/groups', { token, body: { name: '  ' } })).status).toBe(400);
+    expect((await t.api('PATCH', '/projects/' + p.id, { token, body: { name: '  ' } })).status).toBe(400);
+    t.gw.services.db.exec("CREATE TRIGGER reject_test_globs BEFORE UPDATE OF carry_globs ON projects BEGIN SELECT RAISE(ABORT, '模拟写入失败'); END");
+    expect(() => t.gw.services.projects.patch(p.id, { name: '不应保存', carryGlobs: [] })).toThrow('模拟写入失败');
+    expect(t.gw.services.projects.get(p.id).name).toBe('原始项目名');
+  });
   it('增删改查；路径重复 409；不存在的路径 400', async () => {
     const p = await makeProject(t, token, '跑酷游戏');
     expect((await t.api('GET', '/projects', { token })).json.items).toHaveLength(1);

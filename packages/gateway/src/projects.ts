@@ -38,12 +38,13 @@ export class ProjectService {
   }
 
   patch(id: string, body: PatchProjectBody): Project {
-    this.get(id);
-    if (body.name !== undefined) this.db.run('UPDATE projects SET name = ? WHERE id = ?', body.name.trim(), id);
-    if (body.defaultAgent !== undefined) this.db.run('UPDATE projects SET default_agent = ? WHERE id = ?', body.defaultAgent, id);
-    if (body.ignoreGlobs !== undefined) this.db.run('UPDATE projects SET ignore_globs=? WHERE id=?', JSON.stringify(body.ignoreGlobs), id);
-    if (body.carryGlobs !== undefined) this.db.run('UPDATE projects SET carry_globs=? WHERE id=?', JSON.stringify(body.carryGlobs), id);
-    return this.get(id);
+    return this.db.tx(() => {
+      if (body.name !== undefined) this.db.run('UPDATE projects SET name = ? WHERE id = ?', body.name.trim(), id);
+      if (body.defaultAgent !== undefined) this.db.run('UPDATE projects SET default_agent = ? WHERE id = ?', body.defaultAgent, id);
+      if (body.ignoreGlobs !== undefined) this.db.run('UPDATE projects SET ignore_globs=? WHERE id=?', JSON.stringify(body.ignoreGlobs), id);
+      if (body.carryGlobs !== undefined) this.db.run('UPDATE projects SET carry_globs=? WHERE id=?', JSON.stringify(body.carryGlobs), id);
+      return this.get(id);
+    });
   }
 
   /** 只移除工作台里的记录，不删除磁盘上的文件；项目下还有任务时拒绝 */
@@ -74,21 +75,21 @@ export class GroupService {
   }
 
   patch(id: string, body: { name?: string | undefined; ord?: number | undefined }): Group {
-    this.get(id);
-    if (body.name !== undefined) this.db.run('UPDATE task_groups SET name = ? WHERE id = ?', body.name.trim(), id);
-    if (body.ord !== undefined) this.db.run('UPDATE task_groups SET ord = ? WHERE id = ?', body.ord, id);
-    return this.get(id);
+    return this.db.tx(() => {
+      if (body.name !== undefined) this.db.run('UPDATE task_groups SET name = ? WHERE id = ?', body.name.trim(), id);
+      if (body.ord !== undefined) this.db.run('UPDATE task_groups SET ord = ? WHERE id = ?', body.ord, id);
+      return this.get(id);
+    });
   }
 
   /** 删除分组：任务不删除，groupId 置空，并为每个受影响的任务推送 task.updated */
   delete(id: string) {
     this.get(id);
-    const affected = this.db.tx(() => {
+    this.db.tx(() => {
       const ids = this.db.all<{ id: string }>('SELECT id FROM tasks WHERE group_id = ?', id).map((r) => r.id);
       this.db.run('UPDATE tasks SET group_id = NULL, updated_at = ? WHERE group_id = ?', now(), id);
       this.db.run('DELETE FROM task_groups WHERE id = ?', id);
-      return ids;
+      for (const taskId of ids) this.tasks.emitUpdated(taskId);
     });
-    for (const t of affected) this.tasks.emitUpdated(t);
   }
 }

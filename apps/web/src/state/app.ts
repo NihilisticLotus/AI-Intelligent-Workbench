@@ -236,6 +236,7 @@ async function resyncAfterReconnect() {
 }
 
 async function resetAndRestart() {
+  historyGeneration++;
   imageCache.clear();
   ws?.stop();
   ws = null;
@@ -247,6 +248,7 @@ async function resetAndRestart() {
 }
 
 function toUnpaired(initialPairCode?: string) {
+  historyGeneration++;
   imageCache.clear();
   ws?.stop();
   ws = null;
@@ -290,21 +292,26 @@ export async function finishLanPairing(result: Extract<LanPairingStatus, { statu
 }
 
 // ---------- 任务历史 ----------
+let historyGeneration = 0;
 export async function loadHistory(taskId: string) {
+  const generation = historyGeneration;
   const st = appStore.get().history[taskId];
   if (st === 'loading' || st === 'done') return;
   set((s) => ({ ...s, history: { ...s.history, [taskId]: 'loading' } }));
   try {
     let after = 0;
-    for (let i = 0; i < 200; i++) {
+    for (;;) {
       const page = await api.taskEvents(taskId, after, 500);
+      if (generation !== historyGeneration) return;
       if (page.items.length) set((s) => ({ ...s, ...applyEvents(s, page.items, 'history') }));
       // 按原始条数和 seq 翻页：跳过的（不认识的）事件不会让分页卡住
-      if (page.lastSeq === null || page.rawCount < 500) break;
+      if (page.nextCursor === null) break;
+      if (page.lastSeq === null || page.lastSeq <= after) throw new Error('任务历史分页没有前进，请重新载入');
       after = page.lastSeq;
     }
     set((s) => ({ ...s, history: { ...s.history, [taskId]: 'done' } }));
   } catch (e) {
+    if (generation !== historyGeneration) return;
     set((s) => ({ ...s, history: { ...s.history, [taskId]: 'error' } }));
     throw e;
   }

@@ -49,6 +49,15 @@ describe('applyEvent', () => {
     s=applyEvent(s,E.updated(9,task()));s=mergeRestTask(s,task());s=applyTaskSnapshot(s,[task()],9);
     s=applyEvent(s,{seq:8,ts:8,taskId:'t1',sessionId:'s1',type:'approval.requested',data:{approval:approval({id:'late'})}});
     expect(s.tasks.t1).toBeUndefined();expect(s.approvals.late).toBeUndefined();
+    s = applyEvents(s, [E.delta(3, '已删除'), E.delta(4, '旧内容')], 'history');
+    expect(s.logs.t1).toBeUndefined();
+  });
+  it('整页历史与实时事件交错时保留已收到的正文和最新任务状态', () => {
+    const live = applyEvents(emptyCore(), [E.delta(2, '实时'), E.updated(6, task({ status: 'review' }))]);
+    const page = [E.delta(1, '甲'), E.delta(2, '重复'), E.updated(4, task()), E.delta(5, '乙')];
+    const merged = applyEvents(live, page, 'history');
+    expect(merged).toEqual(page.reduce((s, event) => applyEvent(s, event, 'history'), live));
+    expect(applyEvents(merged, page, 'history')).toBe(merged);
   });
   it('同一 seq 不重复应用', () => {
     let s = emptyCore();

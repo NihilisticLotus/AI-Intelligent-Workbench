@@ -21,6 +21,11 @@ export type Route =
 
 export function parseHash(hash: string): Route {
   const h = hash.replace(/^#/, '');
+  try { return routeFromFragment(h); }
+  catch (error) { if (error instanceof URIError) return { page: 'home' }; throw error; }
+}
+
+function routeFromFragment(h: string): Route {
   if (h === '/new' || h.startsWith('/new?')) {
     const params = new URLSearchParams(h.split('?').slice(1).join('?')), preset: NewTaskPreset = {};
     for (const key of ['projectId', 'model', 'prompt'] as const) if (params.has(key)) preset[key] = params.get(key)!;

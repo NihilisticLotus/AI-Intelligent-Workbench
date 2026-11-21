@@ -58,6 +58,22 @@ export interface HttpClientOptions {
 
 type Query = Record<string, string | number | undefined | null>;
 
+async function allPages<T>(read: (cursor: string | null) => Promise<{ items: T[]; nextCursor: string | null }>): Promise<T[]> {
+  const result: T[] = [];
+  const seen = new Set<string>();
+  let cursor: string | null = null;
+  do {
+    const page = await read(cursor);
+    result.push(...page.items);
+    cursor = page.nextCursor;
+    if (cursor !== null) {
+      if (seen.has(cursor)) throw new ApiRequestError({ code: ClientErrorCode.BadResponse, message: '列表分页没有前进，请刷新后重试', actions: [] });
+      seen.add(cursor);
+    }
+  } while (cursor !== null);
+  return result;
+}
+
 /** 列表接口统一是协议里的分页格式 { items, nextCursor } */
 const listOf = <T extends z.ZodTypeAny>(item: T) => ({
   parse(raw: unknown): { items: z.infer<T>[]; nextCursor: string | null } {
@@ -269,15 +285,7 @@ export class HttpClient {
 
   /** 任务列表：按游标翻完所有页 */
   async tasks(query: { projectId?: string; groupId?: string } = {}): Promise<Task[]> {
-    const all: Task[] = [];
-    let cursor: string | null = null;
-    for (let i = 0; i < 50; i++) {
-      const page: { items: Task[]; nextCursor: string | null } = await this.request('GET', '/tasks', { query: { ...query, cursor }, parse: listOf(Task) });
-      all.push(...page.items);
-      if (!page.nextCursor) break;
-      cursor = page.nextCursor;
-    }
-    return all;
+    return allPages<Task>(cursor => this.request('GET', '/tasks', { query: { ...query, cursor }, parse: listOf(Task) }));
   }
   task(id: string) { return this.request('GET', `/tasks/${encodeURIComponent(id)}`, { parse: oneOf(Task) }); }
   moveTaskQueue(id: string, position: number) { return this.request('POST', `/tasks/${encodeURIComponent(id)}/queue`, { body: { position }, parse: oneOf(Task) }); }
@@ -326,15 +334,7 @@ export class HttpClient {
   }
   /** 账号列表：按游标翻完所有页 */
   async profiles(agent?: AgentKind): Promise<AgentProfile[]> {
-    const all: AgentProfile[] = [];
-    let cursor: string | null = null;
-    for (let i = 0; i < 20; i++) {
-      const page: { items: AgentProfile[]; nextCursor: string | null } = await this.request('GET', '/profiles', { query: { agent, cursor }, parse: listOf(AgentProfile) });
-      all.push(...page.items);
-      if (!page.nextCursor) break;
-      cursor = page.nextCursor;
-    }
-    return all;
+    return allPages<AgentProfile>(cursor => this.request('GET', '/profiles', { query: { agent, cursor }, parse: listOf(AgentProfile) }));
   }
   /** apiKey 只在这个请求体里出现一次；响应里只有 hasSecret 和末 4 位 */
   createProfile(body: CreateProfileBody) { return this.request('POST', '/profiles', { body, parse: oneOf(AgentProfile) }); }

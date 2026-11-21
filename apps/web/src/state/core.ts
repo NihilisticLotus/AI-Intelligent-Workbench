@@ -34,15 +34,20 @@ export function insertBySeq(list: readonly EventEnvelope[] | undefined, ev: Even
   const n = arr.length;
   // 快速路径：绝大多数事件是按顺序追加的
   if (n === 0 || arr[n - 1]!.seq < ev.seq) return [...arr, ev];
-  let lo = 0;
-  let hi = n;
-  while (lo < hi) {
-    const mid = (lo + hi) >> 1;
-    if (arr[mid]!.seq < ev.seq) lo = mid + 1;
-    else hi = mid;
-  }
+  const lo = firstBySeq(arr, ev.seq);
   if (arr[lo]?.seq === ev.seq) return arr; // 重复
   return [...arr.slice(0, lo), ev, ...arr.slice(lo)];
+}
+
+function firstBySeq(events: readonly EventEnvelope[], seq: number) {
+  let lo = 0;
+  let hi = events.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (events[mid]!.seq < seq) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
 }
 
 export type EventSource = 'ws' | 'history';
@@ -54,6 +59,9 @@ export function applyEvent(s: CoreState, ev: EventEnvelope, source: EventSource 
   const wsSeq = source === 'ws' ? Math.max(s.wsSeq, ev.seq) : s.wsSeq;
   let next: CoreState;
   if (ev.taskId) {
+    if (!s.tasks[ev.taskId] && (s.entitySeq['t:' + ev.taskId] ?? -1) >= ev.seq) {
+      return wsSeq === s.wsSeq ? s : { ...s, wsSeq };
+    }
     const old = s.logs[ev.taskId];
     const log = insertBySeq(old, ev);
     if (log === old) return wsSeq === s.wsSeq ? s : { ...s, wsSeq };
@@ -67,9 +75,31 @@ export function applyEvent(s: CoreState, ev: EventEnvelope, source: EventSource 
 }
 
 export function applyEvents(s: CoreState, events: readonly EventEnvelope[], source: EventSource = 'ws'): CoreState {
+  const taskId = events[0]?.taskId;
+  if (source === 'history' && taskId && events.length > 1 && (s.tasks[taskId] || s.entitySeq['t:' + taskId] === undefined)
+    && events.every((event, i) => event.taskId === taskId && event.type !== 'task.deleted' && (!i || event.seq > events[i - 1]!.seq))) {
+    return mergeHistory(s, taskId, events);
+  }
   let cur = s;
   for (const ev of events) cur = applyEvent(cur, ev, source);
   return cur;
+}
+
+/** 服务端一页历史已按序号排序。整页只合并一次，保留重叠处先收到的事件。 */
+function mergeHistory(s: CoreState, taskId: string, page: readonly EventEnvelope[]): CoreState {
+  const previous = s.logs[taskId] ?? [];
+  let at = firstBySeq(previous, page[0]!.seq);
+  const merged = previous.slice(0, at);
+  let state = s;
+  let changed = false;
+  for (const event of page) {
+    while (at < previous.length && previous[at]!.seq < event.seq) merged.push(previous[at++]!);
+    if (previous[at]?.seq === event.seq) { merged.push(previous[at++]!); continue; }
+    merged.push(event);
+    state = applyEntity(state, event);
+    changed = true;
+  }
+  return changed ? { ...state, logs: { ...state.logs, [taskId]: merged.concat(previous.slice(at)) } } : s;
 }
 
 function applyEntity(s: CoreState, ev: EventEnvelope): CoreState {

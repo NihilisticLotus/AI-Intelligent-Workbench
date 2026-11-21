@@ -36,6 +36,20 @@ async function setup() {
 }
 
 describe('账号 REST', () => {
+  it('兼容账号创建和更换密钥遇到写入失败时整次回退', async () => {
+    const { token }=await setup(), db=t!.gw.services.db;
+    const create=()=>t!.api('POST','/profiles',{token,body:{agent:'claude',name:'合成配置',kind:'apiKey',apiKey:KEY}});
+    db.exec("CREATE TRIGGER fail_create BEFORE INSERT ON agent_profiles WHEN NEW.secret_id IS NOT NULL BEGIN SELECT RAISE(ABORT,'模拟保存失败'); END");
+    expect((await create()).status).toBe(500);
+    expect(db.all('SELECT id FROM secrets')).toHaveLength(0);
+    db.exec('DROP TRIGGER fail_create');
+    const profile=(await create()).json as AgentProfile, before=db.all('SELECT id FROM secrets');
+    db.exec("CREATE TRIGGER fail_default BEFORE UPDATE OF is_default ON agent_profiles WHEN NEW.is_default=1 BEGIN SELECT RAISE(ABORT,'模拟默认账号保存失败'); END");
+    const reply=await t!.api('PATCH','/profiles/'+profile.id,{token,body:{name:'新名称',apiKey:'仅用于离线测试的替换值',isDefault:true}});
+    expect(reply.status).toBe(500);
+    expect(db.all('SELECT id FROM secrets')).toEqual(before);
+    expect(t!.gw.services.profiles.get(profile.id)).toEqual(profile);
+  });
   it('自定义账号的手填模型不被其他账号或通用 ACP 缓存覆盖，未探测账号不借用默认目录', async () => {
     const { token } = await setup();
     const models=[{id:'glm',name:'GLM',contextWindow:null,vision:false}];

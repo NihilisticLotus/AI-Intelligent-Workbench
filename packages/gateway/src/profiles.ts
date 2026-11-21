@@ -147,19 +147,20 @@ export class ProfileService {
     const id = newId('pf');
     // 新的订阅账号默认用独立的配置目录（第二个订阅账号）；API Key 和自定义地址沿用 Agent 的配置目录（保留设置、技能和 MCP）
     const configDir = body.configDir ?? (body.kind === 'subscription' ? 'isolated' : 'shared');
-    const secret = body.apiKey ? await this.secrets.save(body.apiKey) : null;
-    const t = now();
-    this.db.run(
-      `INSERT INTO agent_profiles (id, agent, name, kind, config_dir, base_url, auth_header, models_json, secret_id, is_default, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
-      id, body.agent, body.name, body.kind, configDir, body.kind === 'customEndpoint' ? body.baseUrl ?? null : null,
-      body.kind === 'customEndpoint' ? body.authHeader ?? 'x-api-key' : null,
-      body.models ? JSON.stringify(body.models) : null, secret?.id ?? null, t, t,
-    );
-    if (configDir === 'isolated') mkdirSync(this.dirOf(id), { recursive: true });
-    // 审计详情里只写账号 ID 和名称
-    this.o.audit(deviceId, 'profile.create', `${id} ${body.name}`);
-    return this.get(id);
+    const persistSecret = body.apiKey ? await this.secrets.prepare(body.apiKey) : null;
+    return this.db.tx(() => {
+      const t = now();
+      this.db.run(
+        `INSERT INTO agent_profiles (id, agent, name, kind, config_dir, base_url, auth_header, models_json, secret_id, is_default, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)`,
+        id, body.agent, body.name, body.kind, configDir, body.kind === 'customEndpoint' ? body.baseUrl ?? null : null,
+        body.kind === 'customEndpoint' ? body.authHeader ?? 'x-api-key' : null,
+        body.models ? JSON.stringify(body.models) : null, persistSecret?.().id ?? null, t, t,
+      );
+      this.o.audit(deviceId, 'profile.create', `${id} ${body.name}`);
+      if (configDir === 'isolated') mkdirSync(this.dirOf(id), { recursive: true });
+      return this.get(id);
+    });
   }
 
   async patch(id: string, body: PatchProfileBody, deviceId: string | null): Promise<AgentProfile> {
@@ -178,27 +179,26 @@ export class ProfileService {
     }
     if (body.authHeader !== undefined) { sets.push('auth_header = ?'); params.push(body.authHeader); }
     if (body.models !== undefined) { sets.push('models_json = ?'); params.push(JSON.stringify(body.models)); }
-    let oldSecret: string | null = null;
-    if (body.apiKey !== undefined) {
-      if (r.kind === 'subscription') throw Errors.badRequest('订阅登录的账号不需要 API Key');
-      const s = await this.secrets.save(body.apiKey);
-      sets.push('secret_id = ?'); params.push(s.id);
-      oldSecret = r.secret_id;
-      this.o.audit(deviceId, 'profile.secret', `${id} ${r.name}`);
-    }
-    if (sets.length) {
-      sets.push('updated_at = ?'); params.push(now());
-      this.db.run(`UPDATE agent_profiles SET ${sets.join(', ')} WHERE id = ?`, ...params, id);
-    }
-    this.secrets.delete(oldSecret);
-    if (body.isDefault) {
-      this.db.tx(() => {
+    if (body.apiKey !== undefined && r.kind === 'subscription') throw Errors.badRequest('订阅登录的账号不需要 API Key');
+    const persistSecret = body.apiKey !== undefined ? await this.secrets.prepare(body.apiKey) : null;
+    return this.db.tx(() => {
+      const current = this.row(id);
+      if (persistSecret) {
+        sets.push('secret_id = ?'); params.push(persistSecret().id);
+        this.o.audit(deviceId, 'profile.secret', `${id} ${current.name}`);
+      }
+      if (sets.length) {
+        sets.push('updated_at = ?'); params.push(now());
+        this.db.run(`UPDATE agent_profiles SET ${sets.join(', ')} WHERE id = ?`, ...params, id);
+      }
+      if (persistSecret) this.secrets.delete(current.secret_id);
+      if (body.isDefault) {
         this.db.run('UPDATE agent_profiles SET is_default = 0 WHERE agent = ? AND is_default = 1', r.agent);
         this.db.run('UPDATE agent_profiles SET is_default = 1, updated_at = ? WHERE id = ?', now(), id);
-      });
-    }
-    if (body.configDir === 'isolated') mkdirSync(this.dirOf(id), { recursive: true });
-    return this.get(id);
+      }
+      if (body.configDir === 'isolated') mkdirSync(this.dirOf(id), { recursive: true });
+      return this.get(id);
+    });
   }
 
   /** 删除：有运行中的会话时拒绝；引用它的任务改用默认账号；isolated 目录保留（避免误删会话记录） */
@@ -212,9 +212,9 @@ export class ProfileService {
       this.db.run('DELETE FROM agent_profiles WHERE id = ?', id);
       this.db.run('DELETE FROM agent_caps WHERE profile_id = ?', id);
       if (r.is_default) this.db.run('UPDATE agent_profiles SET is_default = 1 WHERE id = ?', this.ensureLocal(r.agent).id);
+      this.secrets.delete(r.secret_id);
+      this.o.audit(deviceId, 'profile.delete', `${id} ${r.name}`);
     });
-    this.secrets.delete(r.secret_id);
-    this.o.audit(deviceId, 'profile.delete', `${id} ${r.name}`);
     return { keptDir: r.config_dir === 'isolated' ? this.dirOf(id) : null };
   }
 

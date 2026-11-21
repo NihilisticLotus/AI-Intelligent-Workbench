@@ -42,25 +42,28 @@ export class IndependentCatalog {
   }
   listServices(): IndependentService[] { return this.db.all('SELECT id FROM independent_services ORDER BY created_at,id').map((r) => this.getService(String(r.id))); }
   private expectRevision(actual: number, expected: number) { if (actual !== expected) throw Errors.conflict('配置已在其他操作中改变，请刷新后重试'); }
-  private async saveSecret(key: string): Promise<string> {
-    try { return (await this.secrets.save(key)).id; }
-    catch { throw Errors.secretUnavailable('密钥保存失败，请重新填写或检查本机安全存储'); }
+  private async prepareSecret(key: string) {
+    const unavailable = () => Errors.secretUnavailable('密钥保存失败，请重新填写或检查本机安全存储');
+    const persist = await this.secrets.prepare(key).catch(() => { throw unavailable(); });
+    return () => {
+      try { return persist().id; } catch { throw unavailable(); }
+    };
   }
 
   async createService(input: CreateIndependentServiceBody, deviceId: string | null = null): Promise<IndependentService> {
     const body = CreateIndependentServiceBody.parse(input);
     if (body.authentication === 'none' && body.apiKey !== undefined) throw Errors.badRequest('无认证服务不能同时保存密钥');
-    const secretId = body.apiKey ? await this.saveSecret(body.apiKey) : null;
+    const persistSecret = body.apiKey ? await this.prepareSecret(body.apiKey) : null;
     const id = newId('isv');
     try {
       return this.change({ scope: 'service', action: 'created', serviceId: id, modelId: null }, () => {
         if (this.listServices().length >= 100) throw Errors.badRequest('最多保存 100 个 API 服务');
+        const secretId = persistSecret?.() ?? null;
         const at = now();
         this.db.run('INSERT INTO independent_services(id,config_json,revision,config_revision,secret_id,created_at,updated_at) VALUES (?,?,1,1,?,?,?)', id, JSON.stringify(serviceConfig(body)), secretId, at, at);
         return this.getService(id);
       }, deviceId);
     } catch (error) {
-      this.secrets.delete(secretId);
       if (error instanceof AppError) throw error;
       throw Errors.internal('API 服务保存失败');
     }
@@ -71,19 +74,18 @@ export class IndependentCatalog {
     this.expectRevision(before.revision, body.expectedRevision);
     const config = serviceConfig({ ...before, ...body });
     if (config.authentication === 'none' && body.apiKey != null) throw Errors.badRequest('无认证服务不能同时保存密钥');
-    const newSecret = body.apiKey ? await this.saveSecret(body.apiKey) : null;
+    const persistSecret = body.apiKey ? await this.prepareSecret(body.apiKey) : null;
     try {
       return this.change({ scope: 'service', action: 'updated', serviceId: id, modelId: null }, () => {
         const old = this.getService(id); this.expectRevision(old.revision, body.expectedRevision);
         const row = this.row(id); const previousSecret = row.secret_id as string | null;
-        const secretId = config.authentication === 'none' || body.apiKey === null ? null : newSecret ?? previousSecret;
+        const secretId = config.authentication === 'none' || body.apiKey === null ? null : persistSecret?.() ?? previousSecret;
         const connectionChanged = body.apiKey !== undefined || ['protocol', 'baseUrl', 'authentication', 'apiVersion', 'providerId', 'plan'].some((key) => config[key as keyof typeof config] !== old[key as keyof typeof config]);
         this.db.run('UPDATE independent_services SET config_json=?,revision=revision+1,config_revision=config_revision+?,secret_id=?,updated_at=? WHERE id=?', JSON.stringify(config), connectionChanged ? 1 : 0, secretId, now(), id);
         if (previousSecret !== secretId) this.secrets.delete(previousSecret);
         return this.getService(id);
       }, deviceId);
     } catch (error) {
-      this.secrets.delete(newSecret);
       if (error instanceof AppError) throw error;
       throw Errors.internal('API 服务修改失败');
     }

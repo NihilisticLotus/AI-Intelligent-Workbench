@@ -93,12 +93,20 @@ export class SecretService {
   constructor(private db: Db, readonly store: SecretStore) {}
 
   async save(plain: string): Promise<{ id: string; hint: string }> {
+    const persist = await this.prepare(plain);
+    return persist();
+  }
+
+  /** 加密可以等待系统响应，密文与引用它的配置在调用方的同步事务中入库。 */
+  async prepare(plain: string) {
     if (!this.store.available) throw Errors.secretUnavailable('这台电脑上不能保存密钥', '第一阶段只支持在 Windows 上保存 API Key');
     const blob = await this.store.encrypt(plain);
     const id = newId('sec');
     const hint = secretHint(plain);
-    this.db.run('INSERT INTO secrets (id, scheme, blob, hint, created_at) VALUES (?, ?, ?, ?, ?)', id, this.store.scheme, blob, hint, now());
-    return { id, hint };
+    return () => {
+      this.db.run('INSERT INTO secrets (id, scheme, blob, hint, created_at) VALUES (?, ?, ?, ?, ?)', id, this.store.scheme, blob, hint, now());
+      return { id, hint };
+    };
   }
 
   async read(id: string): Promise<string | null> {

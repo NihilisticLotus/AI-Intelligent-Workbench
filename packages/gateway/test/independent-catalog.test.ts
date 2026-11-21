@@ -32,6 +32,23 @@ afterEach(async () => {
 });
 
 describe('独立服务与模型目录', () => {
+  it('创建与替换服务密钥时，其他连接始终只看见已关联的密文', async () => {
+    const {catalog,db,file}=setup(), reader=new DatabaseSync(file,{readOnly:true});
+    const observed:number[]=[];
+    const run=db.run.bind(db), spy=vi.spyOn(db,'run').mockImplementation((sql,...args)=>{
+      const result=run(sql,...args);
+      if(sql.startsWith('INSERT INTO secrets')) {
+        const row=reader.prepare('SELECT count(*) AS n FROM secrets s WHERE NOT EXISTS(SELECT 1 FROM independent_services i WHERE i.secret_id=s.id)').get()!;
+        observed.push(Number(row.n));
+      }
+      return result;
+    });
+    try {
+      const s=await catalog.createService(config({authentication:'api_key',apiKey:'仅用于离线测试的初始值'}));
+      await catalog.patchService(s.id,{expectedRevision:s.revision,apiKey:'仅用于离线测试的替换值'});
+      expect(observed).toEqual([0,0]);
+    } finally {spy.mockRestore();reader.close();}
+  });
   it('同配置重新绑定保留完整身份，修订变化仍建立新绑定并拒绝旧快照', async () => {
     const { catalog, db } = setup(); seed(db);
     const service = await catalog.createService(config()); const model = catalog.createModel(service.id, { remoteModelId: 'fixture', name: '模型' });

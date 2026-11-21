@@ -184,3 +184,4 @@
 | [ISSUE-0176](ISSUE-0176-queue-order-notification.md) | 调序保存失败仍改变等待顺序 | fixed | bug | 2026-11-21 | 2026-11-21 |
 | [ISSUE-0177](ISSUE-0177-change-target-selection.md) | 工具记录可能打开并允许还原另一个文件 | fixed | bug | 2026-11-21 | 2026-11-21 |
 | [ISSUE-0178](ISSUE-0178-secret-reference-transaction.md) | 配置保存中断可能留下无归属的密文 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0179](ISSUE-0179-lan-uac-preflight.md) | 局域网开关缺少 Windows 无法弹出 UAC 时的处理约定 | fixed | 验收未通过 | 2026-11-21 | 2026-11-22 |

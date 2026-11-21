@@ -50,6 +50,16 @@ describe('网页设备访问', () => {
     expect(networkChoice({ ...remoteState, interfaces: [network, other], selected: other }, network)).toEqual(other);
   });
 
+  it('错误栏已显示的原因只读一次，单独或不同的网络状态仍可见', () => {
+    const reason = 'Windows 已关闭 UAC';
+    const props = { state: { ...lan, unavailableReason: reason }, choice: network, remote: false,
+      busy: false, onSelect: vi.fn(), onToggle: vi.fn(), onUpdate: vi.fn() };
+    const controls = (operationError?: string) => renderToStaticMarkup(createElement(LanControls, { ...props, operationError }));
+    expect(controls(reason)).not.toContain(reason);
+    expect(controls()).toContain(reason);
+    expect(controls('其他操作失败')).toContain(reason);
+  });
+
   it('启动时没能恢复的局域网仍显示为开启，开关用于关闭', () => {
     const props = { busy: false, onSelect: vi.fn(), onToggle: vi.fn(), onUpdate: vi.fn() };
     const pendingState: LanState = { ...lan, requested: true, selected: network, firewall: 'mismatch', unavailableReason: '防火墙规则需要更新，请在设备与访问中检查' };

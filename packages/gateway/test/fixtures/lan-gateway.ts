@@ -12,6 +12,9 @@ export async function startLanGateway(extra: GatewayOptions = {}, dataDir?: stri
       supported: true,
       listInterfaces: () => [{ name: LAN_SELECTION.name, address: LAN_ALIAS }],
       async execute(cmd) {
+        if (cmd.kind === 'uac-check') return { status: 'ok', stdout: JSON.stringify({
+          enabled: 1, interactive: true, elevated: false, adminGroup: true, adminPolicy: 5, userPolicy: 3,
+        }) };
         if (cmd.kind === 'network-profile') return { status: 'ok', stdout: JSON.stringify([{ name: LAN_SELECTION.name, category: 'Private' }]) };
         if (cmd.kind === 'firewall-query') return { status: 'ok', stdout: JSON.stringify(rule ? [rule] : []) };
         const args = cmd.env?.AIC_LAN_RULE_ARGS ?? '';

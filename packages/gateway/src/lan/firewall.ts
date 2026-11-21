@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import type { LanFirewallState } from '@aic/protocol';
 import { Errors } from '../util';
+import { uacProblem } from './uac';
 import type { LanExecutor } from './windows-executor';
 
 export interface FirewallTarget {
@@ -81,6 +82,8 @@ export class LanFirewall {
   }
 
   async change(action: 'add' | 'set' | 'delete', target: FirewallTarget | null = null): Promise<void> {
+    const problem = await uacProblem(this.execute);
+    if (problem) throw Errors.conflict(action === 'delete' ? `${problem} 局域网已关闭，防火墙规则待清理。` : problem);
     // Start-Process 直接启动 netsh；每个参数作为一个 Windows 命令行参数，网卡名不参与命令。
     const args = firewallChangeArgs(this.name, action, target).map((arg) => `"${arg}"`).join(' ');
     const result = await this.execute({

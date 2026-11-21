@@ -2,7 +2,7 @@ import { execFile } from 'node:child_process';
 import path from 'node:path';
 
 export type LanCommand = {
-  kind: 'network-profile' | 'firewall-query' | 'firewall-change';
+  kind: 'network-profile' | 'firewall-query' | 'uac-check' | 'firewall-change';
   script: string;
   timeoutMs: number;
   env?: Record<string, string>;

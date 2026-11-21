@@ -16,6 +16,7 @@ const address = '192.168.7.4';
 const alias = '127.0.0.2';
 const name = '家庭 Wi-Fi';
 const program = 'C:\\Program Files\\nodejs\\node.exe';
+const interactiveUac = { enabled: 1, interactive: true, elevated: false, adminGroup: true, adminPolicy: 5, userPolicy: 3 };
 const rule = {
   address, port: '17890', program, remoteAddress: 'LocalSubnet', profiles: 2, protocol: 6, direction: 1, action: 1, edge: false, enabled: true,
 };
@@ -104,6 +105,7 @@ describe('局域网设置接口', () => {
     const calls: LanCommand[] = [];
     let installed: unknown[] = [];
     let changeResult: LanCommandResult = { status: 'ok', stdout: '' };
+    let uacResult: LanCommandResult = { status: 'ok', stdout: JSON.stringify(interactiveUac) };
     let category = initialCategory;
     let present = true;
     let hold: (() => Promise<void>) | undefined;
@@ -112,6 +114,7 @@ describe('局域网设置接口', () => {
       supported: true, program, listInterfaces: () => present ? [{ name, address: alias }] : [],
       execute: async (cmd: LanCommand): Promise<LanCommandResult> => {
         calls.push(cmd);
+        if (cmd.kind === 'uac-check') return uacResult;
         if (cmd.kind === 'network-profile') {
           const stdout = JSON.stringify([{ name, category }]);
           const pause = hold;
@@ -141,6 +144,10 @@ describe('局域网设置接口', () => {
         return { arrived, release };
       },
       setChangeResult: (value: LanCommandResult) => { changeResult = value; },
+      setUac: (patch: Partial<typeof interactiveUac>) => {
+        uacResult = { status: 'ok', stdout: JSON.stringify({ ...interactiveUac, ...patch }) };
+      },
+      setUacResult: (result: LanCommandResult) => { uacResult = result; },
       setCategory: (value: string) => { category = value; },
       setPresent: (value: boolean) => { present = value; },
       setRules: (value: unknown[]) => { installed = value; },
@@ -188,6 +195,47 @@ describe('局域网设置接口', () => {
       expect(result.json.message).toContain(expected);
       expect((await gw.api('GET', '/access/lan', { token })).json).toMatchObject({ enabled: false, requested: false, firewall: 'missing' });
     }
+  });
+
+  it('点击开启才核对 UAC，无法交互时解释原因且不写规则', async () => {
+    const { gw, token, body, calls, setUac, setUacResult } = await setup();
+    await gw.api('GET', '/access/lan', { token });
+    expect(calls.some(call => call.kind === 'uac-check')).toBe(false);
+    for (const [patch, reason] of [
+      [{ enabled: 0 }, '已关闭 UAC'], [{ elevated: true }, '普通权限'],
+      [{ interactive: false }, '交互式桌面'], [{ adminPolicy: 0 }, '不提示'],
+      [{ adminGroup: false, userPolicy: 0 }, '拒绝提升'], [{ adminGroup: false, userPolicy: 9 }, '无法确认'],
+    ] as const) {
+      setUac(patch);
+      const reply = await gw.api('PUT', '/access/lan', { token, body });
+      expect(reply.status).toBe(409);
+      expect(reply.json.message).toContain(reason);
+      expect((await gw.api('GET', '/access/lan', { token })).json).toMatchObject({
+        enabled: false, requested: false, firewall: 'missing',
+      });
+    }
+    for (const result of [{ status: 'failed' }, { status: 'ok', stdout: '{' }, { status: 'ok', stdout: '{}' }] as const) {
+      setUacResult(result);
+      expect((await gw.api('PUT', '/access/lan', { token, body })).json.message).toContain('无法确认');
+    }
+    expect(calls.some(call => call.kind === 'firewall-change')).toBe(false);
+  });
+
+  it('普通用户按自己的提示策略开启，关闭时 UAC 不可用先断开且保留清理入口', async () => {
+    const { gw, token, body, calls, setUac } = await setup();
+    setUac({ adminGroup: false, adminPolicy: 0, userPolicy: 3 });
+    expect((await gw.api('PUT', '/access/lan', { token, body })).json.enabled).toBe(true);
+    setUac({ enabled: 0 });
+    const reply = await gw.api('PUT', '/access/lan', { token, body: { enabled: false } });
+    expect(reply.status).toBe(409);
+    expect(reply.json.message).toContain('规则待清理');
+    expect((await gw.api('GET', '/access/lan', { token })).json).toMatchObject({
+      enabled: false, requested: false, firewall: 'mismatch',
+    });
+    expect(gw.gw.services.lan.activeAddress()).toBeNull();
+    expect(calls.filter(call => call.kind === 'firewall-change')).toHaveLength(1);
+    setUac({});
+    expect((await gw.api('POST', '/access/lan/firewall', { token })).json).toMatchObject({ enabled: false, firewall: 'missing' });
   });
 
   it('非回环来源可读状态，不能保存设置或操作防火墙', async () => {

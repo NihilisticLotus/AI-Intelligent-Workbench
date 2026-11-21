@@ -15,13 +15,14 @@ interface LanControlsProps {
   state: LanState;
   choice: LanInterface | null;
   remote: boolean;
+  operationError?: string;
   busy: boolean;
   onSelect: (choice: LanInterface) => void;
   onToggle: () => void;
   onUpdate: () => void;
 }
 
-export function LanControls({ state, choice, remote, busy, onSelect, onToggle, onUpdate }: LanControlsProps) {
+export function LanControls({ state, choice, remote, busy, operationError, onSelect, onToggle, onUpdate }: LanControlsProps) {
   const selectedIndex = state.interfaces.findIndex((item) => item.name === choice?.name && item.address === choice?.address);
   const on = lanSwitchOn(state);
   const leftover = !on && state.firewall === 'mismatch';
@@ -49,7 +50,8 @@ export function LanControls({ state, choice, remote, busy, onSelect, onToggle, o
           {choice?.category === 'domain' || choice?.category === 'unknown' ? <p className="lan-note">只可在确认是专用网络的网卡上开启。</p> : null}
         </div>
       </div>}
-    {state.unavailableReason ? <p className="lan-note" role="status">{state.unavailableReason}</p> : null}
+    {state.unavailableReason && state.unavailableReason !== operationError
+      ? <p className="lan-note" role="status">{state.unavailableReason}</p> : null}
     <div className="set-row">
       <span className="lbl">Windows 防火墙</span>
       <div className="lan-row"><span>{leftover ? '有残留规则，点“更新规则”删除' : firewallLabel[state.firewall]}</span>
@@ -157,7 +159,7 @@ export function DeviceAccessSection() {
     {remote ? <p className="alert attn lan-warning">局域网连接没有加密，只在家庭或公司等可信网络使用。</p> : null}
     {available && !state && !lanError ? <p role="status">正在读取局域网状态…</p> : null}
     {lanError ? <ErrorNotice error={lanError} onRetry={refreshLan} /> : null}
-    {state ? <LanControls state={state} choice={choice} remote={remote} busy={busy} onSelect={setChoice} onToggle={toggle}
+    {state ? <LanControls state={state} choice={choice} remote={remote} busy={busy} operationError={lanError?.message} onSelect={setChoice} onToggle={toggle}
       onUpdate={() => void mutateLan(() => api.updateLanFirewall())} /> : null}
     {available && !remote ? <button type="button" className="btn sm" disabled={busy} onClick={refreshLan}>刷新网络状态</button> : null}
     {address ? <div className="set-row"><span className="lbl">访问地址</span><div>

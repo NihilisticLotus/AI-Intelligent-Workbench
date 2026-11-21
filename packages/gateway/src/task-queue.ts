@@ -29,16 +29,18 @@ export class TaskQueue {
   private reserve(key: string, id: string) {
     const ids = this.active.get(key) ?? []; ids.push(id); this.active.set(key, ids);
   }
+  private unreserve(key: string, id: string) {
+    const ids = this.active.get(key);
+    if (!ids) return;
+    const index = ids.indexOf(id);
+    if (index >= 0) ids.splice(index, 1);
+    if (!ids.length) this.active.delete(key);
+  }
   private release(key: string, id: string) {
     let released = false;
     return () => {
       if (released) return; released = true;
-      const ids = this.active.get(key);
-      if (ids) {
-        const index = ids.indexOf(id);
-        if (index >= 0) ids.splice(index,1);
-        if (!ids.length) this.active.delete(key);
-      }
+      this.unreserve(key, id);
       this.drain(key); this.notify(key, [id]);
     };
   }
@@ -53,21 +55,34 @@ export class TaskQueue {
   async acquire(key: string, id: string, onQueued?: () => void, signal?: AbortSignal, wait = true, parkedSource = false): Promise<(() => void) | null> {
     if (signal?.aborted) throw new AbortError();
     if (this.position(id) || (!parkedSource && [...this.active.values()].some(ids => ids.includes(id)))) throw Errors.conflict('任务已经占用或等待名额');
-    if (this.running(key) < this.limit(key)) { this.reserve(key, id); this.notify(key); return this.release(key, id); }
+    if (this.running(key) < this.limit(key)) {
+      this.reserve(key, id);
+      try { this.notify(key); }
+      catch (error) { this.unreserve(key, id); throw error; }
+      return this.release(key, id);
+    }
     if (!wait) return null;
     await new Promise<void>((resolve, reject) => {
       const items = this.waiting.get(key) ?? []; this.waiting.set(key, items);
+      const removeWaiter = () => {
+        const index = items.indexOf(item);
+        if (index < 0) return false;
+        items.splice(index, 1);
+        signal?.removeEventListener('abort', item.cancel);
+        if (!items.length) this.waiting.delete(key);
+        return true;
+      };
       const item = { id,
         start: () => { signal?.removeEventListener('abort', item.cancel); resolve(); },
         cancel: () => {
-          const index = items.indexOf(item); if (index < 0) return;
-          items.splice(index, 1); signal?.removeEventListener('abort', item.cancel);
-          if (!items.length) this.waiting.delete(key);
-          this.notify(key, [id]); reject(new AbortError());
+          if (!removeWaiter()) return;
+          reject(new AbortError());
+          this.notify(key, [id]);
         },
       };
       items.push(item); signal?.addEventListener('abort', item.cancel, { once: true });
-      onQueued?.(); this.notify(key);
+      try { onQueued?.(); this.notify(key); }
+      catch (error) { removeWaiter(); reject(error); return; }
       if (signal?.aborted) item.cancel();
     });
     return this.release(key, id);

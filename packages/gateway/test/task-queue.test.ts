@@ -2,6 +2,24 @@ import { describe, expect, it } from 'vitest';
 import { TaskQueue } from '../src/task-queue';
 
 describe('可调序的任务名额', () => {
+  it('登记排队状态失败后移除等待者，后续任务可以获得名额', async () => {
+    const queue = new TaskQueue(() => 1);
+    const release = await queue.acquire('agent', '运行中');
+    await expect(queue.acquire('agent', '失败', () => { throw new Error('无法保存状态'); })).rejects.toThrow('无法保存状态');
+    expect(queue.position('失败')).toBeUndefined();
+    release!();
+    const next = await queue.acquire('agent', '下一个', undefined, undefined, false);
+    expect(next).toBeTypeOf('function');
+    next!();
+  });
+  it('立即分配时通知失败也归还名额', async () => {
+    let fail = true;
+    const queue = new TaskQueue(() => 1, () => { if (fail) throw new Error('无法通知'); });
+    await expect(queue.acquire('agent', '失败')).rejects.toThrow('无法通知');
+    fail = false;
+    expect(queue.running('agent')).toBe(0);
+    (await queue.acquire('agent', '下一个'))!();
+  });
   it('调序改变实际唤醒顺序，重复释放不挤占新任务', async () => {
     const queue = new TaskQueue(() => 1), started: string[] = [];
     const first = await queue.acquire('fake', 'a');

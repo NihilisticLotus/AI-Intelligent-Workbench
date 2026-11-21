@@ -8,6 +8,11 @@ describe('工具 diff 结构化摘要',()=>{
     expect(diffFile({path:'a',newText:'one'})).toEqual({path:'a',added:null,removed:null,created:false});
     expect(diffFile({oldText:'',newText:''})).toBeNull();
   });
+  it('行末换行不增加空行，分开的修改保留中间未变的行', () => {
+    expect(diffFile({path:'a',oldText:null,newText:'一\r\n二\r\n'})).toMatchObject({added:2,removed:0});
+    expect(diffFile({path:'a',oldText:'甲\n保留\n乙\n',newText:'丙\n保留\n丁\n'})).toMatchObject({added:2,removed:2});
+    expect(diffFile({path:'a',oldText:'末行',newText:'末行\n'})).toMatchObject({added:1,removed:1});
+  });
   it('真实假 ACP 链路同时保留摘要文字与 files 事件',async()=>{
     const sc=scenario({turns:[{steps:[{update:{sessionUpdate:'tool_call',toolCallId:'edit',title:'编辑',kind:'edit',status:'completed',content:[{type:'diff',path:'a.ts',oldText:'a',newText:'b\nc'}]}}]}]});
     const host=new RecordingHost(), conn=await fakeAdapter(sc).spawn({cwd:sc.dir,model:null,effort:null,permission:'ask',host});

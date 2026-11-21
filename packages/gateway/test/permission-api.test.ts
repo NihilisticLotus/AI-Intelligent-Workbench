@@ -32,6 +32,23 @@ describe('普通读取自动允许不刷屏（ISSUE-0103）',{timeout:30000},()=
   });
 });
 describe('权限接口与工作台总是允许',{timeout:30000},()=>{
+  it.each(['提交前','规则核对期间'])('审批到期在%s也只能过期一次',async phase=>{
+    const {service,task,request,outcomes}=await setup(), approval=await request();
+    const time=vi.spyOn(Date,'now');
+    if(phase==='提交前')time.mockReturnValue(approval.expiresAt!);
+    else {
+      const decide=service.permissions.decide.bind(service.permissions);
+      vi.spyOn(service.permissions,'decide').mockImplementationOnce(async(...args)=>{
+        const decision=await decide(...args);time.mockReturnValue(approval.expiresAt!);return decision;
+      });
+    }
+    try {await expect(service.approve(approval.id,'once',undefined,'device')).rejects.toThrow('过期');}
+    finally {time.mockRestore();}
+    await service.idle();
+    expect(outcomes).toEqual([{outcome:'cancelled'}]);
+    expect(service.get(task.id).status).toBe('paused');
+    expect(t!.gw.services.events.read({after:0,taskId:task.id,limit:1000}).filter(e=>e.type==='approval.resolved').map(e=>e.data.status)).toEqual(['expired']);
+  });
   it('规则读写仍校验令牌、Host、Origin，整表修订冲突返回 409',async()=>{
     const {token,project}=await setup(),url=`/projects/${project.id}/rules`;
     expect((await t!.api('GET',url)).status).toBe(401);

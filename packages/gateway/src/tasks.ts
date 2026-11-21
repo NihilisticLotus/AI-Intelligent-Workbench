@@ -1588,13 +1588,7 @@ export class TaskService {
       };
       const timer = setTimeout(() => {
         const p = this.pending.get(approval.id);
-        if (!p) return;
-        p.cleanup();
-        this.finishApproval(approval.id, 'expired', null, null);
-        // 超时不放行；记下来，本轮结束后任务暂停（不进入待验收）
-        this.approvalTimedOut.add(taskId);
-        this.recomputeStatus(taskId);
-        resolve({ outcome: 'cancelled' });
+        if (p) this.expireApproval(p);
       }, this.approvalTimeoutMs);
       timer.unref?.();
       const cleanup = () => {
@@ -1628,11 +1622,29 @@ export class TaskService {
     return a;
   }
 
-  /** 任一设备先处理即生效（先到先得） */
+  private expireApproval(p: PendingApproval) {
+    const {id, taskId} = p.approval;
+    p.cleanup();
+    this.approvalTimedOut.add(taskId);
+    try {
+      this.db.tx(() => this.finishApproval(id, 'expired', null, null));
+      this.recomputeStatus(taskId);
+    } catch { this.log('审批已过期，保存审批或任务状态失败。'); }
+    finally { p.resolve({ outcome: 'cancelled' }); }
+  }
+  private assertCurrentApproval(p: PendingApproval) {
+    if(this.pending.get(p.approval.id)!==p)throw Errors.invalidState('这条审批已经处理过了');
+    if(p.approval.expiresAt!==null && now()>=p.approval.expiresAt) {
+      this.expireApproval(p);
+      throw Errors.invalidState('这条审批已过期');
+    }
+  }
   async permissionRulePreview(approvalId:string) {
     const p=this.pending.get(approvalId);if(!p?.operation)throw Errors.invalidState('这条审批无法生成规则');
+    this.assertCurrentApproval(p);
     const preview=await this.permissions.preview(p.operation,await this.permissionContext(p.approval.taskId));
-    if(!preview||this.pending.get(approvalId)!==p)throw Errors.invalidState('审批已变化或不能安全生成规则');return preview;
+    this.assertCurrentApproval(p);
+    if(!preview)throw Errors.invalidState('审批已变化或不能安全生成规则');return preview;
   }
   async approve(approvalId: string, optionId: string, note: string | undefined, deviceId: string, alwaysAllow?:AlwaysAllowConfirmation): Promise<Approval> {
     const p = this.pending.get(approvalId);
@@ -1641,6 +1653,7 @@ export class TaskService {
       if (!exists) throw Errors.notFound('找不到这条审批');
       throw Errors.invalidState('这条审批已经处理过了');
     }
+    this.assertCurrentApproval(p);
     const opt = p.approval.options.find((o) => o.id === optionId);
     if (!opt) throw Errors.badRequest('没有这个选项');
     let responseId=optionId;
@@ -1654,11 +1667,10 @@ export class TaskService {
         const preview=await this.permissionRulePreview(approvalId);
         if(preview.revision!==alwaysAllow.revision)throw Errors.conflict('权限规则已变化，请重新预览');
         const once=p.approval.options.find(o=>o.kind==='allow_once');if(!once)throw Errors.invalidState('Agent 不支持允许一次，不能写入它的原生规则');
-        if(this.pending.get(approvalId)!==p)throw Errors.invalidState('这条审批已经处理过了');
         confirmedRule=preview;responseId=once.id;
       } else if(alwaysAllow)throw Errors.badRequest('此选项不接受规则确认');
     }
-    if(this.pending.get(approvalId)!==p)throw Errors.invalidState('这条审批已经处理过了');
+    this.assertCurrentApproval(p);
     const status = opt.kind.startsWith('allow') ? 'allowed' : 'rejected';
     // 拒绝理由（note）ACP 不支持回传，只存在审批记录里
     const a=this.db.tx(()=>{

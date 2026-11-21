@@ -15,6 +15,20 @@ async function setup(git=true) {
   return {task,url,token,project,manager,post:(suffix:string,body?:unknown)=>t!.api('POST',url+suffix,{token,body})};
 }
 describe('任务工作区操作接口',{timeout:60000},()=>{
+  it('终态与操作记录同时写入，旧数据在副本清理后仍能核对',async()=>{
+    const f=await setup(false), db=t!.gw.services.db;
+    db.exec("CREATE TRIGGER refuse_finish BEFORE UPDATE OF status ON tasks WHEN NEW.status='discarded' BEGIN SELECT RAISE(ABORT,'模拟保存失败'); END");
+    await expect(f.manager.discard(f.task.id)).rejects.toThrow('模拟保存失败');
+    expect(f.manager.operation(f.task.id)).toBeUndefined();
+    expect(existsSync(f.task.workspace!.path!)).toBe(true);
+    db.exec('DROP TRIGGER refuse_finish');
+    await f.manager.discard(f.task.id);
+    expect(t!.gw.services.tasks.get(f.task.id).status).toBe('discarded');
+    db.run("UPDATE tasks SET status='review',finished_at=NULL WHERE id=?",f.task.id);
+    await f.manager.recoverOperations();
+    expect((await t!.api('GET',f.url,{token:f.token})).json).toMatchObject({status:'discarded'});
+    expect(db.get('SELECT finished_at FROM tasks WHERE id=?',f.task.id)).toEqual({finished_at:f.manager.operation(f.task.id)!.finishedAt});
+  });
   it.each([true,false])('%s git：合并或应用、终态拦截、撤销和事件一致',async git=>{
     const f=await setup(git);writeFileSync(path.join(f.task.workspace!.path!,'notes.txt'),'任务\n');if(!git)await f.manager.snapshot(f.task.id,'任务结束');
     const applied=await f.post('/merge',{strategy:'squash',message:'界面提交'});expect(applied.status).toBe(200);expect(WorkspaceOperationResult.parse(applied.json).status).toBe(git?'merged':'applied');

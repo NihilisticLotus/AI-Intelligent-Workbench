@@ -315,8 +315,6 @@ export class TaskService {
         if(action==='discard')result=await manager.discard(id);
         else if(action==='rollback')result=task.workspace?.kind==='copy'?await manager.rollbackCopy(id):await manager.rollbackGit(id);
         else result=task.workspace?.kind==='copy'?await manager.applyCopy(id):await manager.mergeGit(id,body!);
-        const final=manager.operation(id);
-        if(final && ['merged','applied','rolled_back','discarded'].includes(final.state))this.db.run('UPDATE tasks SET status=?,finished_at=?,updated_at=? WHERE id=?',final.state==='discarded'?'discarded':'merged',final.finishedAt,now(),id);
         this.syncWorkspace(id);await this.refreshChanges(id);return result;
       });
     } finally {this.configuring.delete(id);}

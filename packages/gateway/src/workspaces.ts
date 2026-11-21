@@ -694,7 +694,16 @@ export class WorkspaceManager {
     return row ? WorkspaceOperationRecord.parse(JSON.parse(row.record_json)) : undefined;
   }
   private saveOperation(record: WorkspaceOperationRecord) {
-    this.db.run('INSERT INTO workspace_operations(task_id,record_json) VALUES(?,?) ON CONFLICT(task_id) DO UPDATE SET record_json=excluded.record_json', record.taskId, JSON.stringify(record));
+    this.db.tx(() => {
+      this.db.run('INSERT INTO workspace_operations(task_id,record_json) VALUES(?,?) ON CONFLICT(task_id) DO UPDATE SET record_json=excluded.record_json', record.taskId, JSON.stringify(record));
+      this.syncFinishedTask(record);
+    });
+  }
+  private syncFinishedTask(record: WorkspaceOperationRecord) {
+    if (!['merged','applied','rolled_back','discarded'].includes(record.state)) return;
+    const status = record.state === 'discarded' ? 'discarded' : 'merged';
+    this.db.run('UPDATE tasks SET status=?,finished_at=?,updated_at=? WHERE id=? AND (status<>? OR finished_at IS NOT ?)',
+      status, record.finishedAt, Date.now(), record.taskId, status, record.finishedAt);
   }
   private operationRecord(taskId: string, state: WorkspaceOperationRecord['state']): WorkspaceOperationRecord {
     return {taskId,state,beforeCommit:null,mergeCommit:null,rollbackCommit:null,strategy:null,conflictFiles:[],appliedFiles:[],changedFiles:[],skippedLargeFiles:[],finishedAt:Date.now(),removedAt:null};
@@ -987,7 +996,10 @@ export class WorkspaceManager {
   async recoverOperations() {
     const unresolved:string[]=[];
     for(const {task_id:id} of this.db.all<{task_id:string}>('SELECT task_id FROM workspace_operations')) {
-      const operation=this.operation(id);if(operation?.state!=='pending'||!operation.pending)continue;
+      const operation=this.operation(id);
+      if(!operation)continue;
+      if(operation.state!=='pending'){this.syncFinishedTask(operation);continue;}
+      if(!operation.pending){unresolved.push(id);continue;}
       try {
         const record=await this.checkedRecord(id),pending=operation.pending;
         if(record.kind!=='worktree'||await this.currentBranch(record.projectPath)!==record.baseBranch){unresolved.push(id);continue;}

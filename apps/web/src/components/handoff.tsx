@@ -16,7 +16,7 @@ export function PendingHandoff({task}:{task:Task}) {
 
 export async function confirmHandoff(taskId:string,id:string):Promise<HandoffSendOptions|null> {
   const record=await api.handoff(taskId,id);
-  const value=await new Promise<HandoffSendOptions|null>(resolve=>openDialog(close=><EditHandoff record={record} finish={value=>{close();resolve(value);}}/>));
+  const value=await new Promise<HandoffSendOptions|null>(resolve=>openDialog(close=><EditHandoff record={record} finish={value=>{close();resolve(value);}}/>, () => resolve(null)));
   // 取消时清理待确认的交接（检查点与说明文件）；清理失败不影响原会话，下次启动会再清理。
   if(!value) await api.cancelHandoff(taskId,id).catch(()=>{});
   return value;

@@ -8,7 +8,7 @@
 // - replayed.reset：服务端的数据库被重置了，交给上层清空本地事件状态、重新拉快照。
 // - 凭据经子协议传递（浏览器的 WebSocket 不能加请求头），见 credentials.ts。
 // - 服务端用 4401 关闭表示令牌失效或设备被吊销：不再重连，交给界面回到配对页。
-import { ClientOp, ServerFrame, WS_CLOSE_UNAUTHORIZED, type ApiError, type EventEnvelope } from '@aic/protocol';
+import { ClientOp, ServerFrame, WS_CLOSE_UNAUTHORIZED, type AccessPrompt, type ApiError, type EventEnvelope } from '@aic/protocol';
 import { ApiRequestError, ClientErrorCode } from './http';
 import { newOpId } from '../lib/ids';
 
@@ -45,7 +45,7 @@ export interface WsClientOptions {
   /** 当前已收到的最大 seq（由 store 提供） */
   getLastSeq: () => number;
   onEvent: (ev: EventEnvelope) => void;
-  onReplayed?: (upToSeq: number, info: { reset: boolean; bootId: string | null; restarted: boolean }) => void;
+  onReplayed?: (upToSeq: number, info: { reset: boolean; bootId: string | null; restarted: boolean; pendingAccess?: AccessPrompt[] }) => void;
   onState?: (s: ConnState) => void;
   /** 每次连接失败（含握手失败）后回调，attempt 从 1 开始；界面可以借机用 /hello 检查是不是令牌失效了 */
   probe?: () => Promise<boolean>;
@@ -237,7 +237,7 @@ export class WsClient {
           }
         }
         this.setState('online');
-        this.o.onReplayed?.(f.upToSeq, { reset: !!f.reset, bootId, restarted });
+        this.o.onReplayed?.(f.upToSeq, { reset: !!f.reset, bootId, restarted, ...(f.pendingAccess && { pendingAccess: f.pendingAccess }) });
         break;
       }
       case 'ack': {

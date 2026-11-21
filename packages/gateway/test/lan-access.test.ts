@@ -167,8 +167,10 @@ describe('局域网操作保护与审计', () => {
 
     const { db, accessAudit } = gw.gw.services;
     const old = db.run('INSERT INTO audit_log (device_id, action, detail, ts) VALUES (NULL, ?, ?, ?)', 'access.offline_old', '{}', Date.now() - 91 * 24 * 60 * 60_000);
+    const migration = db.run("INSERT INTO audit_log (action, ts) VALUES ('migration.v2', ?)", Date.now() - 91 * 24 * 60 * 60_000);
     accessAudit.prune();
     expect(db.get('SELECT id FROM audit_log WHERE id = ?', old.lastInsertRowid)).toBeUndefined();
+    expect(db.get('SELECT action FROM audit_log WHERE id = ?', migration.lastInsertRowid)).toEqual({ action: 'migration.v2' });
     db.run('INSERT INTO audit_log (device_id, action, detail, ts) VALUES (NULL, ?, ?, ?)', 'offline.legacy', '旧自由文本', Date.now());
     const first = await request('GET', '/access/audit?limit=2');
     expect(first.status).toBe(200);

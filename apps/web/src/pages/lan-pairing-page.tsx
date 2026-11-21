@@ -1,8 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react';
-import type { ApiError, LanPairingPending, LanPairingStatus } from '@aic/protocol';
-import { toApiError } from '../api/http';
+import type { ApiError, LanPairingStatus } from '@aic/protocol';
+import { ApiRequestError, toApiError } from '../api/http';
 import { ErrorNotice } from '../components/ui';
-import { pairingResultMessage, pollingOutcome } from '../lib/lan-access';
+import { localDeadline, pairingResultMessage, pollingOutcome } from '../lib/lan-access';
 import { useCountdown } from '../lib/use-countdown';
 import { api, finishLanPairing, submitLanPairing, useApp } from '../state/app';
 
@@ -12,9 +12,10 @@ export function LanPairingPage() {
   const [error, setError] = useState<ApiError | null>(null);
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
-  const [pending, setPending] = useState<LanPairingPending | null>(null);
-  const remaining = useCountdown(pending?.expiresAt);
-  const retry = useCountdown(error?.retryAt);
+  const [pending, setPending] = useState<{ id: string; deadline: number } | null>(null);
+  const [retryDeadline, setRetryDeadline] = useState<number>();
+  const remaining = useCountdown(pending?.deadline);
+  const retry = useCountdown(retryDeadline);
 
   useEffect(() => {
     const request = pending;
@@ -40,10 +41,11 @@ export function LanPairingPage() {
         setError(null);
       } catch (failure) {
         if (!active) return;
+        if (failure instanceof ApiRequestError && failure.status === 404) { finish('unavailable'); return; }
         setError(toApiError(failure));
       }
       if (!active) return;
-      const next = pollingOutcome(result, request!.expiresAt);
+      const next = pollingOutcome(result, request!.deadline);
       if (next !== 'pending' && next !== 'paired') { finish(next); return; }
       timer = setTimeout(() => void poll(), 1000);
     }
@@ -56,9 +58,16 @@ export function LanPairingPage() {
     if (busy || retry || !/^\d{6}$/.test(code)) return;
     setBusy(true);
     setError(null);
+    setRetryDeadline(undefined);
     setMessage('');
-    try { setPending(await submitLanPairing(code)); }
-    catch (failure) { setError(toApiError(failure)); }
+    try {
+      const response = await submitLanPairing(code);
+      setPending({ id: response.id, deadline: localDeadline(response.expiresAt, response.serverTime) });
+    } catch (failure) {
+      const problem = toApiError(failure);
+      setError(problem);
+      if (problem.retryAt !== undefined) setRetryDeadline(localDeadline(problem.retryAt, problem.serverTime));
+    }
     finally { setBusy(false); }
   };
 
@@ -82,7 +91,7 @@ export function LanPairingPage() {
           </button>
         </form>
       </>}
-      {error ? <ErrorNotice error={retry ? { ...error, hint: `请 ${retry} 秒后再试` } : error} /> : null}
+      {error ? <ErrorNotice error={retryDeadline !== undefined ? { ...error, hint: retry ? `请 ${retry} 秒后再试` : '现在可以重新配对' } : error} /> : null}
     </div>
   </main>;
 }

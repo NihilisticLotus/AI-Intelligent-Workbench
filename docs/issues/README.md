@@ -159,3 +159,11 @@
 | [ISSUE-0151](ISSUE-0151-lan-pairing-client-clock.md) | 手机按本地时钟提前判定配对超时 | fixed | bug | 2026-11-19 | 2026-11-19 |
 | [ISSUE-0152](ISSUE-0152-desktop-keyboard-mode.md) | 桌面小窗口调整高度被当成软键盘 | fixed | bug | 2026-11-19 | 2026-11-19 |
 | [ISSUE-0153](ISSUE-0153-mobile-switch-circle.md) | 触屏断点内开关被压成圆点 | fixed | bug | 2026-11-19 | 2026-11-19 |
+| [ISSUE-0154](ISSUE-0154-lan-audit-retention.md) | 访问审计清理误删其他模块的历史记录 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0155](ISSUE-0155-lan-pairing-revocation.md) | 设备吊销和一次性配对领取的状态不一致 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0156](ISSUE-0156-lan-pending-confirmation-sync.md) | 电脑新标签页漏掉已有的待确认请求 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0157](ISSUE-0157-lan-pairing-relative-time.md) | 手机时钟偏差造成配对倒计时和重试时间错误 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0158](ISSUE-0158-lan-running-profile-change.md) | 网卡转为公用网络后第二监听仍在运行 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0159](ISSUE-0159-lan-local-pairing-audit.md) | 本机配对请求和失败结果缺少访问审计 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0160](ISSUE-0160-revoked-device-overlays.md) | 设备吊销后旧弹窗遮住手机配对页 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0161](ISSUE-0161-lan-port-fallback-assertion.md) | 正常顺延多个端口时局域网用例误报 | fixed | bug | 2026-11-21 | 2026-11-21 |

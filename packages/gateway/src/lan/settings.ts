@@ -13,9 +13,11 @@ export interface LanDependencies {
   execute: LanExecutor;
   supported: boolean;
   program: string;
+  profileCheckMs: number;
 }
 
 type StopListener = () => Promise<void>;
+type ActiveListener = { address: string; name: string; stop: StopListener };
 type RuleAction = 'add' | 'set' | 'delete';
 type RuleAudit = (action: RuleAction, result: 'ok' | 'failed') => void;
 
@@ -23,31 +25,38 @@ export class LanSettings {
   private readonly deps: LanDependencies;
   private readonly firewall: LanFirewall;
   private pending: Promise<unknown> = Promise.resolve();
-  private active: { address: string; stop: StopListener } | null = null;
+  private active: ActiveListener | null = null;
+  private profileTimer?: ReturnType<typeof setTimeout>;
   private reason: string | null = null;
   private stopping = false;
+  private settingsVersion = 0;
 
   constructor(private readonly db: Db, dataDir: string, private readonly port: () => number,
     private readonly listen: (address: string) => Promise<StopListener>, private readonly log: (message: string) => void,
-    deps?: Partial<LanDependencies>) {
-    this.deps = { listInterfaces: listPrivateInterfaces, execute: executeLanCommand, supported: process.platform === 'win32', program: process.execPath, ...deps };
+    deps?: Partial<LanDependencies>, private readonly onSuspended?: () => void) {
+    this.deps = { listInterfaces: listPrivateInterfaces, execute: executeLanCommand, supported: process.platform === 'win32', program: process.execPath, profileCheckMs: 60_000, ...deps };
     this.firewall = new LanFirewall(firewallRuleName(dataDir), this.deps.execute);
   }
 
   activeAddress(): string | null { return this.active?.address ?? null; }
 
   async state(): Promise<LanState> {
+    const version = this.settingsVersion;
     const config = this.read();
+    const active = this.active;
     const interfaces = await this.interfaces();
+    if (active) await this.checkActive(active, interfaces);
     const selected = config.enabled
       ? interfaces.find((item) => item.name === config.name && item.address === config.address)
         ?? { name: config.name, address: config.address, category: 'unknown' as const }
       : null;
     const firewall = this.deps.supported ? await this.firewall.state(selected && this.target(selected)) : 'unknown';
+    // Windows 查询可能晚于关闭或重新开启。旧结果不能覆盖电脑上刚保存的新状态。
+    if (version !== this.settingsVersion || active !== this.active) return this.state();
     const unavailableReason = !this.deps.supported ? '局域网访问需要 Windows 防火墙' : selected
       ? this.selectionError(interfaces, selected)
       : interfaces.length ? null : '没有可用的私有 IPv4 网卡';
-    return { enabled: this.active !== null, requested: config.enabled, selected, interfaces, port: this.port(), firewall,
+    return { enabled: active !== null, requested: config.enabled, selected, interfaces, port: this.port(), firewall,
       unavailableReason: unavailableReason ?? this.reason };
   }
 
@@ -65,7 +74,7 @@ export class LanSettings {
         if (body.enabled) {
           await this.ensureFirewall(this.target(body), true, audit);
           await this.requirePrivate(body);
-          await this.activate(body.address);
+          await this.activate(body);
           this.save(body);
         } else {
           await this.removeFirewall(audit);
@@ -87,7 +96,7 @@ export class LanSettings {
           await this.requirePrivate(config);
           await this.ensureFirewall(this.target(config), false, audit);
           await this.requirePrivate(config);
-          if (!this.active) await this.activate(config.address);
+          if (!this.active) await this.activate(config);
         } else {
           await this.removeFirewall(audit);
         }
@@ -110,7 +119,7 @@ export class LanSettings {
         if (await this.inspectFirewall(this.target(config)) !== 'matched') {
           throw Errors.conflict('防火墙规则需要更新，请在设备与访问中检查');
         }
-        await this.activate(config.address);
+        await this.activate(config);
       } catch (error) {
         this.reason = error instanceof AppError ? error.message : '无法恢复上次的局域网设置';
         this.log(`局域网保持关闭：${this.reason}`);
@@ -139,6 +148,7 @@ export class LanSettings {
     this.requireRunning();
     this.db.run('INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
       SETTINGS_KEY, JSON.stringify(config));
+    this.settingsVersion++;
   }
 
   private async interfaces(): Promise<LanInterface[]> {
@@ -199,7 +209,7 @@ export class LanSettings {
     audit?.(action, 'ok');
   }
 
-  private async activate(address: string) {
+  private async activate({ name, address }: Pick<LanInterface, 'name' | 'address'>) {
     this.requireRunning();
     let stop: StopListener;
     try { stop = await this.listen(address); } catch {
@@ -209,10 +219,32 @@ export class LanSettings {
       await stop();
       return;
     }
-    this.active = { address, stop };
+    this.active = { name, address, stop };
+    this.scheduleProfileCheck(this.active);
+  }
+
+  private scheduleProfileCheck(active: ActiveListener) {
+    this.profileTimer = setTimeout(async () => {
+      // 查询未结束时不再排下一次，切换网卡或关闭期间返回的旧结果不能影响新的监听。
+      const interfaces = await this.interfaces().catch(() => []);
+      await this.checkActive(active, interfaces);
+      if (this.active === active) this.scheduleProfileCheck(active);
+    }, this.deps.profileCheckMs);
+    this.profileTimer.unref();
+  }
+
+  private async checkActive(active: ActiveListener, interfaces: LanInterface[]) {
+    if (active !== this.active) return;
+    const reason = this.selectionError(interfaces, active);
+    if (!reason) return;
+    this.reason = `局域网监听已暂停：${reason}。恢复专用网络后可点击“更新规则”重新连接`;
+    this.log(this.reason);
+    this.onSuspended?.();
+    await this.deactivate();
   }
 
   private deactivate(): Promise<void> {
+    clearTimeout(this.profileTimer);
     const active = this.active;
     this.active = null;
     return active?.stop() ?? Promise.resolve();

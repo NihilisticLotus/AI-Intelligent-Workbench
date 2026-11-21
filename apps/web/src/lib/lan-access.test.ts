@@ -3,15 +3,31 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LanControls } from '../pages/device-access-section';
+import { choiceDialog, confirmDialog, DialogHost, dismissSessionOverlays, MenuHost, openMenu } from '../components/ui';
 import { canUseSystemNotifications, createBrowserPlatform } from '../platform/browser';
 import {
-  canToggleLan, isLanHostname, networkChoice, pairCodeFromHash, pairingResultMessage, pollingOutcome, secondsUntil, updateAccessPrompts,
+  canToggleLan, isLanHostname, localDeadline, networkChoice, pairCodeFromHash, pairingResultMessage, pollingOutcome, secondsUntil, updateAccessPrompts,
 } from './lan-access';
 
 const network: LanInterface = { name: '离线网卡', address: '192.168.8.5', category: 'private' };
 const lan: LanState = { enabled: false, requested: false, selected: null, port: 17890, firewall: 'missing', interfaces: [network], unavailableReason: null };
 
 describe('网页设备访问', () => {
+  it('配对失效时收起工作台菜单和对话框，并取消仍待选择的操作', async () => {
+    const selected = vi.fn();
+    openMenu({} as HTMLElement, [{ label: '打开任务', onSelect: selected }]);
+    const confirmed = confirmDialog({ title: '删除任务', body: '测试', ok: '删除' });
+    const choice = choiceDialog({ title: '选择操作', body: '测试', choices: [{ value: 'continue', label: '继续' }] });
+    expect(renderToStaticMarkup(createElement(DialogHost))).toContain('删除任务');
+    expect(renderToStaticMarkup(createElement(MenuHost))).toContain('打开任务');
+    dismissSessionOverlays();
+    expect(renderToStaticMarkup(createElement(DialogHost))).toBe('');
+    expect(renderToStaticMarkup(createElement(MenuHost))).toBe('');
+    expect(await confirmed).toBe(false);
+    expect(await choice).toBeNull();
+    expect(selected).not.toHaveBeenCalled();
+  });
+
   it('专用网可开启，公用网显示具体原因，局域网页面只呈现状态', () => {
     const props = { busy: false, onSelect: vi.fn(), onToggle: vi.fn(), onUpdate: vi.fn() };
     const publicNet = { ...network, category: 'public' as const };
@@ -30,6 +46,8 @@ describe('网页设备访问', () => {
     expect(canToggleLan(remoteState, network, false)).toBe(true);
     expect(networkChoice(lan, null)).toEqual(network);
     expect(networkChoice({ ...lan, interfaces: [publicNet, network] }, null)).toBeNull();
+    const other = { ...network, name: '另一张网卡', address: '192.168.8.6' };
+    expect(networkChoice({ ...remoteState, interfaces: [network, other], selected: other }, network)).toEqual(other);
   });
 
   it('启动时没能恢复的局域网仍显示为开启，开关用于关闭', () => {
@@ -59,6 +77,15 @@ describe('网页设备访问', () => {
     expect(pollingOutcome({ status: 'pending', id: `lp_${'a'.repeat(32)}`, expiresAt: 1000 }, 1000, 5000)).toBe('pending');
     expect(pairingResultMessage.unavailable).toContain('已断开');
     expect(secondsUntil(2500, 1000)).toBe(2);
+  });
+
+  it('手机快慢都按实际剩余时长等待确认或解除限流，兼容旧版时间戳', () => {
+    for (const received of [200, 9_000_000]) {
+      expect(localDeadline(1_120_000, 1_000_000, received)).toBe(received + 120_000);
+      expect(localDeadline(1_060_000, 1_000_000, received)).toBe(received + 60_000);
+      expect(localDeadline(900_000, 1_000_000, received)).toBe(received);
+    }
+    expect(localDeadline(1_000_000, undefined, 200)).toBe(1_000_000);
   });
 
   it('按接收顺序处理配对与操作请求，忽略重复及超时请求', () => {

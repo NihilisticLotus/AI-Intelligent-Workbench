@@ -195,10 +195,11 @@ export class AuthService {
         { label: '重新生成配对码', action: 'pairing.start' },
       ]);
     }
-    // 一次性：用过立即作废；成功配对后限流间隔复原
+    // 设备写入成功才消耗一次性码；事务失败时仍可在有效期内重试。
+    const issued = this.issueDevice(ip, body, replacingDeviceId, 'local');
     this.pairing = null;
     this.interval = this.limits.startIntervalMs;
-    return this.issueDevice(ip, body, replacingDeviceId, 'local');
+    return issued;
   }
 
   issueDevice(ip: string, body: Pick<PairingCompleteBody, 'tokenDelivery' | 'deviceName' | 'kind'>,
@@ -213,10 +214,10 @@ export class AuthService {
         id, body.deviceName, body.kind, key ? cookieHash(token, key) : bearerHash(token), ip, t, t, source,
       );
       this.audit(id, 'device.paired', `${source} ${body.kind} ${ip}`);
+      if (replacingDeviceId && this.deviceRow(replacingDeviceId)?.revoked === 0) {
+        this.revoke(replacingDeviceId, id, 'device.replaced');
+      }
     });
-    if (replacingDeviceId && replacingDeviceId !== id) {
-      try { this.revoke(replacingDeviceId, id, 'device.replaced'); } catch { /* 已经不在了 */ }
-    }
     return { device: this.toDevice(this.deviceRow(id)!, id), token, ...(key ? { key } : {}) };
   }
 

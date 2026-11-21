@@ -277,7 +277,12 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
   };
   void cleanWorkspaces();
   const groups = new GroupService(db, tasks);
-  const lan = new LanSettings(db, realpathSync(dataDir), () => port, listenLan, log, opts.lan);
+  const lan = new LanSettings(db, realpathSync(dataDir), () => port, listenLan, log, opts.lan,
+    () => {
+      accessAudit.write('lan.suspended', { id: null, ip: null }, 'unavailable');
+      try { events.append({ type: 'access.lan_suspended', taskId: null, sessionId: null, data: {} }); }
+      catch { log('无法通知本机页面刷新局域网状态'); }
+    });
   const lanPairing = new LanPairing(auth, events, () => {
     const address = lan.activeAddress();
     return address ? `http://${address}:${port}/` : null;
@@ -312,7 +317,7 @@ export async function createGateway(opts: GatewayOptions = {}): Promise<Gateway>
     const detach = ws.addServer(listener);
     try { await bind(listener, port, address); } catch (error) { detach(); throw error; }
     return () => new Promise<void>((resolve) => {
-      lanPairing.closeLan();
+      lanPairing.invalidateAll();
       accessConfirmation.cancelAll();
       detach();
       listener.close(() => resolve());

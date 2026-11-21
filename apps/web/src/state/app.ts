@@ -50,6 +50,8 @@ export const appStore = createStore<AppState>({
 export const useApp = <S>(sel: (s: AppState) => S) => useStore(appStore, sel);
 export const useRemoteAccess = () => useApp((s) => isRemoteAccess(s.hello));
 export const accessPromptStore = createStore<AccessPrompt[]>([]);
+export const lanSuspendedSeq = createStore(0);
+export const pairingUsedSeq = createStore(0);
 export const dismissAccessPrompt = (id: string) => accessPromptStore.set((items) => items.filter(({ request }) => request.id !== id));
 const set = (fn: (s: AppState) => AppState) => appStore.set(fn);
 
@@ -88,6 +90,8 @@ function sideEffects(before: AppState, batch: EventEnvelope[]) {
     void refreshAgents().catch(() => { /* 目录页保留错误提示，断线后由完整快照恢复。 */ });
   }
   for (const ev of batch) {
+    if (ev.type === 'access.lan_suspended') lanSuspendedSeq.set(() => ev.seq);
+    if (ev.type === 'pairing.requested') pairingUsedSeq.set(() => ev.seq);
     const prompts = accessPromptStore.get();
     const next = updateAccessPrompts(prompts, ev);
     if (next !== prompts) accessPromptStore.set(() => next);
@@ -202,6 +206,10 @@ function connectWs() {
       flushEvents();
       // 服务端的数据库被重置或换了（seq 比我们记得的小）：清空本地事件状态，重新拉快照
       if (info.reset || upToSeq < appStore.get().wsSeq) void resetAndRestart();
+      else {
+        const pending = info.pendingAccess;
+        if (pending) accessPromptStore.set(() => pending);
+      }
     },
     onState: (conn) => {
       set((s) => ({ ...s, conn }));
@@ -242,11 +250,14 @@ function toUnpaired(initialPairCode?: string) {
   imageCache.clear();
   ws?.stop();
   ws = null;
+  queue = [];
+  firstOnline = true;
   accessPromptStore.set(() => []);
   // 凭据已失效（或设备被吊销）：清掉本地保存的密钥 / 令牌
   void creds.clear();
   set((s) => (s.boot === 'unpaired' && initialPairCode === undefined ? s :
-    { ...s, boot: 'unpaired', conn: 'idle', initialPairCode: initialPairCode ?? '' }));
+    { ...s, ...emptyCore(), hello: null, projects: [], groups: [], history: {}, profiles: {}, devices: null,
+      boot: 'unpaired', conn: 'idle', pairRequested: false, bootError: null, initialPairCode: initialPairCode ?? '' }));
 }
 
 // ---------- 配对 ----------

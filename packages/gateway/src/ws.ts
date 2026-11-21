@@ -118,7 +118,7 @@ export function attachWs(server: Server, s: Services) {
     const wants = (e: EventEnvelope) => {
       if (e.type === 'pairing.requested') return !remote && s.lanPairing.isPending(e.data.id);
       if (e.type === 'access.confirm_requested') return !remote && s.accessConfirmation.isPending(e.data.id);
-      if (e.type === 'pairing.resolved' || e.type === 'access.confirm_resolved' || e.type === 'agent.login') return !remote;
+      if (e.type === 'pairing.resolved' || e.type === 'access.confirm_resolved' || e.type === 'access.lan_suspended' || e.type === 'agent.login') return !remote;
       return !filter || e.taskId === null || filter.has(e.taskId) || ALWAYS.has(e.type);
     };
 
@@ -151,7 +151,9 @@ export function attachWs(server: Server, s: Services) {
       if (!remote && device.kind === 'browser') releaseLocalPage ??= s.lanPairing.registerLocalPage();
       // 客户端的 lastSeq 比库里还大：数据库被重置或换了，让客户端清空本地状态重新拉快照
       const reset = lastSeq > upToSeq;
-      sendNow({ kind: 'replayed', upToSeq, bootId: s.bootId, ...(reset ? { reset } : {}) });
+      const pendingAccess = releaseLocalPage ? [...s.lanPairing.pendingPrompts(), ...s.accessConfirmation.pendingPrompts()]
+        .sort((a, b) => a.seq - b.seq).map(entry => entry.prompt) : undefined;
+      sendNow({ kind: 'replayed', upToSeq, bootId: s.bootId, ...(reset ? { reset } : {}), ...(pendingAccess ? { pendingAccess } : {}) });
       return { upToSeq };
     };
 

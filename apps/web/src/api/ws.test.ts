@@ -238,6 +238,20 @@ describe('WsClient 指令与 ack', () => {
     await expect(q).resolves.toMatchObject({ taskId: 't1' });
   });
 
+  it('补发完成时将本机待确认快照交给页面，包括已无待办的空队列', () => {
+    const onReplayed = vi.fn();
+    const { client } = setup({ onReplayed });
+    client.start();
+    const w = FakeWs.all[0]!;
+    w.open();
+    const pendingAccess = [{ kind: 'pairing', request: { id: 'lp_' + 'a'.repeat(32), name: '离线设备', browser: '浏览器', ip: '127.0.0.1', expiresAt: 120000 } }];
+    w.frame({ kind: 'replayed', upToSeq: 5, pendingAccess });
+    expect(onReplayed).toHaveBeenLastCalledWith(5, expect.objectContaining({ pendingAccess }));
+    w.frame({ kind: 'replayed', upToSeq: 6, pendingAccess: [] });
+    expect(onReplayed).toHaveBeenLastCalledWith(6, expect.objectContaining({ pendingAccess: [] }));
+    client.stop();
+  });
+
   it('replayed.reset 传给上层', () => {
     const replays: Array<{ reset: boolean }> = [];
     const { client } = setup({ onReplayed: (_u, info) => replays.push(info) });

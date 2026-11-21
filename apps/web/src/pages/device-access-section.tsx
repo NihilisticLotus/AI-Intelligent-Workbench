@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { FeatureKey, type AccessAuditEntry, type ApiError, type Device, type LanInterface, type LanPairingCode, type LanState } from '@aic/protocol';
 import { asApiError, confirmDialog, ErrorNotice, toastErrorOf } from '../components/ui';
 import { Icon } from '../components/Icon';
@@ -6,7 +6,8 @@ import { ago } from '../lib/format';
 import { canToggleLan, firewallLabel, lanStatusText, lanSwitchOn, networkCategory, networkChoice, operationLabel } from '../lib/lan-access';
 import { useCountdown } from '../lib/use-countdown';
 import { platform } from '../platform';
-import { api, loadDevices, revokeDevice, useApp, useRemoteAccess } from '../state/app';
+import { api, lanSuspendedSeq, loadDevices, pairingUsedSeq, revokeDevice, useApp, useRemoteAccess } from '../state/app';
+import { useStore } from '../state/store';
 import { setPref, usePref } from '../state/prefs';
 import { toast } from '../state/ui';
 
@@ -60,6 +61,8 @@ export function LanControls({ state, choice, remote, busy, onSelect, onToggle, o
 
 const auditResults = { ok: '成功', failed: '失败', requested: '已请求', allowed: '已允许', denied: '已拒绝', expired: '已超时', unavailable: '已失效' };
 const auditActions: Record<string, string> = {
+  'lan.suspended': '网卡或网络类别变化，暂停局域网',
+  'pairing.start': '请求本机配对码',
   'lan.enable': '开启局域网', 'lan.disable': '关闭局域网', 'firewall.add': '添加防火墙规则', 'firewall.set': '替换防火墙规则',
   'firewall.delete': '删除防火墙规则', 'firewall.update': '更新防火墙规则', 'pairing.issue': '生成配对码', 'pairing.requested': '请求配对',
   'pairing.resolved': '处理配对', 'pairing.claimed': '领取配对凭据', 'pairing.local': '本机配对', 'device.revoke': '吊销设备',
@@ -76,12 +79,16 @@ export function DeviceAccessSection() {
   const devices = useApp((s) => s.devices);
   const available = useApp((s) => !!s.hello?.features[FeatureKey.Lan]);
   const remote = useRemoteAccess();
+  const suspended = useStore(lanSuspendedSeq, seq => seq);
+  const used = useStore(pairingUsedSeq, seq => seq);
+  const readVersion = useRef(0);
   const [state, setState] = useState<LanState | null>(null);
   const [choice, setChoice] = useState<LanInterface | null>(null);
   const [lanError, setLanError] = useState<ApiError | null>(null);
   const [deviceError, setDeviceError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
-  const [pairing, setPairing] = useState<LanPairingCode | null>(null);
+  const [issued, setPairing] = useState<{ code: LanPairingCode; used: number } | null>(null);
+  const pairing = issued?.used === used ? issued.code : null;
   const [manual, setManual] = useState<{ label: string; text: string } | null>(null);
   const seconds = useCountdown(pairing?.expiresAt);
 
@@ -91,17 +98,31 @@ export function DeviceAccessSection() {
     setChoice((previous) => networkChoice(next, previous));
     if (!next.enabled) { setPairing(null); setManual(null); }
   };
-  const refreshLan = () => { setLanError(null); void api.lanState().then(applyLan, (error) => setLanError(asApiError(error))); };
+  const refreshLan = () => {
+    const version = ++readVersion.current;
+    setLanError(null);
+    void api.lanState().then(next => { if (version === readVersion.current) applyLan(next); },
+      error => { if (version === readVersion.current) setLanError(asApiError(error)); });
+  };
   useEffect(refreshDevices, []);
-  useEffect(() => { if (available) refreshLan(); }, [available]);
+  useEffect(() => { if (available) refreshLan(); return () => { readVersion.current++; }; }, [available, suspended]);
 
   const mutateLan = async (doUpdate: () => Promise<LanState>) => {
+    readVersion.current++;
     setBusy(true);
     setLanError(null);
-    try { applyLan(await doUpdate()); }
+    try {
+      const next = await doUpdate();
+      readVersion.current++;
+      applyLan(next);
+    }
     catch (failure) {
       setLanError(asApiError(failure));
-      try { applyLan(await api.lanState()); } catch { /* 保留操作报错 */ }
+      try {
+        const next = await api.lanState();
+        readVersion.current++;
+        applyLan(next);
+      } catch { /* 保留操作报错 */ }
     } finally { setBusy(false); }
   };
   const toggle = () => {
@@ -111,7 +132,7 @@ export function DeviceAccessSection() {
   const issue = async () => {
     setBusy(true);
     setLanError(null);
-    try { setPairing(await api.localPairingCode()); await loadDevices(); }
+    try { setManual(null); setPairing({ code: await api.localPairingCode(), used }); await loadDevices(); }
     catch (failure) { setLanError(asApiError(failure)); }
     finally { setBusy(false); }
   };
@@ -126,7 +147,7 @@ export function DeviceAccessSection() {
   };
   const revokeAll = async () => {
     if (!await confirmDialog({ title: '吊销全部局域网设备？', ok: '全部吊销', danger: true, body: <p>所有通过局域网配对的设备都需要重新配对。本机设备仍可访问。</p> })) return;
-    try { const result = await api.revokeLanDevices(); await loadDevices(); toast(`已吊销 ${result.revoked} 台局域网设备`); }
+    try { const result = await api.revokeLanDevices(); setPairing(null); setManual(null); await loadDevices(); toast(`已吊销 ${result.revoked} 台局域网设备`); }
     catch (failure) { toastErrorOf(failure); }
   };
 
@@ -138,6 +159,7 @@ export function DeviceAccessSection() {
     {lanError ? <ErrorNotice error={lanError} onRetry={refreshLan} /> : null}
     {state ? <LanControls state={state} choice={choice} remote={remote} busy={busy} onSelect={setChoice} onToggle={toggle}
       onUpdate={() => void mutateLan(() => api.updateLanFirewall())} /> : null}
+    {available && !remote ? <button type="button" className="btn sm" disabled={busy} onClick={refreshLan}>刷新网络状态</button> : null}
     {address ? <div className="set-row"><span className="lbl">访问地址</span><div>
       <div className="lan-row"><span className="mono lan-address">{address}</span>
         <button type="button" className="btn sm" onClick={() => void copy('地址', address)}>复制地址</button>

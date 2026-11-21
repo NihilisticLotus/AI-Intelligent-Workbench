@@ -9,6 +9,7 @@ import type { LanPairing } from './pairing';
 export interface AccessActor { id: string; name: string; ip: string; remote: boolean }
 
 interface Pending {
+  seq: number;
   request: AccessConfirmRequest;
   actor: AccessActor;
   timer: ReturnType<typeof setTimeout>;
@@ -43,10 +44,10 @@ export class AccessConfirmation {
       const onAbort = () => { const entry = this.pending.get(id); if (entry) this.resolve(entry, 'unavailable'); };
       const timer = setTimeout(() => { const entry = this.pending.get(id); if (entry) this.resolve(entry, 'expired'); }, this.timeoutMs);
       timer.unref();
-      const entry = { request, actor, complete, timer, detach: () => signal?.removeEventListener('abort', onAbort) };
+      const entry = { seq: 0, request, actor, complete, timer, detach: () => signal?.removeEventListener('abort', onAbort) };
       this.pending.set(id, entry);
       signal?.addEventListener('abort', onAbort, { once: true });
-      try { this.events.append({ taskId: null, sessionId: null, type: 'access.confirm_requested', data: request }); }
+      try { entry.seq = this.events.append({ taskId: null, sessionId: null, type: 'access.confirm_requested', data: request }).seq; }
       catch (error) { this.take(entry); reject(error); }
     });
     if (result !== 'allowed') throw this.rejected(result);
@@ -71,6 +72,11 @@ export class AccessConfirmation {
 
   cancelAll() {
     for (const entry of this.pending.values()) this.resolve(entry, 'unavailable');
+  }
+
+  pendingPrompts() {
+    return [...this.pending.values()].filter(entry => this.isPending(entry.request.id))
+      .map(entry => ({ seq: entry.seq, prompt: { kind: 'operation' as const, request: entry.request } }));
   }
 
   private take(entry: Pending) {

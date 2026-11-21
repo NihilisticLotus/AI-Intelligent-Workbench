@@ -3,7 +3,7 @@ import { TaskWorkspace, WorkspaceGlobs } from './workspaces';
 // AI Console 共享协议：Gateway 与所有客户端（浏览器、以后的桌面软件和手机应用）共用的类型与校验。
 // 规则见 docs/plan-phase1.md 第 2 节：只通过 /api/v1 的 REST + WebSocket 对接；类型只在这里定义一次。
 import { z } from 'zod';
-import { AccessConfirmRequest, AccessConfirmResolved, DeviceSource, LanPairingPending, LanPairingRequest, LanPairingResolved } from './access';
+import { AccessConfirmRequest, AccessConfirmResolved, AccessPrompt, DeviceSource, LanPairingPending, LanPairingRequest, LanPairingResolved } from './access';
 export * from './access';
 export * from './workspaces';
 export * from './permissions';
@@ -35,6 +35,7 @@ export const ApiError = z.object({
   message: z.string(),         // 发生了什么
   hint: z.string().optional(), // 怎么处理
   retryAt: Ts.optional(),
+  serverTime: Ts.optional(),
   actions: z.array(ErrorAction).default([]),
 });
 export type ApiError = z.infer<typeof ApiError>;
@@ -422,6 +423,7 @@ export const EventEnvelope = z.discriminatedUnion('type', [
   ev('pairing.resolved', LanPairingResolved),
   ev('access.confirm_requested', AccessConfirmRequest),
   ev('access.confirm_resolved', AccessConfirmResolved),
+  ev('access.lan_suspended', z.object({})),
   ev('task.created', z.object({ task: Task })),
   ev('task.updated', z.object({ task: Task })),
   ev('task.deleted', z.object({ id: Id })),
@@ -521,6 +523,8 @@ export const ServerFrame = z.discriminatedUnion('kind', [
     bootId: z.string().optional(),
     /** 1.1 新增：客户端给的 lastSeq 比服务端最大 seq 还大（数据库被重置或换了）：客户端应清空本地事件状态，重新拉快照 */
     reset: z.boolean().optional(),
+    /** 已配对的本机浏览器在补发结束时对齐待确认队列，含订阅游标之前仍待处理的请求。 */
+    pendingAccess: z.array(AccessPrompt).optional(),
   }),
   z.object({ kind: z.literal('pong'), ts: Ts }),
 ]);

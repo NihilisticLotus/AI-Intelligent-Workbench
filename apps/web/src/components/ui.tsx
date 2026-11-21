@@ -45,12 +45,12 @@ export function Dialog({ title, onClose, children, footer, wide, initialFocus, c
 }
 
 // 命令式对话框：菜单等地方需要“确认一下”“输入名称”时用
-type DialogEntry = { id: number; node: (close: () => void) => ReactNode };
+type DialogEntry = { id: number; node: (close: () => void) => ReactNode; onSessionEnd?: () => void };
 const dialogStore = createStore<DialogEntry[]>([]);
 let dialogSeq = 0;
-export function openDialog(node: (close: () => void) => ReactNode) {
+export function openDialog(node: DialogEntry['node'], onSessionEnd?: () => void) {
   const id = ++dialogSeq;
-  dialogStore.set((l) => [...l, { id, node }]);
+  dialogStore.set((l) => [...l, { id, node, onSessionEnd }]);
   return () => dialogStore.set((l) => l.filter((x) => x.id !== id));
 }
 export function DialogHost() {
@@ -75,7 +75,7 @@ export function confirmDialog(opts: { title: string; body: ReactNode; ok: string
           {opts.body}
         </Dialog>
       );
-    });
+    }, () => resolve(false));
   });
 }
 
@@ -95,7 +95,7 @@ export function choiceDialog<V extends string>(opts: { title: string; body: Reac
           {opts.body}
         </Dialog>
       );
-    });
+    }, () => resolve(null));
   });
 }
 
@@ -137,6 +137,17 @@ function NameDialog({ title, label, value = '', hint, ok, placeholder, onSave, c
 export interface MenuItem { label: string; onSelect: () => void; danger?: boolean; disabled?: boolean }
 interface MenuState { anchor: HTMLElement; items: MenuItem[]; x?: number; y?: number }
 const menuStore = createStore<MenuState | null>(null);
+/** 设备配对失效时结束工作台交互，所有等待用户选择的操作都按取消处理。 */
+export function dismissSessionOverlays() {
+  const dialogs = dialogStore.get();
+  dialogStore.set(() => []);
+  menuStore.set(() => null);
+  errorAlertStore.set(() => []);
+  toastStore.set(() => []);
+  announceStore.set((s) => ({ text: '', n: s.n + 1 }));
+  for (const entry of dialogs) entry.onSessionEnd?.();
+}
+
 export function openMenu(anchor: HTMLElement, items: MenuItem[], at?: { x: number; y: number }) {
   menuStore.set(() => ({ anchor, items, x: at?.x, y: at?.y }));
 }

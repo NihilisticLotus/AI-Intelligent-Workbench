@@ -1,6 +1,7 @@
+import { randomInt } from 'node:crypto';
 import { once } from 'node:events';
 import { createServer } from 'node:net';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { NetworkInterfaceInfoIPv4 } from 'node:os';
 import { FeatureKey, LanState } from '@aic/protocol';
 import WebSocket from 'ws';
@@ -22,30 +23,33 @@ const ipv4 = (address: string, internal = false): NetworkInterfaceInfoIPv4 => ({
   address, netmask: '255.255.255.0', family: 'IPv4', mac: '', internal, cidr: `${address}/24`,
 });
 
-async function occupyPortWithAvailableSuccessor() {
+async function occupyAdjacentPorts() {
   for (let attempt = 0; attempt < 20; attempt++) {
     const occupied = createServer();
-    occupied.listen(0, '127.0.0.1');
-    await once(occupied, 'listening');
-    const addressInfo = occupied.address();
-    const port = typeof addressInfo === 'object' && addressInfo ? addressInfo.port : 65535;
+    const next = createServer();
     const probe = createServer();
+    const close = () => Promise.all([occupied, next, probe].filter(server => server.listening)
+      .map(server => new Promise<void>(resolve => server.close(() => resolve()))));
     try {
-      if (port < 65535) {
-        // Windows 随机分配到的端口旁边也可能落在系统保留范围，先验证顺延端口。
-        probe.listen(port + 1, '127.0.0.1');
-        await once(probe, 'listening');
-        await new Promise<void>((resolve) => probe.close(() => resolve()));
-        return { occupied, port };
-      }
+      // 独立抽取候选，避免系统连续分配的临时端口与同一轮 HTTP 客户端争用。
+      const port = randomInt(20_000, 40_000);
+      occupied.listen(port, '127.0.0.1');
+      await once(occupied, 'listening');
+      next.listen(port + 1, '127.0.0.1');
+      await once(next, 'listening');
+      // 保留两个相邻端口，后续端口探测只用于排除 Windows 保留范围。
+      probe.listen(port + 2, '127.0.0.1');
+      await once(probe, 'listening');
+      await new Promise<void>((resolve) => probe.close(() => resolve()));
+      return { close, port };
     } catch (error) {
       const code = (error as NodeJS.ErrnoException).code;
       if (code !== 'EADDRINUSE' && code !== 'EACCES') {
-        await new Promise<void>((resolve) => occupied.close(() => resolve()));
+        await close();
         throw error;
       }
     }
-    await new Promise<void>((resolve) => occupied.close(() => resolve()));
+    await close();
   }
   throw new Error('未找到可验证端口顺延的相邻回环端口');
 }
@@ -96,17 +100,25 @@ describe('局域网设置接口', () => {
   let t: TestGw | undefined;
   afterEach(async () => { await t?.stop(); t = undefined; });
 
-  async function setup(initialCategory = 'Private', port?: number) {
+  async function setup(initialCategory = 'Private', port?: number, profileCheckMs?: number) {
     const calls: LanCommand[] = [];
     let installed: unknown[] = [];
     let changeResult: LanCommandResult = { status: 'ok', stdout: '' };
     let category = initialCategory;
     let present = true;
+    let hold: (() => Promise<void>) | undefined;
     const lan = {
+      ...(profileCheckMs === undefined ? {} : { profileCheckMs }),
       supported: true, program, listInterfaces: () => present ? [{ name, address: alias }] : [],
       execute: async (cmd: LanCommand): Promise<LanCommandResult> => {
         calls.push(cmd);
-        if (cmd.kind === 'network-profile') return { status: 'ok', stdout: JSON.stringify([{ name, category }]) };
+        if (cmd.kind === 'network-profile') {
+          const stdout = JSON.stringify([{ name, category }]);
+          const pause = hold;
+          hold = undefined;
+          if (pause) await pause();
+          return { status: 'ok', stdout };
+        }
         if (cmd.kind === 'firewall-query') return { status: 'ok', stdout: JSON.stringify(installed) };
         if (changeResult.status === 'ok') {
           const args = cmd.env?.AIC_LAN_RULE_ARGS ?? '';
@@ -120,6 +132,14 @@ describe('局域网设置接口', () => {
     const token = await gw.pair();
     const body = { enabled: true, name, address: alias };
     return { gw, token, calls, body, lan,
+      holdNextProfile: () => {
+        let started!: () => void;
+        let release!: () => void;
+        const arrived = new Promise<void>(resolve => { started = resolve; });
+        const paused = new Promise<void>(resolve => { release = resolve; });
+        hold = () => { started(); return paused; };
+        return { arrived, release };
+      },
       setChangeResult: (value: LanCommandResult) => { changeResult = value; },
       setCategory: (value: string) => { category = value; },
       setPresent: (value: boolean) => { present = value; },
@@ -185,10 +205,12 @@ describe('局域网设置接口', () => {
   });
 
   it('第二监听使用顺延后的同一端口，HTTP 和 WebSocket 校验地址与来源，关闭时只断开第二监听', async () => {
-    const { occupied, port } = await occupyPortWithAvailableSuccessor();
+    const { close, port } = await occupyAdjacentPorts();
     try {
       const { gw, token, body, setChangeResult } = await setup('Private', port);
-      expect(gw.port).toBe(port + 1);
+      // 探测和启动之间系统仍可能分配端口。以产品承诺的十次尝试及实际监听端口为准。
+      expect(gw.port).toBeGreaterThanOrEqual(port + 2);
+      expect(gw.port).toBeLessThan(port + 10);
       const host = `${alias}:${gw.port}`;
       const origin = `http://${host}`;
       const app = createApp(gw.gw.services, { webDist: gw.dataDir });
@@ -236,7 +258,7 @@ describe('局域网设置接口', () => {
         setChangeResult({ status: 'ok', stdout: '' });
         expect((await gw.api('POST', '/access/lan/firewall', { token })).json.firewall).toBe('missing');
       } finally { await localSocket.close(); }
-    } finally { await new Promise<void>((resolve) => occupied.close(() => resolve())); }
+    } finally { await close(); }
   });
 
   it('第二监听失败时回滚开关，本机继续服务，留下可重试清理的规则状态', async () => {
@@ -254,6 +276,42 @@ describe('局域网设置接口', () => {
       expect((await gw.api('GET', '/hello', { token })).status).toBe(200);
       expect((await gw.api('POST', '/access/lan/firewall', { token })).json.firewall).toBe('missing');
     } finally { await new Promise<void>((resolve) => taken.close(() => resolve())); }
+  });
+
+  it('运行中网卡转成公用时停止第二监听，保留本机，恢复网络后由本机重新启用', async () => {
+    const { gw, token, calls, body, setCategory } = await setup('Private', undefined, 40);
+    expect((await gw.api('PUT', '/access/lan', { token, body })).status).toBe(200);
+    const phone = await WsClient.connect(gw.port, token, {}, undefined, alias);
+    try {
+      calls.length = 0;
+      setCategory('Public');
+      await vi.waitFor(() => expect(gw.gw.services.lan.activeAddress()).toBeNull());
+      await vi.waitFor(() => expect(phone.ws.readyState).toBe(WebSocket.CLOSED));
+      const state = (await gw.api('GET', '/access/lan', { token })).json;
+      expect(state).toMatchObject({ requested: true, enabled: false, selected: { category: 'public' } });
+      expect(state.unavailableReason).toContain('公用');
+      expect(calls.some(call => call.kind === 'firewall-change')).toBe(false);
+      setCategory('Private');
+      expect((await gw.api('GET', '/access/lan', { token })).json.enabled).toBe(false);
+      expect((await gw.api('POST', '/access/lan/firewall', { token })).json.enabled).toBe(true);
+      expect((await gw.api('GET', '/hello', { token, loopback: alias })).status).toBe(200);
+    } finally { await phone.close(); }
+  });
+
+  it('上一次监听的公用网络查询晚到时，保留随后重新开启的专用监听', async () => {
+    const { gw, token, body, setCategory, holdNextProfile } = await setup();
+    await gw.api('PUT', '/access/lan', { token, body });
+    setCategory('Public');
+    const gate = holdNextProfile();
+    const stale = gw.api('GET', '/access/lan', { token });
+    try {
+      await gate.arrived;
+      await gw.api('PUT', '/access/lan', { token, body: { enabled: false } });
+      setCategory('Private');
+      expect((await gw.api('PUT', '/access/lan', { token, body })).json.enabled).toBe(true);
+    } finally { gate.release(); }
+    expect((await stale).json).toMatchObject({ enabled: true, requested: true, selected: { category: 'private' } });
+    expect((await gw.api('GET', '/hello', { token, loopback: alias })).status).toBe(200);
   });
 
   it('启动只恢复仍存在的专用网卡和匹配当前程序端口的规则，失败时不提权', async () => {

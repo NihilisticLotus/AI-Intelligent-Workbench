@@ -62,6 +62,9 @@ describe('局域网配对', () => {
       expect((await decide(request.id, true)).status).toBe(200);
       expect((await pollWrongIp()).status).toBe(404);
       expect((await decide(request.id, true)).status).toBe(409);
+      const headersOnly = await gw.api('HEAD', `/pairing/requests/${request.id}`, { loopback: LAN_ALIAS, token });
+      expect(headersOnly.status).toBe(405);
+      expect(headersOnly.headers['set-cookie']).toBeUndefined();
       const granted = await poll(request.id);
       const paired = LanPairingStatus.parse(granted.json);
       if (paired.status !== 'paired') throw new Error('局域网设备未收到配对凭据');
@@ -91,6 +94,79 @@ describe('局域网配对', () => {
       expect((await gw.api('GET', '/hello', { loopback: LAN_ALIAS, ...creds })).status).toBe(401);
       expect((await gw.api('GET', '/devices', { token })).json.items.map((item: { source: string }) => item.source)).toEqual(['local']);
     } finally { await Promise.all([local.close(), lanObserver.close()]); }
+  });
+
+  it('吊销设备会取消它的在途换配，批量吊销也会清掉尚未领取的新配对', async () => {
+    const { gw, token, issue, submit, poll, decide, page } = await setup();
+    const local = await page();
+    try {
+      const services = gw.gw.services;
+      const ip = '127.0.0.1';
+      const old = services.auth.issueDevice(ip, { deviceName: '待换配手机', kind: 'browser', tokenDelivery: 'cookie' }, null, 'lan');
+      const rotation = services.lanPairing.submit(ip, '', { code: (await issue()).code, deviceName: '换配手机', kind: 'browser', tokenDelivery: 'cookie' }, old.device.id);
+      services.lanPairing.decide(rotation.id, true);
+      services.auth.revoke(old.device.id, old.device.id);
+      expect(services.lanPairing.status(rotation.id, ip).body.status).toBe('unavailable');
+      const fresh = LanPairingPending.parse((await submit((await issue()).code)).json);
+      await decide(fresh.id, true);
+      const pending = LanPairingPending.parse((await submit((await issue()).code)).json);
+      const unused = await issue();
+      expect((await gw.api('DELETE', '/devices/lan', { token })).status).toBe(200);
+      expect((await poll(fresh.id)).json.status).toBe('unavailable');
+      expect((await poll(pending.id)).json.status).toBe('unavailable');
+      expect((await submit(unused.code)).status).toBe(400);
+      expect(services.auth.listDevices(null)).toHaveLength(1);
+    } finally { await local.close(); }
+  });
+
+  it('换配写库失败保留原设备，重试只生成一条有效配对', async () => {
+    const { gw, issue, page } = await setup();
+    const local = await page();
+    try {
+      const { auth, lanPairing } = gw.gw.services;
+      const body = { deviceName: '换配设备', kind: 'browser', tokenDelivery: 'cookie' } as const;
+      const ip = '127.0.0.1';
+      const old = auth.issueDevice(ip, body, null, 'lan');
+      const count = auth.listDevices(null).length;
+      const pending = lanPairing.submit(ip, '', { ...body, code: (await issue()).code }, old.device.id);
+      lanPairing.decide(pending.id, true);
+      const failing = vi.spyOn(auth, 'revoke').mockImplementationOnce(() => { throw new Error('模拟换配写入失败'); });
+      try { expect(() => lanPairing.status(pending.id, ip)).toThrow('模拟换配写入失败'); }
+      finally { failing.mockRestore(); }
+      expect(auth.listDevices(null)).toHaveLength(count);
+      expect(auth.deviceRow(old.device.id)?.revoked).toBe(0);
+      expect(lanPairing.status(pending.id, ip).body.status).toBe('paired');
+      expect(auth.deviceRow(old.device.id)?.revoked).toBe(1);
+      expect(auth.listDevices(null)).toHaveLength(count);
+      expect(lanPairing.status(pending.id, ip).body.status).toBe('claimed');
+    } finally { await local.close(); }
+  });
+
+  it('在另一个本机页面接手时补齐仍待处理的两类确认，远程页面只收到普通同步结果', async () => {
+    const { gw, token, issue, submit, page, decide } = await setup();
+    const local = await page();
+    const next = await WsClient.connect(gw.port, token);
+    const phone = await WsClient.connect(gw.port, token, {}, undefined, LAN_ALIAS);
+    try {
+      const pairing = LanPairingPending.parse((await submit((await issue()).code)).json);
+      const id = gw.gw.services.auth.listDevices(null)[0]!.id;
+      const confirmation = gw.gw.services.accessConfirmation.require({ id, name: '离线手机', ip: LAN_ALIAS, remote: true }, 'task.permission');
+      const event = await local.waitEvent(e => e.type === 'access.confirm_requested');
+      if (event.type !== 'access.confirm_requested') throw new Error('没有收到操作确认');
+      const data = { lastSeq: gw.gw.services.events.lastSeq() };
+      try {
+        await next.call({ op: 'subscribe', data });
+        await phone.call({ op: 'subscribe', data });
+        expect(phone.frames.find(f => f.kind === 'replayed')).not.toHaveProperty('pendingAccess');
+        expect(next.frames.find(f => f.kind === 'replayed')).toMatchObject({ pendingAccess: [
+          { kind: 'pairing', request: { id: pairing.id } }, { kind: 'operation', request: { id: event.data.id } },
+        ] });
+        await local.close();
+        await decide(pairing.id, false);
+      } finally { gw.gw.services.accessConfirmation.decide(event.data.id, true); await confirmation; }
+      await next.call({ op: 'subscribe', data });
+      expect(next.frames.filter(f => f.kind === 'replayed').at(-1)).toMatchObject({ pendingAccess: [] });
+    } finally { await Promise.all([local.close(), next.close(), phone.close()]); }
   });
 
   it('拒绝、超时、本机页面掉线或没有打开时均不会发放令牌', async () => {
@@ -132,6 +208,7 @@ describe('局域网配对', () => {
     const fast = await submit(wrong);
     expect(fast.status).toBe(429);
     expect(fast.json).toMatchObject({ code: ErrorCode.RateLimited, retryAt: at() + 60_000 });
+    expect(fast.json.serverTime).toBe(at());
     const other = await app.request('/api/v1/pairing/complete', {
       method: 'POST', headers: { host: `${LAN_ALIAS}:${gw.port}`, 'content-type': 'application/json' },
       body: JSON.stringify({ code: wrong, deviceName: '另一个离线来源' }),
@@ -151,6 +228,20 @@ describe('局域网配对', () => {
     const local = await page();
     try { expect((await submit((await issue()).code)).status).toBe(202); }
     finally { await local.close(); }
+  });
+
+  it('本机发起和失败的配对均留下审计结果，只记录操作和来源', async () => {
+    const { gw, token } = await setup();
+    await gw.api('POST', '/pairing/start');
+    const wrongCode = gw.code() === '000000' ? '111111' : '000000';
+    const rejected = await gw.api('POST', '/pairing/complete', { body: { code: wrongCode, deviceName: '不应进入审计的设备输入' } });
+    expect(rejected.status).toBe(400);
+    const entries = (await gw.api('GET', '/access/audit', { token })).json.items;
+    expect(entries).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'pairing.start', result: 'ok', ip: '127.0.0.1' }),
+      expect.objectContaining({ action: 'pairing.local', result: 'failed', ip: '127.0.0.1' }),
+    ]));
+    expect(JSON.stringify(entries)).not.toContain('不应进入审计的设备输入');
   });
 
   it('旧设备迁移为本机来源，原配对仍然有效', async () => {

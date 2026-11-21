@@ -61,15 +61,17 @@ export class PairingAttempts {
   }
 
   private wait(retryAt: number, locked = false) {
+    const serverTime = this.clock();
     return new AppError(429, {
       code: locked ? ErrorCode.PairingLocked : ErrorCode.RateLimited,
       message: locked ? '配对连续失败次数太多，已暂时锁定' : '配对请求太频繁',
-      hint: `请 ${Math.max(1, Math.ceil((retryAt - this.clock()) / 1000))} 秒后再试`, retryAt, actions: [],
+      hint: `请 ${Math.max(1, Math.ceil((retryAt - serverTime) / 1000))} 秒后再试`, retryAt, serverTime, actions: [],
     });
   }
 }
 
 interface RequestEntry {
+  seq: number;
   info: LanPairingRequest;
   status: 'pending' | 'claimed' | LanPairingResolution;
   replacing: string | null;
@@ -104,6 +106,11 @@ export class LanPairing {
     this.clock = options.clock ?? Date.now;
     this.ttl = options.requestTtlMs ?? REQUEST_TTL;
     this.attempts = new PairingAttempts(this.clock);
+    auth.onRevoke((id) => {
+      for (const request of this.requests.values()) {
+        if (request.replacing === id) this.invalidate(request);
+      }
+    });
   }
 
   hasLocalPage(): boolean { return this.localPages.size > 0; }
@@ -151,15 +158,16 @@ export class LanPairing {
     const info = { id, name: body.deviceName, browser: browserType(userAgent), ip, expiresAt: time + this.ttl };
     const timer = setTimeout(() => this.expire(id), this.ttl);
     timer.unref();
-    this.requests.set(id, { info, status: 'pending', replacing, timer });
-    try { this.events.append({ taskId: null, sessionId: null, type: 'pairing.requested', data: info }); } catch (error) {
+    const entry: RequestEntry = { seq: 0, info, status: 'pending', replacing, timer };
+    this.requests.set(id, entry);
+    try { entry.seq = this.events.append({ taskId: null, sessionId: null, type: 'pairing.requested', data: info }).seq; } catch (error) {
       clearTimeout(timer);
       this.requests.delete(id);
       throw error;
     }
     this.log('有新设备请求连接，请在本机页面确认');
     this.audit.write('pairing.requested', { id: replacing, ip }, 'requested');
-    return { status: 'pending', id, expiresAt: info.expiresAt };
+    return { status: 'pending', id, expiresAt: info.expiresAt, serverTime: time };
   }
 
   decide(id: string, allow: boolean) {
@@ -171,13 +179,18 @@ export class LanPairing {
   status(id: string, ip: string): { body: LanPairingStatus; token?: string } {
     const request = this.lookup(id, ip);
     switch (request.status) {
-      case 'pending': return { body: { status: 'pending', id, expiresAt: request.info.expiresAt } };
+      case 'pending': return { body: { status: 'pending', id, expiresAt: request.info.expiresAt, serverTime: this.clock() } };
       case 'allowed': {
-        const { device, key, token } = this.auth.issueDevice(ip, {
-          deviceName: request.info.name, kind: 'browser', tokenDelivery: 'cookie',
-        }, request.replacing, 'lan');
-        if (!key) throw Errors.internal('没有生成浏览器设备密钥');
+        // 正常轮换会同步通知旧设备已吊销，本次领取已开始，其他换配请求仍需作废。
         request.status = 'claimed';
+        let issued: ReturnType<AuthService['issueDevice']>;
+        try {
+          issued = this.auth.issueDevice(ip, {
+            deviceName: request.info.name, kind: 'browser', tokenDelivery: 'cookie',
+          }, request.replacing, 'lan');
+        } catch (error) { request.status = 'allowed'; throw error; }
+        const { device, key, token } = issued;
+        if (!key) throw Errors.internal('没有生成浏览器设备密钥');
         clearTimeout(request.timer);
         this.audit.write('pairing.claimed', { id: device.id, ip }, 'ok', device.id);
         return { body: { status: 'paired', device, key }, token };
@@ -191,15 +204,18 @@ export class LanPairing {
     return entry?.status === 'pending' && entry.info.expiresAt > this.clock();
   }
 
-  closeLan() {
+  pendingPrompts() {
+    return [...this.requests.values()].filter(entry => this.isPending(entry.info.id))
+      .map(entry => ({ seq: entry.seq, prompt: { kind: 'pairing' as const, request: entry.info } }));
+  }
+
+  invalidateAll() {
     this.code = null;
-    for (const request of this.requests.values()) {
-      if (request.status === 'pending') this.resolve(request, 'unavailable');
-      if (request.status === 'allowed') {
-        request.status = 'unavailable';
-        clearTimeout(request.timer);
-      }
-    }
+    for (const request of this.requests.values()) this.invalidate(request);
+  }
+
+  private invalidate(request: RequestEntry) {
+    if (request.status === 'pending' || request.status === 'allowed') this.resolve(request, 'unavailable');
   }
 
   stop() {

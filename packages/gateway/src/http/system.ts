@@ -8,7 +8,7 @@ import { TOKEN_IDLE_TTL_MS } from '../auth';
 import type { Services } from '../services';
 import type { Env } from './app';
 import { credsOf, isLocalRequest, readBody } from './app';
-import { Errors } from '../util';
+import { Errors, toApiError } from '../util';
 import { auditAccess, confirmRemote } from './access-guard';
 
 export function systemRoutes(s: Services) {
@@ -60,9 +60,9 @@ export function systemRoutes(s: Services) {
   });
 
   // 重新生成配对码：只允许本机请求；配对码只打印在终端窗口里，不经网络返回
-  r.post('/pairing/start', (c) => {
+  r.post('/pairing/start', async (c) => {
     if (!isLocalRequest(c)) throw Errors.forbidden('只能在这台电脑上重新生成配对码');
-    return c.json(s.auth.requestPairingCode(c.get('ip')));
+    return c.json(await auditAccess(c, s, 'pairing.start', undefined, () => s.auth.requestPairingCode(c.get('ip'))));
   });
 
   r.post('/pairing/local-code', async (c) => {
@@ -91,9 +91,16 @@ export function systemRoutes(s: Services) {
       out.token = token; // 桌面 / 手机应用自己保存到安全存储，以后用 Authorization: Bearer
     }
     return c.json(out);
+  }).catch((error: unknown) => {
+    if (isLocalRequest(c)) {
+      s.accessAudit.write('pairing.local', { id: null, ip: c.get('ip') }, toApiError(error).status === 403 ? 'denied' : 'failed');
+    }
+    throw error;
   }));
 
   r.get('/pairing/requests/:id', (c) => {
+    // 路由器默认将 HEAD 分派到 GET。只读响应头不能消耗一次性的浏览器凭据。
+    if (c.req.method === 'HEAD') return c.body(null, 405, { Allow: 'GET' });
     if (!c.get('lanConnection')) throw Errors.forbidden('请在发起配对的设备上查看请求');
     const id = LanPairingRequestId.safeParse(c.req.param('id'));
     if (!id.success) throw Errors.notFound('找不到这条配对请求');
@@ -115,7 +122,11 @@ export function systemRoutes(s: Services) {
 
   r.delete('/devices/lan', async (c) => {
     if (!isLocalRequest(c)) throw Errors.forbidden('只能在这台电脑上吊销全部局域网设备');
-    const revoked = await auditAccess(c, s, 'device.revoke_lan', undefined, () => s.auth.revokeLanDevices(c.get('device').id));
+    const revoked = await auditAccess(c, s, 'device.revoke_lan', undefined, () => {
+      const count = s.auth.revokeLanDevices(c.get('device').id);
+      s.lanPairing.invalidateAll();
+      return count;
+    });
     const result: RevokeLanResult = { revoked };
     return c.json(result);
   });

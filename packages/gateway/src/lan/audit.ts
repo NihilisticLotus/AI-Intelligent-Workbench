@@ -22,7 +22,7 @@ export class AccessAudit {
   }
 
   prune() {
-    try { this.db.run('DELETE FROM audit_log WHERE ts < ?', Date.now() - EARLIEST_DAYS * DAY); }
+    try { this.db.run("DELETE FROM audit_log WHERE action GLOB 'access.*' AND ts < ?", Date.now() - EARLIEST_DAYS * DAY); }
     catch { this.log('清理过期审计日志失败'); }
   }
 

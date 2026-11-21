@@ -73,3 +73,15 @@
 - [仅发送附件换 Agent 时接收方误收切回等待指令](issues/ISSUE-0135-handoff-attachment-only.md)
 - [ACP 首轮请求把历史资料放在本轮用户指令之后](issues/ISSUE-0136-acp-handoff-resource-order.md)
 - [切回原 Agent 或强制重新交接丢失模型选择或思考强度](issues/ISSUE-0137-handoff-return-model-effort.md)
+
+### 2026-11-21 局域网浏览器代码复核
+
+- [第 1.7 步验收记录](acceptance/step-1.7.md)
+- [访问审计清理误删其他模块的历史记录](issues/ISSUE-0154-lan-audit-retention.md)
+- [设备吊销和一次性配对领取的状态不一致](issues/ISSUE-0155-lan-pairing-revocation.md)
+- [电脑新标签页漏掉已有的待确认请求](issues/ISSUE-0156-lan-pending-confirmation-sync.md)
+- [手机时钟偏差造成配对倒计时和重试时间错误](issues/ISSUE-0157-lan-pairing-relative-time.md)
+- [网卡转为公用网络后第二监听仍在运行](issues/ISSUE-0158-lan-running-profile-change.md)
+- [本机配对请求和失败结果缺少访问审计](issues/ISSUE-0159-lan-local-pairing-audit.md)
+- [设备吊销后旧弹窗遮住手机配对页](issues/ISSUE-0160-revoked-device-overlays.md)
+- [正常顺延多个端口时局域网用例误报](issues/ISSUE-0161-lan-port-fallback-assertion.md)

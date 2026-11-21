@@ -1,6 +1,7 @@
 # AI Console 设计文档
 
-> 版本 0.4.61 · 2026-11-19 · 状态：设计中
+> 版本 0.4.62 · 2026-11-21 · 状态：设计中
+> v0.4.62 补充运行中的专用网络复核、吊销与配对领取的顺序、本机待确认队列同步及访问审计保留范围。
 > v0.4.61 同步 1.7 本机验收、局域网设备名称与真机复核范围。
 > v0.4.60 增加网页设备与访问及本机确认，扫码暂缓并保留地址和六位码流程。
 > v0.4.59 同步 1.7 的专用网络监听、电脑确认配对、远程操作保护与审计。mDNS 推迟到手机应用阶段。
@@ -1221,7 +1222,8 @@ approvals (
 )
 devices (
   id TEXT PRIMARY KEY, name TEXT, kind TEXT,  -- desktop | browser | mobile
-  token_hash TEXT, last_ip TEXT, last_seen INTEGER, paired_at INTEGER, revoked INTEGER
+  token_hash TEXT, last_ip TEXT, last_seen INTEGER, paired_at INTEGER, revoked INTEGER,
+  pairing_source TEXT  -- local / lan，旧设备为 local
 )
 audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, action TEXT, detail TEXT, ts INTEGER)
 ```
@@ -1385,6 +1387,7 @@ audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, action TEXT, de
 - 打开时让用户选择网卡（只列出私有网段地址：192.168.x.x、10.x.x.x、172.16–31.x.x），Gateway 只监听该地址。
 - Windows 防火墙：工作台申请一次管理员权限（系统弹出 UAC 确认框），添加一条只对"专用网络"生效的入站规则；关闭局域网访问时自动删除该规则。
 - 当前网络是"公用网络"（如咖啡馆 WiFi）时，拒绝开启并提示原因。
+- 监听生效期间每分钟复核网卡、地址与网络类别，设置页读取状态时也会复核。检测到网卡消失或无法确认仍是专用网络时，Gateway 暂停第二监听、断开已有连接并通知电脑页面。用户可在网络恢复后点击“更新规则”重新连接。后台复核只查询网络状态。
 - 关闭时先停第二监听并断开它的连接，再删除实例规则。规则因程序路径或实际端口变化而不匹配时，可在“设备与访问”更新。
 - mDNS `_aiconsole._tcp` 广播推迟到手机应用阶段。浏览器用“设备与访问”显示的地址直连。
 
@@ -1395,6 +1398,8 @@ audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, action TEXT, de
 3. 用户在电脑上点 [允许] 后，发起配对的设备凭同一请求编号从同一 IP 领取一次浏览器凭据。没打开本机页面、拒绝或超时均不会发放凭据。
 4. Gateway 把随机 256 位令牌保存在 HttpOnly Cookie 中，设备密钥留在浏览器同源存储。数据库只存用于校验的哈希。
 5. 设备令牌 30 天未使用自动失效；可在"设备与访问"页随时吊销。
+
+换配的新旧设备记录在同一事务内更新。吊销设备会取消该设备仍在途的换配，批量吊销会同时作废已发出的局域网配对码和待领取请求。电脑新打开或重新连接的浏览器会取得仍待处理的配对和敏感操作，按发起顺序显示。
 
 新配对的局域网设备名称可由浏览器标识带上设备类型及浏览器名，列表以 Gateway 保存的配对来源显示“本机”或“局域网”。第 1.7 步的本机验收使用回环别名及注入的防火墙执行器；真实网络、Windows UAC、规则删除与手机系统交互仍需现场复核。[1.7 验收记录](../acceptance/step-1.7.md) · [ISSUE-0149](../issues/ISSUE-0149-lan-phone-acceptance.md)
 
@@ -1426,6 +1431,7 @@ audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, action TEXT, de
 - 局域网设备开启全自动或工作区内自动权限、修改项目权限规则（含“总是允许”）、删除项目、吊销设备、合并或应用改动、回滚或丢弃工作副本时，电脑上需要二次确认。恢复单文件或交接检查点、删除带工作副本的任务也沿用该确认。两分钟内没有允许、用户拒绝或没有已连接的本机页面时，请求不会执行。
 - 普通审批、发消息、停止和查看可从局域网设备直接操作。从局域网设备不能填写、修改或清除 Key，也不能把已有 Key 改送到其他授权地址。第三方登录和在电脑桌面打开资源管理器只允许本机操作。
 - 局域网写操作、配对、吊销、开关、规则变更和确认结果写入审计日志。日志保留 90 天，只记录操作名、对象、设备、IP 和结果，在“设备与访问”分页查看。
+- 90 天清理范围为访问审计条目。本机请求新码与配对失败也记录来源与结果。共用审计表中的数据库迁移、账号与模型目录记录沿用原保留策略。
 
 ## 17. 稳定性与诊断
 

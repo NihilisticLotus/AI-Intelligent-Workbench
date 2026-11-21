@@ -42,7 +42,7 @@ export const LanPairingRequest = z.object({
 });
 export type LanPairingRequest = z.infer<typeof LanPairingRequest>;
 
-export const LanPairingPending = z.object({ status: z.literal('pending'), id: LanPairingRequestId, expiresAt: PairingTime });
+export const LanPairingPending = z.object({ status: z.literal('pending'), id: LanPairingRequestId, expiresAt: PairingTime, serverTime: PairingTime.optional() });
 export type LanPairingPending = z.infer<typeof LanPairingPending>;
 
 export const LanPairingResolution = z.enum(['allowed', 'rejected', 'expired', 'unavailable']);
@@ -65,6 +65,12 @@ export const AccessConfirmRequest = z.object({
   deviceId: z.string(), deviceName: z.string(), ip: z.string(), expiresAt: PairingTime,
 });
 export type AccessConfirmRequest = z.infer<typeof AccessConfirmRequest>;
+
+export const AccessPrompt = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('pairing'), request: LanPairingRequest }),
+  z.object({ kind: z.literal('operation'), request: AccessConfirmRequest }),
+]);
+export type AccessPrompt = z.infer<typeof AccessPrompt>;
 
 export const AccessConfirmOutcome = z.enum(['allowed', 'denied', 'expired', 'unavailable']);
 export type AccessConfirmOutcome = z.infer<typeof AccessConfirmOutcome>;

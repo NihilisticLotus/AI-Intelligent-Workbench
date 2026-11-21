@@ -1,5 +1,5 @@
 // 应用外壳：启动状态（载入 / 配对 / 就绪）、侧栏 + 主区 + 右侧面板、全局快捷键。
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { FeatureKey } from '@aic/protocol';
 import { boot, useApp } from './state/app';
 import { prefsStore, setPref, usePref } from './state/prefs';
@@ -7,7 +7,7 @@ import { navigate, newTaskReturnStore, routeHash, routeStore } from './state/ui'
 import { useStore } from './state/store';
 import { Sidebar } from './components/Sidebar';
 import { TaskView } from './components/TaskView';
-import { Announcer, DialogHost, ErrorAlerts, ErrorNotice, MenuHost, Toasts } from './components/ui';
+import { Announcer, DialogHost, dismissSessionOverlays, ErrorAlerts, ErrorNotice, MenuHost, Toasts } from './components/ui';
 import { openPalette } from './components/Palette';
 import { openNewTask } from './components/dialogs';
 import { requestFocusApproval } from './components/focus';
@@ -27,6 +27,9 @@ export function App() {
   const bootState = useApp((s) => s.boot);
   const bootError = useApp((s) => s.bootError);
   useEffect(() => { void boot(); }, []);
+  useLayoutEffect(() => {
+    if (bootState === 'unpaired') dismissSessionOverlays();
+  }, [bootState]);
 
   return (
     <>

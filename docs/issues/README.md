@@ -167,3 +167,13 @@
 | [ISSUE-0159](ISSUE-0159-lan-local-pairing-audit.md) | 本机配对请求和失败结果缺少访问审计 | fixed | bug | 2026-11-21 | 2026-11-21 |
 | [ISSUE-0160](ISSUE-0160-revoked-device-overlays.md) | 设备吊销后旧弹窗遮住手机配对页 | fixed | bug | 2026-11-21 | 2026-11-21 |
 | [ISSUE-0161](ISSUE-0161-lan-port-fallback-assertion.md) | 正常顺延多个端口时局域网用例误报 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0162](ISSUE-0162-gateway-owner-lifecycle.md) | 重复启动或关闭失败会留下错误的目录占用 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0163](ISSUE-0163-committed-event-order.md) | 派生事件抢先推送导致实时对话漏项 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0164](ISSUE-0164-project-settings-atomicity.md) | 项目或分组可保存空名称且多项修改可能只生效一部分 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0165](ISSUE-0165-acp-changed-lines.md) | 工具改动摘要多算尾部空行和两处修改之间的原文 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0166](ISSUE-0166-web-cursor-truncation.md) | 网页把尚有下一页的任务、账号或长对话标为完整 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0167](ISSUE-0167-web-malformed-route.md) | 截断的任务网址会让工作台无法显示 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0168](ISSUE-0168-task-draft-recovery.md) | 草稿可能被临时断线、旧保存或旧标签页覆盖 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0169](ISSUE-0169-folder-picker-pending-selection.md) | 目录读取未确认时可以把父目录误选为项目 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0170](ISSUE-0170-launcher-incomplete-web-assets.md) | 双击启动忽略缺失的网页脚本或样式 | fixed | bug | 2026-11-21 | 2026-11-21 |
+| [ISSUE-0171](ISSUE-0171-queue-failed-reservation.md) | 任务登记排队状态失败会永久占用执行名额 | fixed | bug | 2026-11-21 | 2026-11-21 |

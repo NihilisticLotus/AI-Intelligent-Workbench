@@ -137,7 +137,7 @@ export class TaskService {
   agentSvc: AgentService | null = null;
   independentRuntime: IndependentTaskRuntime | null = null;
   workspaces: WorkspaceManager | null = null;
-  private projectQueue = new TaskQueue(() => 1, (_key, ids) => this.queueChanged(ids));
+  private projectQueue = new TaskQueue(() => 1, (_key, ids) => this.queueChanged(ids), message => this.log(message));
   private turnActivity = new Map<string, TaskActivity>();
   private configuring = new Set<string>();
 
@@ -412,7 +412,9 @@ export class TaskService {
   }
 
   queueChanged(ids: string[]) {
-    for (const id of ids) if (this.db.get('SELECT id FROM tasks WHERE id=?', id)) this.emitUpdated(id);
+    this.db.tx(() => {
+      for (const id of ids) if (this.db.get('SELECT id FROM tasks WHERE id=?', id)) this.emitUpdated(id);
+    });
   }
   moveQueuedTask(id: string, position: number): Task {
     const task = this.get(id);

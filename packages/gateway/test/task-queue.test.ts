@@ -2,6 +2,31 @@ import { describe, expect, it } from 'vitest';
 import { TaskQueue } from '../src/task-queue';
 
 describe('可调序的任务名额', () => {
+  it('取消和释放时通知失败仍唤醒下一任务并报告各次失败', async () => {
+    const errors: string[] = [];
+    let failing = false;
+    const queue = new TaskQueue(() => 1, () => { if (failing) throw new Error('保存失败'); }, message => errors.push(message));
+    const first = await queue.acquire('agent', '甲'), abort = new AbortController();
+    const cancelled = expect(queue.acquire('agent', '乙', undefined, abort.signal)).rejects.toThrow();
+    const next = queue.acquire('agent', '丙');
+    failing = true;
+    abort.abort(); await cancelled; first!();
+    expect(queue.position('乙')).toBeUndefined();
+    expect(queue.running('agent')).toBe(1);
+    expect(errors).toHaveLength(2);
+    failing = false; (await next)!();
+  });
+  it('调序通知保存失败时保留原先的等待顺序', async () => {
+    let failing = false;
+    const queue = new TaskQueue(() => 1, () => { if (failing) throw new Error('保存失败'); });
+    const first = await queue.acquire('agent', '甲');
+    const second = queue.acquire('agent', '乙'), third = queue.acquire('agent', '丙');
+    failing = true;
+    expect(() => queue.move('丙', 1)).toThrow('保存失败');
+    failing = false;
+    expect(queue.position('乙')?.position).toBe(1);
+    first!(); (await second)!(); (await third)!();
+  });
   it('登记排队状态失败后移除等待者，后续任务可以获得名额', async () => {
     const queue = new TaskQueue(() => 1);
     const release = await queue.acquire('agent', '运行中');

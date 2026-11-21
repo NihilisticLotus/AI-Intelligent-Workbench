@@ -39,8 +39,8 @@ export class AgentService {
   private profileLogin = new Map<string, boolean | null>();
   onQueueChange: (ids: string[]) => void = () => {};
   private pool = new TaskQueue(key => this.concurrencyLimit(key as AgentKind), (key, ids) => {
-    this.pushStatus(key as AgentKind); this.onQueueChange(ids);
-  });
+    this.db.tx(() => { this.onQueueChange(ids); this.pushStatus(key as AgentKind); });
+  }, message => this.o.log(message));
   private logins = new Map<string, LoginRec>();
   private probing = new Map<AgentKind, Promise<void>>();
   profiles!: ProfileService;

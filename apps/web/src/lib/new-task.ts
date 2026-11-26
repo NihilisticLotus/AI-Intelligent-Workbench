@@ -21,7 +21,7 @@ export function recommendAgent(prompt: string, hasImage: boolean, projectId: str
     return null;
   }
   const previous = tasks.filter((t) => t.projectId === projectId).sort((a, b) => b.lastActivityAt - a.lastActivityAt)[0];
-  const info = enabled.find((a) => a.kind === previous?.agent);
+  const info = enabled.find((a) => a.kind === previous?.agent && a.status === 'ready');
   if (!previous || !info) return null;
   const model = previous.agent === 'independent' ? previous.independent?.modelId ?? previous.model : previous.model;
   return { agent: info.kind, model: model ?? '', label: `${info.displayName} · ${info.models.find((m) => m.id === model)?.name ?? model ?? 'Agent 默认模型'}`, reason: '这是你上次在这个项目使用的 Agent 和模型。' };

@@ -30,7 +30,7 @@ export function NewTaskPage({ preset = {} }: { preset?: NewTaskPreset }) {
   const [model, setModel] = useState(preset.model ?? taskDefaults(info).model), [effort, setEffort] = useState(taskDefaults(info).effort);
   const [permission, setPermission] = useState<PermissionLevel>('ask');
   const [independent, setIndependent] = useState<IndependentTaskOptions | null>(null);
-  const [created, setCreated] = useState<string | null>(null), [busy, setBusy] = useState(false), [error, setError] = useState<ApiError | null>(null);
+  const [created, setCreated] = useState<string | null>(null), [createdKey, setCreatedKey] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState<ApiError | null>(null);
   const [environments, setEnvironments] = useState<SavedEnvironment[]>([]), [environmentId, setEnvironmentId] = useState('');
   const [environmentError, setEnvironmentError] = useState<ApiError | null>(null), [environmentLoading, setEnvironmentLoading] = useState(true);
   const attachments = useAttachments(created), input = useAttachmentInput(attachments.add);
@@ -40,7 +40,8 @@ export function NewTaskPage({ preset = {} }: { preset?: NewTaskPreset }) {
   const recommendation = recommendAgent(prompt, hasImages, projectId, agents, Object.values(tasks));
   const [adopted, setAdopted] = useState('');
   const recommendationKey = recommendation ? `${projectId}:${recommendation.agent}:${recommendation.model}:${recommendation.reason}` : '';
-  const adoptedCurrent = !!recommendation && adopted === recommendationKey && agent === recommendation.agent && model === recommendation.model;
+  const alreadyMatchesRecommendation = !!recommendation && agent === recommendation.agent && model === recommendation.model;
+  const adoptedCurrent = alreadyMatchesRecommendation && adopted === recommendationKey;
 
   useEffect(() => {
     alive.current = true; textarea.current?.focus();
@@ -68,9 +69,17 @@ export function NewTaskPage({ preset = {} }: { preset?: NewTaskPreset }) {
     const warning = visionWarning(info, model || null, images);
     if (warning.text && (warning.vision === false || !force)) { toast(warning.text, 'attn'); textarea.current?.closest('.nt-page')?.querySelector<HTMLElement>('.attachment-warning button')?.focus(); return; }
     submitting.current = true; setBusy(true); setError(null);
+    const formKey = JSON.stringify({ projectId, groupId, agent, model, effort, permission, profileId, independent });
     try {
-      let task = created ? await api.task(created) : await createTask({ ...newTaskBody({ projectId, groupId, prompt, agent, model, effort, permission, profileId, independent, hasAttachments: !!attachments.items.length }), deferPrompt: true });
-      setCreated(task.id);
+      let task;
+      if (created && createdKey === formKey) {
+        task = await api.task(created);
+      } else {
+        if (created) await api.deleteTask(created).catch(() => {});
+        task = await createTask({ ...newTaskBody({ projectId, groupId, prompt, agent, model, effort, permission, profileId, independent, hasAttachments: !!attachments.items.length }), deferPrompt: true });
+        setCreated(task.id);
+        setCreatedKey(formKey);
+      }
       if (task.workspace?.state === 'confirmation_required') {
         const ready = await confirmWorkspaceCopy(task);
         if (!ready) { setBusy(false); return; }
@@ -83,7 +92,7 @@ export function NewTaskPage({ preset = {} }: { preset?: NewTaskPreset }) {
     } catch (e) { if (alive.current) { setError(asApiError(e)); setBusy(false); } }
     finally { submitting.current = false; }
   };
-  const locked = busy || !!created;
+  const locked = busy;
   const sendDisabled = busy || !prompt.trim() || !project || !agent || !readiness.ready || attachments.uploading || !permAvailable(agent, permission, info) || agent === 'independent' && !independent;
   return <main className="main nt-page">
     <header className="nt-top"><button type="button" className="btn ghost" disabled={busy} onClick={returnFromNewTask}><Icon name="undo" />返回</button><span className="muted">新建任务</span></header>
@@ -121,7 +130,7 @@ export function NewTaskPage({ preset = {} }: { preset?: NewTaskPreset }) {
           </div>
           {permission==='full'?<p className="attn-note" role="status">全自动：按固定禁止和项目规则检查，其余操作不再逐次确认；命令没有系统沙箱。</p>:null}
         </fieldset>
-        {recommendation ? <div className="nt-rec"><div><strong>推荐：{recommendation.label}</strong><p>{recommendation.reason}</p></div><button type="button" className="btn sm" disabled={locked || adoptedCurrent} onClick={() => { changeAgent(recommendation.agent); setModel(recommendation.model); setAdopted(recommendationKey); }}>{adoptedCurrent ? '已采用推荐' : '采用推荐'}</button></div> : null}
+        {recommendation && (!alreadyMatchesRecommendation || adoptedCurrent) ? <div className="nt-rec"><div><strong>推荐：{recommendation.label}</strong><p>{recommendation.reason}</p></div><button type="button" className="btn sm" disabled={locked || adoptedCurrent} onClick={() => { changeAgent(recommendation.agent); setModel(recommendation.model); setAdopted(recommendationKey); }}>{adoptedCurrent ? '已采用推荐' : '采用推荐'}</button></div> : null}
         {agent === 'independent' ? <IndependentTaskConfig initialModelId={model} onChange={(value) => { setIndependent(value); if (value) setModel(value.selection.modelId); }} disabled={locked} /> : null}
         {!readiness.ready ? <div className="alert attn"><div className="body"><strong>{readiness.reason}</strong><p>请在 Agent 页完成安装、登录或连接检测。</p><button type="button" className="btn sm" onClick={() => navigate(agent ? { page: 'agents', agent } : { page: 'agents' })}>去 Agent 页处理</button></div></div> : null}
         <div className="nt-quick">{quickTemplates.map((template) => <button key={template.id} type="button" className="nt-q" disabled={busy} onClick={() => { const draft = templateDraft(template); setPrompt(draft.text); requestAnimationFrame(() => { textarea.current?.focus(); textarea.current?.setSelectionRange(draft.start, draft.end); }); }}>{template.label}</button>)}</div>

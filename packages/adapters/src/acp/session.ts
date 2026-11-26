@@ -232,7 +232,8 @@ export class AcpSession implements AgentConnection {
     // 工作台审批也就拦不住。设置失败或设置后仍比预期宽松，就关掉会话、报错，不交给用户使用。
     const exp = this.spec.modeFor(this.permission);
     try {
-      await this.setPermission(this.permission);
+      // 恢复会话时强制重发一次权限模式，不信任恢复响应投影的默认值（防止旧会话留在宽松模式）
+      await this.setPermission(this.permission, this.resumed);
     } catch (e) {
       this.log('warn', `[agent:${this.spec.kind}] 设置模式失败：${redact(String((e as Error).message), this.secrets)}`);
       throw agentErrors.modeUnavailable(this.spec.kind, this.spec.displayName, exp ?? '');
@@ -443,13 +444,16 @@ export class AcpSession implements AgentConnection {
     else if (configId === this.state.ids.mode) this.state = { ...this.state, mode: value };
   }
 
-  async setPermission(level: PermissionLevel): Promise<void> {
+  async setPermission(level: PermissionLevel, force = false): Promise<void> {
     this.permission = level;
     const modeId = this.spec.modeFor(level);
     if (!modeId) return;
     this.expectedMode = modeId;
-    if (this.state.mode === modeId) return;
+    if (!force && this.state.mode === modeId) return;
     await this.setMode(modeId);
+    if (this.state.mode !== null && this.spec.modeRank(this.state.mode) > this.spec.modeRank(modeId)) {
+      throw agentErrors.modeUnavailable(this.spec.kind, this.spec.displayName, modeId);
+    }
     this.emitConfig();
   }
 
@@ -488,11 +492,17 @@ export class AcpSession implements AgentConnection {
       if (this.state.mode !== null && this.spec.modeRank(this.state.mode) > this.spec.modeRank(exp)) throw new Error(`改回后仍是“${this.state.mode}”`);
       this.emitConfig();
     }).catch((e) => {
+      if (this.conn.isClosed) return;
       this.log('error', `[agent:${this.spec.kind}] 模式改回失败，结束 Agent 进程：${redact(String((e as Error).message), this.secrets)}`);
       this.notice('warn', `没能把 ${this.spec.displayName} 改回“${exp}”模式，已结束 Agent 进程；发下一条消息时会重新启动`);
       this.conn.notify('session/cancel', { sessionId: this.agentSessionId });
       void this.conn.kill();
-    }).finally(() => { this.driftFix = null; });
+    }).finally(() => {
+      this.driftFix = null;
+      if (!this.conn.isClosed && this.state.mode && this.expectedMode && this.spec.modeRank(this.state.mode) > this.spec.modeRank(this.expectedMode)) {
+        this.checkDrift(this.state.mode);
+      }
+    });
     return true;
   }
 
@@ -536,6 +546,7 @@ export class AcpSession implements AgentConnection {
 
   async close(): Promise<void> {
     if (this.configTimer) { clearTimeout(this.configTimer); this.configTimer = null; }
+    if (this.replayTimer) { clearTimeout(this.replayTimer); this.replayTimer = null; }
     if (!this.conn.isClosed && this.caps.close && this.agentSessionId) {
       await this.conn.request('session/close', { sessionId: this.agentSessionId }, 2000).catch(() => {});
     }
@@ -545,14 +556,23 @@ export class AcpSession implements AgentConnection {
 
 const asRecord = (v: unknown): Record<string, unknown> => (isRecord(v) ? v : {});
 const errCode = (e: unknown): number | null => (isRecord(e) || e instanceof Error ? (typeof (e as { code?: unknown }).code === 'number' ? (e as { code: number }).code : null) : null);
+const safeLaunchModel = (m: string) => m.length > 0 && !m.startsWith('-') && !/[\0\r\n\s]/.test(m);
 
 // ---------- 启动（含恢复失败时新建） ----------
 
-export async function startConnection(spec: AcpAgentSpec, rt: AcpRuntime, opts: { cwd: string; env: Record<string, string>; redact?: string[]; label?: string; holder: { session: AcpSession | null }; signal?: AbortSignal }): Promise<AcpConnection> {
+interface SessionHolder { session: AcpSession | null; pending: AgentUpdate[] }
+function attachSession(holder: SessionHolder, session: AcpSession) {
+  holder.session = session;
+  if (holder.pending.length) {
+    const queued = holder.pending.splice(0);
+    for (const u of queued) session.emit(u);
+  }
+}
+
+export async function startConnection(spec: AcpAgentSpec, rt: AcpRuntime, opts: { cwd: string; env: Record<string, string>; redact?: string[]; label?: string; holder: SessionHolder; signal?: AbortSignal }): Promise<AcpConnection> {
   const launch = spec.launch(opts.env);
-  const pending: AgentUpdate[] = [];
   const emitter = {
-    emit: (u: AgentUpdate) => { if (opts.holder.session) opts.holder.session.emit(u); else pending.push(u); },
+    emit: (u: AgentUpdate) => { if (opts.holder.session) opts.holder.session.emit(u); else opts.holder.pending.push(u); },
     log: rt.log,
   };
   try {
@@ -580,10 +600,10 @@ export async function acpSpawn(spec: AcpAgentSpec, rt: AcpRuntime, opts: SpawnOp
   if (signal?.aborted) throw new AbortError();
   // H1：Agent 不能在会话里换模型时，由 Gateway 要求在启动时指定模型
   const inherited = agentEnv(spec, opts.env ?? {});
-  const lm = opts.launchModel && opts.model && spec.launchModel ? spec.launchModel(opts.model, inherited) : null;
+  const lm = opts.launchModel && opts.model && spec.launchModel && safeLaunchModel(opts.model) ? spec.launchModel(opts.model, inherited) : null;
   const env = { ...inherited, ...(lm?.env ?? {}) };
   const runSpec: AcpAgentSpec = lm?.args?.length ? { ...spec, launch: (e) => { const l = spec.launch(e); return { ...l, args: [...l.args, ...lm.args!] }; } } : spec;
-  const holder: { session: AcpSession | null } = { session: null };
+  const holder: SessionHolder = { session: null, pending: [] };
   let conn: AcpConnection | null = null;
   // 用户在启动期间点了 [停止]：立即结束进程，不用等启动超时
   const onAbort = () => { void conn?.kill(); };
@@ -607,11 +627,11 @@ export async function acpSpawn(spec: AcpAgentSpec, rt: AcpRuntime, opts: SpawnOp
   }
 }
 
-async function spawnInner(spec: AcpAgentSpec, rt: AcpRuntime, opts: SpawnOptions, start: () => Promise<AcpConnection>, holder: { session: AcpSession | null }, launchedModel: string | null): Promise<AcpSession> {
+async function spawnInner(spec: AcpAgentSpec, rt: AcpRuntime, opts: SpawnOptions, start: () => Promise<AcpConnection>, holder: SessionHolder, launchedModel: string | null): Promise<AcpSession> {
   let conn = await start();
   let session = new AcpSession(spec, conn, opts, rt);
   session.launchedModel = launchedModel;
-  holder.session = session;
+  attachSession(holder, session);
   const fail = async (e: unknown): Promise<never> => {
     await conn.kill().catch(() => {});
     throw classifyError(e, spec.kind, spec.displayName, opts.redact ?? []);
@@ -633,7 +653,7 @@ async function spawnInner(spec: AcpAgentSpec, rt: AcpRuntime, opts: SpawnOptions
         conn = await start();
         session = new AcpSession(spec, conn, opts, rt);
         session.launchedModel = launchedModel;
-        holder.session = session;
+        attachSession(holder, session);
       }
     }
   }
@@ -681,7 +701,7 @@ export async function acpProbe(spec: AcpAgentSpec, rt: AcpRuntime, opts: ProbeOp
       return r ? { outcome: 'selected', optionId: r.id } : { outcome: 'cancelled' };
     },
   };
-  const holder: { session: AcpSession | null } = { session: null };
+  const holder: SessionHolder = { session: null, pending: [] };
   s = t0();
   let conn: AcpConnection;
   try {
@@ -697,7 +717,7 @@ export async function acpProbe(spec: AcpAgentSpec, rt: AcpRuntime, opts: ProbeOp
     cwd: opts.cwd, model: null, effort: null, permission: 'readonly', host, ...(opts.profile ? { profile: opts.profile } : {}),
     env: opts.env, redact: opts.redact ?? [], sessionLabel: 'probe',
   }, rt);
-  holder.session = session;
+  attachSession(holder, session);
   let error: ProbeResult['error'];
   let ok = true;
   try {
@@ -719,8 +739,8 @@ export async function acpProbe(spec: AcpAgentSpec, rt: AcpRuntime, opts: ProbeOp
         s = t0();
         session.ready();
         try {
-          await session.setPermission('readonly').catch(() => {});
-          const r = await session.prompt({ text: '这是连接测试，请只回复 OK，不要做任何其他事情。' }, new AbortController().signal);
+          await session.setPermission('readonly', true);
+          const r = await session.prompt({ text: '这是连接测试，请只回复 OK，不要做任何其他事情。' }, AbortSignal.timeout(60_000));
           step('发送测试消息', s, r.stopReason === 'end_turn', `回复：${text.trim().slice(0, 200) || '（空）'}`);
           if (r.stopReason !== 'end_turn') ok = false;
         } catch (e) {

@@ -5,7 +5,7 @@ import { environments, saveEnvironment, deleteEnvironment } from '../environment
 import { browse } from '../fsbrowse';
 import type { Services } from '../services';
 import { parseQuery, readBody, type Env } from './app';
-import { confirmRemote } from './access-guard';
+import { confirmRemote, requireLocal } from './access-guard';
 
 export function projectRoutes(s: Services) {
   const r = new Hono<Env>();
@@ -22,8 +22,14 @@ export function projectRoutes(s: Services) {
     return c.json(s.tasks.permissions.put(id, body));
   });
   r.get('/approvals/:id/rule',async c=>c.json(await s.tasks.permissionRulePreview(c.req.param('id'))));
-  r.post('/projects', async (c) => c.json(s.projects.create(await readBody(c, CreateProjectBody)), 201));
-  r.patch('/projects/:id', async (c) => c.json(s.projects.patch(c.req.param('id'), await readBody(c, PatchProjectBody))));
+  r.post('/projects', async (c) => {
+    requireLocal(c, '请在这台电脑上添加项目文件夹');
+    return c.json(s.projects.create(await readBody(c, CreateProjectBody)), 201);
+  });
+  r.patch('/projects/:id', async (c) => {
+    requireLocal(c, '请在这台电脑上修改项目设置');
+    return c.json(s.projects.patch(c.req.param('id'), await readBody(c, PatchProjectBody)));
+  });
   r.delete('/projects/:id', async (c) => {
     const id = c.req.param('id');
     await confirmRemote(c, s, 'project.delete', id);
@@ -32,6 +38,7 @@ export function projectRoutes(s: Services) {
   });
 
   r.get('/fs/browse', (c) => {
+    requireLocal(c, '请在这台电脑上浏览并选择项目文件夹');
     const q = parseQuery(c, FsBrowseQuery);
     return c.json(browse(q.path, { cursor: q.cursor, limit: q.limit }));
   });

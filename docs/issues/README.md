@@ -185,5 +185,12 @@
 | [ISSUE-0177](ISSUE-0177-change-target-selection.md) | 工具记录可能打开并允许还原另一个文件 | fixed | bug | 2026-11-21 | 2026-11-21 |
 | [ISSUE-0178](ISSUE-0178-secret-reference-transaction.md) | 配置保存中断可能留下无归属的密文 | fixed | bug | 2026-11-21 | 2026-11-21 |
 | [ISSUE-0179](ISSUE-0179-lan-uac-preflight.md) | 局域网开关缺少 Windows 无法弹出 UAC 时的处理约定 | fixed | 验收未通过 | 2026-11-21 | 2026-11-22 |
-| [ISSUE-0180](ISSUE-0180-hello-worktree-feature-flag.md) | `/api/v1/hello` 中 `FeatureKey.Worktrees` 仍固定为 `false` | open | bug | 2026-11-26 | — |
+| [ISSUE-0180](ISSUE-0180-hello-worktree-feature-flag.md) | `/api/v1/hello` 中 `FeatureKey.Worktrees` 仍固定为 `false` | fixed | bug | 2026-11-26 | 2026-11-26 |
 | [ISSUE-0181](ISSUE-0181-phase1-antigravity-zcode-codex-refresh.md) | 第一阶段新增 Google Antigravity 接入及 ZCode、Codex 更新兼容与回归测试 | fixed | 待办 | 2026-11-26 | 2026-11-26 |
+| [ISSUE-0182](ISSUE-0182-acp-permission-normalization.md) | ACP 工具名与路径归一缺漏导致审批目标与删除语义识别不全 | fixed | bug | 2026-11-26 | 2026-11-26 |
+| [ISSUE-0183](ISSUE-0183-zcode-xdg-config-and-resume-mode.md) | ZCode 受外部 XDG 配置影响、恢复会话跳过权限重设与连接收尾隐患 | fixed | bug | 2026-11-26 | 2026-11-26 |
+| [ISSUE-0184](ISSUE-0184-permission-rules-path-and-git-guards.md) | 权限规则存在路径/凭据绕过与 Git 正则误判及悬空链接风险 | fixed | bug | 2026-11-26 | 2026-11-26 |
+| [ISSUE-0185](ISSUE-0185-lan-route-boundaries-and-ws-revoke.md) | 局域网接口边界遗漏、目录校验缺口、WS 吊销竞态与配对临期超时 | fixed | bug | 2026-11-26 | 2026-11-26 |
+| [ISSUE-0186](ISSUE-0186-workspace-recovery-semaphore-and-files.md) | 工作区恢复漏算携带文件、附件信号量断链、进程清理与文件归并缺陷 | fixed | bug | 2026-11-26 | 2026-11-26 |
+| [ISSUE-0187](ISSUE-0187-env-redaction-and-launcher-sync.md) | 子进程环境剥离不全、脱敏规则漏网与启动器锁文件检查缺口 | fixed | bug | 2026-11-26 | 2026-11-26 |
+| [ISSUE-0188](ISSUE-0188-web-markdown-handoff-and-draft-fixes.md) | 网页 Markdown 远程图片外联、待交接丢失思考强度与多处状态同步隐患 | fixed | bug | 2026-11-26 | 2026-11-26 |

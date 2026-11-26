@@ -8,7 +8,7 @@ import {
   type AgentInfo, type AgentKind, type AgentProfile, type AgentTestResult, type ApiError, type AuthMethod,
 } from '@aic/protocol';
 import {
-  cancelLogin, clearRetiredProfileSecret, deleteProfile, loadProfiles, patchAgent, patchProfile, redetectAgents, refreshProfileModels, sendLoginCode,
+  appStore, cancelLogin, clearRetiredProfileSecret, deleteProfile, loadProfiles, patchAgent, patchProfile, redetectAgents, refreshProfileModels, sendLoginCode,
   startLogin, testAgent, useApp, useRemoteAccess,
 } from '../state/app';
 import type { LoginInfo } from '../state/core';
@@ -117,7 +117,8 @@ export function AgentsPage() {
       if (on) {
         toast(`已打开 ${a.displayName}，检测完成`);
         select(a.kind, true);
-        if (a.kind === 'zcode' || a.kind === 'antigravity') void runTest({ ...a, enabled: true });
+        const fresh = appStore.get().agents.find((x) => x.kind === a.kind);
+        if (fresh?.status === 'ready' && !fresh.models.length) void runTest(fresh);
       } else toast(`已关闭 ${a.displayName}：不再检测，新建任务和切换器里不显示。已有任务的记录保留`);
     } catch (e) { toastErrorOf(e, { kind: a.kind }); } finally { setToggling(null); }
   };
@@ -238,8 +239,8 @@ function AgentCard({ a, current, busy, test, onSelect, onLogin, onTest, onRedete
       ) : null}
       <dl>
         <dt>版本</dt>
-        <dd className={!a.verified && version !== '—' ? 'unverified' : undefined}>
-          {!a.verified && version !== '—' ? <><Icon name="warn" size={13} /> </> : null}{version}{version === '—' ? '' : a.verified ? '（已验证）' : '，未验证版本'}
+        <dd className={!a.verified && a.status !== 'not_installed' && version !== '—' ? 'unverified' : undefined}>
+          {!a.verified && a.status !== 'not_installed' && version !== '—' ? <><Icon name="warn" size={13} /> </> : null}{version}{version === '—' || a.status === 'not_installed' ? '' : a.verified ? '（已验证）' : '，未验证版本'}
         </dd>
         {real && a.usesNativeConfig ? <><dt>配置</dt><dd>沿用软件自身配置与登录</dd></> : real && profiles.length ? <><dt>账号</dt><dd>{profiles.map((p) => p.name).join('、')}</dd></> : null}
         {a.runningSessions !== undefined ? <><dt>运行中</dt><dd>{a.runningSessions} 个会话{a.concurrencyLimit ? `（并发上限 ${a.concurrencyLimit}）` : ''}</dd></> : null}
@@ -668,7 +669,7 @@ function SettingsSection({ a }: { a: AgentInfo }) {
       {a.engineLocation ? <div className="field"><span className="lbl">引擎位置</span><span className="mono loc">{a.engineLocation}</span></div> : null}
       {a.adapterVersion || a.engineVersion ? (
         <div className="field"><span className="lbl">版本</span><span>{[a.adapterVersion ? `适配器 ${a.adapterVersion}` : null, a.engineVersion ? `引擎 ${a.engineVersion}` : null].filter(Boolean).join('，')}
-          {!a.verified ? <span className="note unverified">不在已验证的版本表里：照常可用，遇到问题请反馈</span> : null}</span></div>
+          {!a.verified && a.status !== 'not_installed' ? <span className="note unverified">不在已验证的版本表里：照常可用，遇到问题请反馈</span> : null}</span></div>
       ) : null}
     </>
   );

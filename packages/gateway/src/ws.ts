@@ -61,7 +61,7 @@ export function attachWs(server: Server, s: Services) {
     handleProtocols: (protocols) => (protocols.has(WS_SUBPROTOCOL) ? WS_SUBPROTOCOL : false),
   });
   const cache = new OpCache();
-  const byDevice = new Map<string, Set<WebSocket>>();
+  const byDevice = new Map<string, Set<() => void>>();
   let connSeq = 0;
 
   const upgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -87,7 +87,7 @@ export function attachWs(server: Server, s: Services) {
   const detach = addServer(server);
 
   s.auth.onRevoke((deviceId) => {
-    for (const ws of byDevice.get(deviceId) ?? []) ws.close(WS_CLOSE_UNAUTHORIZED, 'revoked');
+    for (const kick of byDevice.get(deviceId) ?? []) kick();
   });
 
   function onConnection(ws: WebSocket, device: DeviceRow, lan: boolean, ip: string) {
@@ -96,9 +96,17 @@ export function attachWs(server: Server, s: Services) {
     const actor = { id: device.id, name: device.name, ip, remote };
     const lifetime = new AbortController();
     const connId = ++connSeq;
+    let revoked = false;
+    const kick = () => {
+      if (revoked) return;
+      revoked = true;
+      lifetime.abort();
+      try { ws.close(WS_CLOSE_UNAUTHORIZED, 'revoked'); } catch { /* 忽略 */ }
+      setTimeout(() => { if (ws.readyState !== ws.CLOSED) ws.terminate(); }, 250).unref?.();
+    };
     let set = byDevice.get(deviceId);
     if (!set) { set = new Set(); byDevice.set(deviceId, set); }
-    set.add(ws);
+    set.add(kick);
 
     // 订阅状态：live 之前不推实时事件；lastSent 防止补发和实时之间重复
     let live = false;
@@ -172,7 +180,7 @@ export function attachWs(server: Server, s: Services) {
     };
 
     ws.on('message', async (raw, isBinary) => {
-      if (isBinary) return;
+      if (isBinary || revoked || ws.readyState !== ws.OPEN) return;
       let json: unknown;
       try { json = JSON.parse(raw.toString()); } catch { json = undefined; }
       const parsed = ClientOp.safeParse(json);
@@ -219,7 +227,7 @@ export function attachWs(server: Server, s: Services) {
       generation++;
       lifetime.abort();
       releaseLocalPage?.();
-      set!.delete(ws);
+      set!.delete(kick);
       if (set!.size === 0) byDevice.delete(deviceId);
     });
     ws.on('error', () => { /* close 会随后触发 */ });

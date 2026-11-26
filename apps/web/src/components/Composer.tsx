@@ -286,16 +286,20 @@ function Switcher({ task, config, online }: { task: Task; config: SessionCfg; on
   const enabled = useApp(s=>!!s.hello?.features[FeatureKey.Handoff]);
   const target = useTarget(task.id, task.agent);
   const selected = target?.agent??task.agent;
-  const selectedConfig = target ? {...config,model:target.model??null,effort:target.effort??null,models:agents.find(a=>a.kind===selected)?.models??[],efforts:[]} : config;
+  const selectedConfig = target ? {...config,model:target.model??null,effort:target.effort??null,models:agents.find(a=>a.kind===selected)?.models??[],efforts:undefined} : config;
   return <div className="switcher-controls">
     <AgentPicker agents={enabled?agents:agents.filter(a=>a.kind===task.agent)} agent={selected} config={selectedConfig} profileId={target?null:profileId} mode="task" disabled={!online||!!busy} requestKey={requestKey}
       onPick={pick=>{
         if (pick.agent!==task.agent) {
           const previous=target?.agent===pick.agent?target:undefined;
           selectTarget(task.id,task.agent,{agent:pick.agent,...(pick.model?{model:pick.model}:previous?.model?{model:previous.model}:{}),...(pick.effort?{effort:pick.effort}:previous?.effort?{effort:previous.effort}:{})});
-        } else if (target) selectTarget(task.id,task.agent);
-        else if (task.agent==='independent') openIndependentConfig(task.id,pick.model);
-        else void doSwitch(pick.profileId?'profile':pick.model!==undefined?'model':'effort',{...(pick.model?{model:pick.model}:{}),...(pick.effort?{effort:pick.effort}:{}),...(pick.profileId?{profileId:pick.profileId}:{})});
+        } else {
+          if (target) selectTarget(task.id,task.agent);
+          if (task.agent==='independent') { if (!target || pick.model) openIndependentConfig(task.id,pick.model); }
+          else if (pick.profileId || (pick.model!==undefined && pick.model!==(config.model??'')) || (pick.effort!==undefined && pick.effort!==(config.effort??''))) {
+            void doSwitch(pick.profileId?'profile':pick.model!==undefined?'model':'effort',{...(pick.model?{model:pick.model}:{}),...(pick.effort?{effort:pick.effort}:{}),...(pick.profileId?{profileId:pick.profileId}:{})});
+          }
+        }
       }}/>
     {selected==='independent'?<button type="button" className="btn sm" disabled={!online||busyStatuses.has(task.status)} onClick={()=>openIndependentConfig(task.id,target?.model)}>独立配置</button>:null}
     {swErr?<ErrorNotice error={swErr} ctx={{taskId:task.id,kind:task.agent}} onDismiss={()=>setSwErr(null)}/>:null}

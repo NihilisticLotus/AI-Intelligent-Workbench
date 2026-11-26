@@ -101,8 +101,13 @@ export function createBrowserPlatform(baseUrl = ''): Platform {
       throw new Error('浏览器里不能直接打开 IDE，桌面版提供');
     },
     async openExternal(url) {
-      // 带 noopener 时 window.open 总是返回 null，拿不到“是否被拦截”，只能认为已打开
-      try { window.open(url, '_blank', 'noopener,noreferrer'); return true; } catch { return false; }
+      // 仅允许 http / https 绝对地址，禁止 javascript: / file: / 相对路径跳转
+      try {
+        const parsed = new URL(url);
+        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return false;
+        window.open(parsed.toString(), '_blank', 'noopener,noreferrer');
+        return true;
+      } catch { return false; }
     },
     async copyText(text) {
       try { await navigator.clipboard.writeText(text); return true; } catch { return false; }

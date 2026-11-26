@@ -1,8 +1,14 @@
 // 日志与错误文本脱敏（phase-1.md 6.2.1）。stderr 进日志前、事件里的 error.message 都要经过这里。
-const PATTERNS: RegExp[] = [
-  /sk-[A-Za-z0-9_-]{16,}/g,
-  /Bearer\s+\S+/gi,
-  /((?:api[_-]?key|token|secret|password)\W*[:=]\s*)\S+/gi,
+const PATTERNS: readonly [RegExp, string][] = [
+  [/sk-[A-Za-z0-9_-]{16,}/g, '***'],
+  [/\bAIza[0-9A-Za-z_-]{30,}\b/g, '***'],
+  [/\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}\b/g, '***'],
+  [/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, '***'],
+  [/\bAKIA[0-9A-Z]{16}\b/g, '***'],
+  [/Bearer\s+\S+/gi, 'Bearer ***'],
+  [/([?&](?:api[_-]?)?key=)[^&\s"']+/gi, '$1***'],
+  [/((?:x-aic-key\s*[:=]\s*|aic_session_[a-z0-9]+=|aic-(?:key|bearer)\.))[^\s;,"']+/gi, '$1***'],
+  [/((?:api[_-]?key|token|secret|password)\W*[:=]\s*)\S+/gi, '$1***'],
 ];
 
 /** 把 text 里的密钥替换成 ***。extra：本次启动注入的密钥原文（太短的不处理，避免误伤） */
@@ -11,9 +17,7 @@ export function redact(text: string, extra: readonly string[] = []): string {
   for (const s of extra) {
     if (s && s.length >= 6) out = out.split(s).join('***');
   }
-  out = out.replace(PATTERNS[0]!, '***');
-  out = out.replace(PATTERNS[1]!, 'Bearer ***');
-  out = out.replace(PATTERNS[2]!, '$1***');
+  for (const [re, rep] of PATTERNS) out = out.replace(re, rep);
   return out;
 }
 

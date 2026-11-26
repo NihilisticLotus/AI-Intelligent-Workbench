@@ -243,7 +243,14 @@ export class LanPairing {
 
   private resolve(request: RequestEntry, status: LanPairingResolution) {
     request.status = status;
-    if (status !== 'allowed') clearTimeout(request.timer);
+    clearTimeout(request.timer);
+    if (status === 'allowed') {
+      // 允许后至少给对端留 30 秒领取窗口，避免在倒计时最后一秒点允许导致手机端误报过期。
+      const claimUntil = Math.max(request.info.expiresAt, this.clock() + 30_000);
+      request.info.expiresAt = claimUntil;
+      request.timer = setTimeout(() => this.expire(request.info.id), Math.max(1, claimUntil - this.clock()));
+      request.timer.unref?.();
+    }
     this.audit.write('pairing.resolved', { id: request.replacing, ip: request.info.ip }, status === 'rejected' ? 'denied' : status);
     try {
       this.events.append({ taskId: null, sessionId: null, type: 'pairing.resolved', data: { id: request.info.id, status } });

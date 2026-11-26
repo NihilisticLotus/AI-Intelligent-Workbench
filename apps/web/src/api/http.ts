@@ -174,7 +174,14 @@ export class HttpClient {
   attachmentInfo(taskId: string, id: string) { return this.request('GET', `/tasks/${encodeURIComponent(taskId)}/attachments/${encodeURIComponent(id)}/info`, { parse: AttachmentInfo }); }
   async attachmentBlob(taskId: string, id: string): Promise<Blob> {
     const res = await this.fetchImpl(this.baseUrl + API_BASE + `/tasks/${encodeURIComponent(taskId)}/attachments/${encodeURIComponent(id)}`, { credentials: 'include', headers: this.opts.getAuthHeaders?.() });
-    if (!res.ok) { const body = ApiError.parse(await res.json()); if (res.status === 401) this.opts.onUnauthorized?.(body); throw new ApiRequestError(body, res.status); }
+    if (!res.ok) {
+      let raw: unknown;
+      try { raw = await res.json(); } catch { raw = undefined; }
+      const parsed = ApiError.safeParse(raw);
+      const body = parsed.success ? parsed.data : { code: res.status === 401 ? ErrorCode.Unauthorized : 'server.internal', message: res.status === 401 ? '这台设备的令牌已失效' : `读取附件失败（HTTP ${res.status}）`, actions: [] };
+      if (res.status === 401) this.opts.onUnauthorized?.(body);
+      throw new ApiRequestError(body, res.status);
+    }
     return res.blob();
   }
   uploadAttachment(taskId: string, file: File, progress: (n: number) => void, signal?: AbortSignal): Promise<AttachmentInfo> {
@@ -185,7 +192,19 @@ export class HttpClient {
       for (const [key,value] of Object.entries(this.opts.getAuthHeaders?.() ?? {})) xhr.setRequestHeader(key,value);
       xhr.upload.onprogress = (ev) => { if(ev.lengthComputable) progress(Math.round(ev.loaded / ev.total * 100)); };
       const abort = () => xhr.abort(); const cleanup = () => signal?.removeEventListener('abort', abort);
-      xhr.onload = () => { cleanup(); try { const data: unknown = JSON.parse(xhr.responseText); if(xhr.status >= 200 && xhr.status < 300) resolve(AttachmentInfo.parse(data)); else { const error = ApiError.parse(data); if(xhr.status === 401)this.opts.onUnauthorized?.(error); reject(new ApiRequestError(error,xhr.status)); } } catch { reject(new Error('上传响应无法识别')); } };
+      xhr.onload = () => {
+        cleanup();
+        let data: unknown;
+        try { data = JSON.parse(xhr.responseText); } catch { data = undefined; }
+        if (xhr.status >= 200 && xhr.status < 300) {
+          try { resolve(AttachmentInfo.parse(data)); } catch { reject(new Error('上传响应无法识别')); }
+          return;
+        }
+        const parsed = ApiError.safeParse(data);
+        const error = parsed.success ? parsed.data : { code: xhr.status === 401 ? ErrorCode.Unauthorized : 'server.internal', message: xhr.status === 401 ? '这台设备的令牌已失效' : `上传附件失败（HTTP ${xhr.status}）`, actions: [] };
+        if (xhr.status === 401) this.opts.onUnauthorized?.(error);
+        reject(new ApiRequestError(error, xhr.status));
+      };
       xhr.onerror = () => { cleanup(); reject(new Error('附件上传失败，请检查连接后重试')); }; xhr.onabort = () => { cleanup(); reject(new Error('附件上传已取消')); };
       if(signal?.aborted) { reject(new Error('附件上传已取消'));return; }signal?.addEventListener('abort',abort,{once:true});xhr.send(file);
     });

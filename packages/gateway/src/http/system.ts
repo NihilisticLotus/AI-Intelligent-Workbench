@@ -9,15 +9,15 @@ import type { Services } from '../services';
 import type { Env } from './app';
 import { credsOf, isLocalRequest, readBody } from './app';
 import { Errors, toApiError } from '../util';
-import { auditAccess, confirmRemote } from './access-guard';
+import { auditAccess, confirmRemote, requireLocal } from './access-guard';
 
 export function systemRoutes(s: Services) {
   const r = new Hono<Env>();
   r.get('/settings/handoff/usage',c=>c.json(s.tasks.handoffs!.summaryLedger.summaryUsage()));
   r.get('/settings/handoff',c=>c.json(s.tasks.handoffs!.settings()));
-  r.put('/settings/handoff',async c=>c.json(s.tasks.handoffs!.settings(await readBody(c,HandoffSettings))));
+  r.put('/settings/handoff',async c=>{requireLocal(c,'请在这台电脑上修改交接设置');return c.json(s.tasks.handoffs!.settings(await readBody(c,HandoffSettings)));});
   r.get('/settings/workspaces',c=>c.json(s.workspaces.retention()));
-  r.put('/settings/workspaces',async c=>c.json(s.workspaces.setRetention(await readBody(c,WorkspaceRetention))));
+  r.put('/settings/workspaces',async c=>{requireLocal(c,'请在这台电脑上修改工作副本保留设置');return c.json(s.workspaces.setRetention(await readBody(c,WorkspaceRetention)));});
 
   r.get('/hello', (c) => {
     const d = c.get('device');
@@ -28,12 +28,12 @@ export function systemRoutes(s: Services) {
       features: {
         [FeatureKey.TaskUsage]: true,
         [FeatureKey.FakeAgent]: true,
-        [FeatureKey.RealAgents]: true,
+        [FeatureKey.RealAgents]: s.agents.all().some((a) => a.real),
         [FeatureKey.Profiles]: true,
         [FeatureKey.Approvals]: true,
         [FeatureKey.Groups]: true,
-        [FeatureKey.FsBrowse]: true,
-        [FeatureKey.Worktrees]: false,
+        [FeatureKey.FsBrowse]: isLocalRequest(c),
+        [FeatureKey.Worktrees]: s.workspaces.git.available,
         [FeatureKey.Handoff]: true,
         [FeatureKey.TaskMemory]: true,
         [FeatureKey.Lan]: true,

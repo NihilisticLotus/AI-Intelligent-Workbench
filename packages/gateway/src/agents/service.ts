@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
 import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import {
-  WORKBUDDY_APP_METHOD, type AgentAdapter, type AgentCaps as AdapterCaps, type DetectResult, type LoginHandle, type SessionConfigState,
+  redact, WORKBUDDY_APP_METHOD, type AgentAdapter, type AgentCaps as AdapterCaps, type DetectResult, type LoginHandle, type SessionConfigState,
 } from '@aic/adapters';
 import {
   ErrorActionKey, ErrorCode, type AgentCaps, type AgentInfo, type AgentKind, type AgentLoginBody, type AgentTestResult, type ModelInfo, type PatchAgentBody,
@@ -104,7 +104,8 @@ export class AgentService {
         this.staticCatalog.set(kind, { models: await a.listModels(), efforts: await a.listEfforts(), modes: [] });
       }
     } catch (e) {
-      d = { installed: false, version: null, enginePath: null, loggedIn: false, message: `检测出错：${(e as Error).message}`, error: String((e as Error).message), checkedAt: now() };
+      const safeMsg = redact((e as Error).message);
+      d = { installed: false, version: null, enginePath: null, loggedIn: false, message: `检测出错：${safeMsg}`, error: safeMsg, checkedAt: now() };
     }
     this.detected.set(kind, d);
     return d;
@@ -404,10 +405,10 @@ export class AgentService {
     const turnedOn = body.enabled === true && !this.enabled(kind);
     if (body.enabled !== undefined) s.enabled = body.enabled;
     this.saveSettings(kind, s);
-    // 刚打开：立即检测（强制，不用旧结果）；能自动探测的顺带探测
+    // 刚打开：立即检测（强制，不用旧结果）；已登录的顺带做一次零费用探测补齐模型列表
     if (turnedOn) {
       await this.detect(kind, true).catch(() => {});
-      void this.autoProbe(kind);
+      void this.autoProbe(kind, true);
     }
     if (engineChanged) {
       a.configure?.({ engine: body.engine! });

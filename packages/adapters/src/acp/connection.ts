@@ -187,38 +187,47 @@ export class AcpConnection {
     void this.conn.agent.notify(method, params).catch(() => {});
   }
 
+  private closingTask: Promise<void> | null = null;
+
   /**
    * 正常关闭：关闭 stdin → 等 closeGrace → 结束进程树 → 再等 killGrace → 结束关闭前快照里还活着的子孙进程。
    * 调用方需要的话，先自行发 session/close。
    */
   async close(): Promise<void> {
-    if (this.closing) { await this.exitPromise; return; }
+    if (this.closingTask) return this.closingTask;
     this.closing = true;
-    const pid = this.pid;
-    const snapshot = pid && !this.exited ? await descendants(pid).catch(() => []) : [];
-    try { this.conn.close(); } catch { /* 忽略 */ }
-    try { this.child.stdin.end(); } catch { /* 忽略 */ }
-    if (!this.exited) await Promise.race([this.exitPromise, delay(this.timeouts.closeGrace)]);
-    if (!this.exited && pid) {
-      await killTree(pid);
-      await Promise.race([this.exitPromise, delay(this.timeouts.killGrace)]);
-    }
-    for (const d of snapshot) if (isAlive(d)) await killTree(d);
-    this.opts.log('info', `${this.prefix} 已关闭`);
+    this.closingTask = (async () => {
+      const pid = this.pid;
+      const snapshot = pid && !this.exited ? await descendants(pid).catch(() => []) : [];
+      try { this.conn.close(); } catch { /* 忽略 */ }
+      try { this.child.stdin.end(); } catch { /* 忽略 */ }
+      if (!this.exited) await Promise.race([this.exitPromise, delay(this.timeouts.closeGrace)]);
+      if (!this.exited && pid) {
+        await killTree(pid);
+        await Promise.race([this.exitPromise, delay(this.timeouts.killGrace)]);
+      }
+      for (const d of snapshot) if (isAlive(d)) await killTree(d);
+      this.opts.log('info', `${this.prefix} 已关闭`);
+    })();
+    return this.closingTask;
   }
 
   /** 立即结束进程树（超时、取消无响应时用） */
   async kill(): Promise<void> {
     if (!this.closing) this.killed = true;
+    if (this.closingTask) return this.closingTask;
     this.closing = true;
-    const pid = this.pid;
-    const snapshot = pid && !this.exited ? await descendants(pid).catch(() => []) : [];
-    try { this.conn.close(); } catch { /* 忽略 */ }
-    if (pid && !this.exited) {
-      await killTree(pid);
-      await Promise.race([this.exitPromise, delay(this.timeouts.killGrace)]);
-    }
-    for (const d of snapshot) if (isAlive(d)) await killTree(d);
+    this.closingTask = (async () => {
+      const pid = this.pid;
+      const snapshot = pid && !this.exited ? await descendants(pid).catch(() => []) : [];
+      try { this.conn.close(); } catch { /* 忽略 */ }
+      if (pid && !this.exited) {
+        await killTree(pid);
+        await Promise.race([this.exitPromise, delay(this.timeouts.killGrace)]);
+      }
+      for (const d of snapshot) if (isAlive(d)) await killTree(d);
+    })();
+    return this.closingTask;
   }
 
   /** 等进程退出 */
@@ -270,18 +279,30 @@ export class AcpConnection {
           }
           controller.enqueue(msg as acp.AnyMessage);
         };
+        let droppingLine = false;
         self.child.stdout.on('data', (d: Buffer) => {
           buf += dec.write(d);
           let i: number;
-          while ((i = buf.indexOf('\n')) >= 0) { handle(buf.slice(0, i)); buf = buf.slice(i + 1); }
+          while ((i = buf.indexOf('\n')) >= 0) {
+            const line = buf.slice(0, i);
+            buf = buf.slice(i + 1);
+            if (droppingLine) { droppingLine = false; continue; }
+            if (line.length > MAX_LINE) {
+              self.opts.log('warn', `${self.prefix} stdout 单行超过上限，已丢弃`);
+              continue;
+            }
+            handle(line);
+          }
           if (buf.length > MAX_LINE) {
-            self.opts.log('warn', `${self.prefix} stdout 单行超过上限，已丢弃`);
+            if (!droppingLine) self.opts.log('warn', `${self.prefix} stdout 单行超过上限，已丢弃`);
+            droppingLine = true;
             buf = '';
           }
         });
         self.child.stdout.on('end', () => {
-          if (buf) handle(buf);
+          if (buf && !droppingLine && buf.length <= MAX_LINE) handle(buf);
           buf = '';
+          droppingLine = false;
           try { controller.close(); } catch { /* 已关闭 */ }
         });
         self.child.stdout.on('error', (e) => { try { controller.error(e); } catch { /* 已关闭 */ } });

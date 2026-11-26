@@ -13,6 +13,8 @@ export const ALWAYS_DENIED = [
 const windows=(root:string)=>/^[a-z]:[\\/]|^\\\\/i.test(root);
 export function relativePermissionPath(root:string,value:string):string|null {
   if(!value||/[\0\r\n]/.test(value))return null;
+  if(value==='~'||/^~[\\/]/.test(value))return null;
+  if(/^[\\/]{2}/.test(value))return null;
   const api=windows(root)?path.win32:path.posix;
   if(windows(root)&&(/^[a-z]:[^\\/]/i.test(value)||/^\\\\[?.]\\/.test(value)))return null;
   const target=api.resolve(root,value),relative=api.relative(api.resolve(root),target).replaceAll('\\','/');
@@ -46,15 +48,48 @@ function commandPaths(command:string) {
   // 无法可靠拆解脚本、重定向、变量或多条命令时，不根据通配规则自动放行。
   const simple=!/[;&|<>`\r\n$%]/.test(command);
   const tokens=command.match(/(?:[^\s"']+|"[^"\r\n]*"|'[^'\r\n]*')+/g)??[];
-  const values=tokens.slice(1).map(t=>t.replaceAll('"','').replaceAll("'",''));
+  const clean=(t:string)=>t.replaceAll('"','').replaceAll("'",'');
+  const first=tokens[0]?clean(tokens[0]):'';
+  const headPath=first&&(first==='~'||/^~[\\/]/.test(first)||/[\\/:]/.test(first)||first.startsWith('.'))&&!/^https?:\/\//i.test(first)?first:null;
+  const values=tokens.slice(1).map(clean);
   const paths=values.flatMap(v=>v.startsWith('-')?(v.includes('=')?[v.slice(v.indexOf('=')+1)]:[]):[v]).filter(v=>v&&!/^https?:\/\//i.test(v));
-  return {simple:simple&&(command.match(/"/g)?.length??0)%2===0&&(command.match(/'/g)?.length??0)%2===0&&!/\s(?:-e|-c|-command|-encodedcommand)(?:\s|=)/i.test(command),paths};
+  const hasScriptFlag=/\s(?:-(?:e|ec|enc[a-z]*|c|co[a-z]*|eval|p|print)|--(?:eval|print))(?:\s|=|$)/i.test(command);
+  return {simple:simple&&(command.match(/"/g)?.length??0)%2===0&&(command.match(/'/g)?.length??0)%2===0&&!hasScriptFlag,paths,headPath};
 }
-function protectedTarget(value:string,write:boolean) {
+const PROTECTED_SEGMENTS = new Set([
+  '.claude', '.claude.json', '.codex', '.codebuddy', '.workbuddy', '.zcode', '.gemini',
+  '.ssh', '.aws', '.azure', '.npmrc', '.netrc', '.pypirc', 'id_rsa', 'id_ed25519', 'id_ecdsa',
+]);
+function protectedTarget(value:string,write:boolean,outsideRoot:boolean) {
   const target=value.replaceAll('\\','/').toLowerCase();
-  if(/(?:^|\/)(?:\.claude|\.codex|\.codebuddy|\.workbuddy|\.zcode|\.gemini)(?:\/|$)/.test(target))return true;
-  if(write&&/(?:^|\/)\.git(?:\/|$)/.test(target))return true;
+  if(write&&target.startsWith('//'))return true;
+  const segs=target.split('/').map(s=>s.replace(/:[^/]*$/,'').replace(/[. ]+$/,''));
+  if(segs.some(s=>PROTECTED_SEGMENTS.has(s)))return true;
+  // .aic-data 是工作台私有数据目录；隔离任务自身的工作副本位于 .aic-data/worktrees/ 下，只拦截指向副本之外的 .aic-data 路径。
+  if(outsideRoot&&segs.includes('.aic-data'))return true;
+  if(write&&segs.includes('.git'))return true;
   return write&&(/^[a-z]:\/(?:windows|program files(?: \(x86\))?|programdata)(?:\/|$)/.test(target)||/^\/(?:etc|usr|bin|sbin|boot|sys|proc)(?:\/|$)/.test(target));
+}
+const BLOCKED_GIT_SUBCOMMANDS = new Set(['push','fetch','pull','remote','config','clone','ls-remote']);
+const GIT_OPTS_WITH_ARG = new Set(['-c','-C','--git-dir','--work-tree','--namespace','--config-env','--exec-path']);
+function hasBlockedGitCommand(command:string):boolean {
+  if(/\bgit(?:\.exe)?\s+(?:push|fetch|pull|remote|config|clone|ls-remote)\b/i.test(command))return true;
+  for(const segment of command.split(/[;&|\r\n]+/)) {
+    const tokens=(segment.match(/(?:[^\s"']+|"[^"\r\n]*"|'[^'\r\n]*')+/g)??[]).map(t=>t.replaceAll('"','').replaceAll("'",''));
+    for(let i=0;i<tokens.length;i++) {
+      const cmd=tokens[i]!.replaceAll('\\','/').split('/').pop()?.toLowerCase();
+      if(cmd!=='git'&&cmd!=='git.exe')continue;
+      let j=i+1;
+      while(j<tokens.length&&tokens[j]!.startsWith('-')) {
+        const opt=tokens[j]!;
+        j+=GIT_OPTS_WITH_ARG.has(opt)?2:1;
+      }
+      const sub=tokens[j]?.toLowerCase();
+      if(sub&&BLOCKED_GIT_SUBCOMMANDS.has(sub))return true;
+      break;
+    }
+  }
+  return false;
 }
 export function evaluatePermission(operation:PermissionOperation,context:PermissionContext,rules:PermissionRule[]):PermissionEvaluation {
   const finish=(action:PermissionEvaluation['action'],reason:string,safeScope:boolean,ruleId?:string):PermissionEvaluation=>({action,reason,safeScope,...(ruleId?{ruleId}:{})});
@@ -64,13 +99,18 @@ export function evaluatePermission(operation:PermissionOperation,context:Permiss
   const relatives=paths.map(p=>relativePermissionPath(context.root,p));
   const outside=relatives.some(p=>p===null);
   const safe=operation.complete&&!outside&&(operation.tool!=='shell'||parsed.simple);
-  if(/\bgit(?:\.exe)?[\s\S]*\b(?:push|fetch|remote|config)\b/i.test(command))return finish('deny','始终禁止：推送、拉取或修改 git 远端 / 配置',false);
+  if(hasBlockedGitCommand(command))return finish('deny','始终禁止：推送、拉取或修改 git 远端 / 配置',false);
   if(/(?:^|[\s;&|])(?:format(?:\.com)?|format-volume|mkfs(?:\.[a-z0-9]+)?)(?:\s|$)/i.test(command)||/\b(?:rm|rmdir|rd|remove-item)\b[^\r\n]*\s["']?(?:\/|[a-z]:[\\/])["']?\s*$/i.test(command))return finish('deny','始终禁止：格式化或删除文件系统根目录',false);
   const deletion=operation.deletion||/\b(?:rm|rmdir|rd|del|erase|remove-item)(?:\.exe)?\b/i.test(command);
-  if(deletion&&(outside||!operation.complete))return finish('deny','始终禁止：删除工作副本外文件或无法确认删除范围',false);
+  if(deletion&&(outside||!operation.complete||(operation.tool==='shell'&&/[$%]/.test(command))))return finish('deny','始终禁止：删除工作副本外文件或无法确认删除范围',false);
+  const api=windows(context.root)?path.win32:path.posix;
+  if(operation.tool==='shell'&&parsed.headPath) {
+    const headTarget=api.resolve(context.root,parsed.headPath);
+    if(protectedTarget(headTarget,false,relativePermissionPath(context.root,headTarget)===null))return finish('deny','始终禁止：系统目录、凭据或 git 元数据',false);
+  }
   for(const p of paths) {
-    const api=windows(context.root)?path.win32:path.posix,target=api.resolve(context.root,p);
-    if(protectedTarget(target,write))return finish('deny','始终禁止：系统目录、凭据或 git 元数据',false);
+    const target=api.resolve(context.root,p);
+    if(protectedTarget(target,write,relativePermissionPath(context.root,target)===null))return finish('deny','始终禁止：系统目录、凭据或 git 元数据',false);
     if(write&&context.isolated&&relativePermissionPath(context.original,target)!==null)return finish('deny','始终禁止：直接修改原项目，请使用合并或应用结果',false);
   }
   // 只读是任务的硬边界，项目 allow 不能把只读任务变成写入任务。
@@ -122,14 +162,18 @@ export class PermissionBroker {
     let canonical:PermissionContext;
     try {canonical={...context,root:await realpath(context.root),original:await realpath(context.original)};}
     catch{return {action:'deny' as const,reason:'无法确认项目与工作副本位置，已停止操作',safeScope:false};}
-    // 对已有路径及最近存在的父目录取 realpath，目录联接不能借相对路径命中 allow。
+    // 对已有路径及最近存在的父目录取 realpath，目录联接与悬空符号链接不能借相对路径命中 allow 或绕过保护。
     const resolved:string[]=[];let complete=operation.complete;
     for(const value of [...operation.paths,...(operation.tool==='shell'?commandPaths(operation.command??'').paths:[])]) {
-      let target=path.resolve(context.root,value),tail:string[]=[];
+      if(value==='~'||/^~[\\/]/.test(value)||/^[\\/]{2}/.test(value)){resolved.push(value);continue;}
+      let target=path.resolve(context.root,value),tail:string[]=[],danglingLink=false;
       try {
-        while(true){try{await lstat(target);break;}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;const parent=path.dirname(target);if(parent===target)throw e;tail.unshift(path.basename(target));target=parent;}}
+        while(true){try{const st=await lstat(target);if(st.isSymbolicLink())danglingLink=true;break;}catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e;const parent=path.dirname(target);if(parent===target)throw e;tail.unshift(path.basename(target));target=parent;}}
         resolved.push(path.join(await realpath(target),...tail));
-      }catch{complete=false;resolved.push(value);}
+      }catch{
+        if(danglingLink)return {action:'deny' as const,reason:'始终禁止：无法确认符号链接目标位置',safeScope:false};
+        complete=false;resolved.push(value);
+      }
     }
     const normalized={...operation,paths:resolved,complete};
     return evaluatePermission(normalized,canonical,this.get(context.projectId).items);

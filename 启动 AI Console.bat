@@ -5,17 +5,20 @@ setlocal
 cd /d "%~dp0"
 title AI Console
 
+set "NODE_OPTIONS="
 where node >nul 2>nul
 if errorlevel 1 goto :no_node
 set "NODE_MAJOR="
 for /f "delims=" %%v in ('node -p "parseInt(process.versions.node)" 2^>nul') do set "NODE_MAJOR=%%v"
 if not defined NODE_MAJOR goto :no_node
+echo %NODE_MAJOR%| findstr /r "^[0-9][0-9]*$" >nul || goto :no_node
 if %NODE_MAJOR% LSS 24 goto :no_node
 
 node scripts\start.mjs
+set "AIC_EXIT=%ERRORLEVEL%"
 echo.
 pause
-exit /b 0
+exit /b %AIC_EXIT%
 
 :no_node
 echo.

@@ -8,7 +8,28 @@ const TOOL_KIND: Record<string, ToolKindT> = {
 };
 export const mapToolKind = (k: unknown): ToolKindT => (typeof k === 'string' && TOOL_KIND[k]) || 'other';
 
-/** 工具的目标：locations[0].path，没有时依次取 rawInput.command / file_path / path */
+/** 兜底识别未填 standard kind 的工具（ZCode / CodeBuddy / Claude NotebookEdit 等） */
+export function inferToolKind(u: Record<string, unknown>): ToolKindT {
+  const mapped = mapToolKind(u.kind);
+  if (mapped !== 'other') return mapped;
+  const meta = isRecord(u._meta) ? u._meta : null;
+  const cc = meta && isRecord(meta.claudeCode) ? str(meta.claudeCode.toolName) : null;
+  const cb = meta ? str(meta['codebuddy.ai/toolName']) : null;
+  const rawName = cc ?? cb ?? str(u.name) ?? str(u.toolName);
+  const title = str(u.title);
+  const hint = rawName ?? (title ? /^([A-Za-z_][A-Za-z0-9_-]*)(?:\s*:|$)/.exec(title.trim())?.[1] ?? null : null);
+  if (!hint) return 'other';
+  const low = hint.toLowerCase();
+  if (/^(?:write|edit|multiedit|multi_edit|notebookedit|notebook_edit|write_file|edit_file|create_file|replace_file|apply_patch|patch)$/.test(low)) return 'edit';
+  if (/^(?:delete|delete_file|remove_file|rm)$/.test(low)) return 'delete';
+  if (/^(?:bash|powershell|shell|run_command|execute|terminal|command)$/.test(low)) return 'execute';
+  if (/^(?:read|read_file|view_file|cat|list_dir)$/.test(low)) return 'read';
+  if (/^(?:glob|grep|search|find|find_by_name|grep_search|search_files)$/.test(low)) return 'search';
+  if (/^(?:fetch|web_fetch|webfetch|web_search|search_web)$/.test(low)) return 'fetch';
+  return 'other';
+}
+
+/** 工具的目标：locations[0].path，没有时依次取 rawInput/args 常见命令或路径字段 */
 export function toolTarget(u: Record<string, unknown>): string | null {
   if (Array.isArray(u.locations)) {
     const l = u.locations.find(isRecord);
@@ -19,9 +40,9 @@ export function toolTarget(u: Record<string, unknown>): string | null {
     const cmd = ri.command ?? ri.CommandLine;
     if (typeof cmd === 'string') return cmd;
     if (Array.isArray(cmd) && cmd.every((x) => typeof x === 'string')) return cmd.join(' ');
-    if (typeof ri.file_path === 'string') return ri.file_path;
-    if (typeof ri.path === 'string') return ri.path;
-    if (typeof ri.Path === 'string') return ri.Path;
+    for (const key of ['file_path', 'filePath', 'notebook_path', 'path', 'Path', 'TargetFile', 'AbsolutePath', 'DirectoryPath', 'SearchPath', 'SearchDirectory']) {
+      if (typeof ri[key] === 'string' && ri[key]) return ri[key] as string;
+    }
   }
   return null;
 }
@@ -206,7 +227,7 @@ export class UpdateMapper {
         if (seen) {
           const changes: { title?: string; target?: string | null; toolKind?: ToolKindT } = {};
           if (typeof update.title === 'string' && update.title !== t.title) changes.title = update.title;
-          if (('locations' in update || 'rawInput' in update) && toolTarget(update) !== t.target) changes.target = toolTarget(update);
+          if (('locations' in update || 'rawInput' in update || 'args' in update) && toolTarget(update) !== t.target) changes.target = toolTarget(update);
           if (typeof update.kind === 'string' && mapToolKind(update.kind) !== t.toolKind) changes.toolKind = mapToolKind(update.kind);
           if (Object.keys(changes).length) { Object.assign(t, changes); this.emit({ kind: 'tool_update', toolId: t.id, ...changes }); }
         }

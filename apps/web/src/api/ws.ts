@@ -44,7 +44,9 @@ export interface WsClientOptions {
   WebSocketImpl?: WebSocketCtor;
   /** 当前已收到的最大 seq（由 store 提供） */
   getLastSeq: () => number;
+  initialBootId?: string | null;
   onEvent: (ev: EventEnvelope) => void;
+  onSkippedSeq?: (seq: number) => void;
   onReplayed?: (upToSeq: number, info: { reset: boolean; bootId: string | null; restarted: boolean; pendingAccess?: AccessPrompt[] }) => void;
   onState?: (s: ConnState) => void;
   /** 每次连接失败（含握手失败）后回调，attempt 从 1 开始；界面可以借机用 /hello 检查是不是令牌失效了 */
@@ -73,7 +75,7 @@ const SUBSCRIBE_IDLE_TIMEOUT_MS = 30_000;
 const OPEN = 1;
 
 export class WsClient {
-  private readonly o: Required<Omit<WsClientOptions, 'onReplayed' | 'onState' | 'onConnectFailure' | 'probe' | 'WebSocketImpl' | 'protocols'>> & WsClientOptions;
+  private readonly o: Required<Omit<WsClientOptions, 'onReplayed' | 'onState' | 'onConnectFailure' | 'onSkippedSeq' | 'initialBootId' | 'probe' | 'WebSocketImpl' | 'protocols'>> & WsClientOptions;
   private ws: WebSocketLike | null = null;
   private _state: ConnState = 'idle';
   private pending = new Map<string, Pending>();
@@ -91,6 +93,7 @@ export class WsClient {
   private carryOver: string[] = [];
 
   constructor(opts: WsClientOptions) {
+    this.bootId = opts.initialBootId ?? null;
     this.o = {
       ackTimeoutMs: 15_000, backoffMinMs: 500, backoffMaxMs: 10_000, heartbeatMs: 25_000, newId: () => newOpId(),
       ...opts,
@@ -202,6 +205,14 @@ export class WsClient {
     try { json = JSON.parse(raw); } catch { return; }
     const parsed = ServerFrame.safeParse(json);
     if (!parsed.success) {
+      // 遵循接口规则 2.5：遇到未来版本的新增事件类型时跳过内容，但仍推进 seq 游标并续期补发超时
+      if (json && typeof json === 'object' && (json as { kind?: unknown }).kind === 'event') {
+        if (this._state === 'replaying' && this.subscribeId) this.arm(this.subscribeId);
+        const ev = (json as { event?: unknown }).event;
+        const seq = ev && typeof ev === 'object' ? (ev as { seq?: unknown }).seq : undefined;
+        if (typeof seq === 'number' && Number.isInteger(seq) && seq >= 0) this.o.onSkippedSeq?.(seq);
+        return;
+      }
       console.warn('[ws] 忽略无法识别的消息', parsed.error.issues[0]);
       return;
     }

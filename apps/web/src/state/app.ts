@@ -202,14 +202,31 @@ function connectWs() {
     url: () => api.wsUrl(),
     protocols: () => creds.wsProtocols(),
     getLastSeq: () => appStore.get().wsSeq,
+    initialBootId: appStore.get().hello?.bootId ?? null,
     onEvent: enqueueEvent,
+    onSkippedSeq: (seq) => set((s) => (seq > s.wsSeq ? { ...s, wsSeq: seq } : s)),
     onReplayed: (upToSeq, info) => {
       flushEvents();
       // 服务端的数据库被重置或换了（seq 比我们记得的小）：清空本地事件状态，重新拉快照
       if (info.reset || upToSeq < appStore.get().wsSeq) void resetAndRestart();
       else {
+        set((s) => {
+          const wsSeq = Math.max(s.wsSeq, upToSeq);
+          const logins = info.restarted ? {} : s.logins;
+          return wsSeq === s.wsSeq && logins === s.logins ? s : { ...s, wsSeq, logins };
+        });
         const pending = info.pendingAccess;
         if (pending) accessPromptStore.set(() => pending);
+        if (info.restarted) {
+          void Promise.all([api.hello(), api.agents(), api.pendingApprovals()]).then(([hello, agents, approvals]) => {
+            set((s) => {
+              let core: CoreState = s;
+              core = applyApprovalSnapshot(core, approvals, hello.lastSeq);
+              core = applyAgentSnapshot(core, agents, hello.lastSeq);
+              return { ...s, ...core, hello };
+            });
+          }).catch(() => {});
+        }
       }
     },
     onState: (conn) => {

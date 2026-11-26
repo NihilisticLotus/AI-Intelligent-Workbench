@@ -3,7 +3,7 @@
 // 1. 不读取 ~/.zcode 下的任何凭据或配置文件；登录状态仅通过 ACP session/new 返回的可用服务状态判断。
 // 2. 强制用当前 Node 进程启动桥接器（ZCODE_ACP_RUNTIME=node），关闭远程 hub（ZCODE_ACP_REMOTE=0）与自动挂机续跑（ZCODE_ACP_QUOTA_AUTO_RESUME=0）。
 // 3. 强制覆盖桥接器默认的 yolo 全自动模式：只读映射为 plan，需审批映射为 build（文件修改与命令执行均须请求工作台审批；注意 ZCode 的 guarded 具有 yolo 自动写文件语义，仅拦截高危 shell，故归入更宽松档位）。
-import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -43,10 +43,10 @@ export const ZCODE_AUTH_METHODS: AuthMethodInfo[] = [
 export function findZcode(override?: string | null): string | null {
   if (override) return existsSync(override) ? override : null;
   if (process.platform === 'win32') {
-    const base = process.env.LOCALAPPDATA;
-    if (!base) return null;
-    const js = path.join(base, 'Programs', 'ZCode', 'resources', 'glm', 'zcode.cjs');
-    return existsSync(js) ? js : null;
+    const cands: string[] = [];
+    if (process.env.LOCALAPPDATA) cands.push(path.join(process.env.LOCALAPPDATA, 'Programs', 'ZCode', 'resources', 'glm', 'zcode.cjs'));
+    if (process.env.ProgramFiles) cands.push(path.join(process.env.ProgramFiles, 'ZCode', 'resources', 'glm', 'zcode.cjs'));
+    return cands.find((c) => existsSync(c)) ?? null;
   }
   if (process.platform === 'darwin') {
     const mac = '/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs';
@@ -62,9 +62,14 @@ export function zcodeBridgePaths() {
   return { pkg, entry, adapterVersion: readVersion(pkg) };
 }
 
-/** 受控桥接环境变量：固定 Node 运行时、禁远程端口、禁默认 yolo */
+/** 受控桥接环境变量：固定 Node 运行时、隔离桥接外部用户配置、禁远程端口、禁默认 yolo */
 export function zcodeBridgeEnv(zcodeJs: string, mode: string): Record<string, string> {
+  // zcode-acp-server 的 ~/.config/zcode-acp/config.json 优先级高于环境变量；
+  // 将 XDG_CONFIG_HOME 指向工作台受控空目录（不影响底层 zcode.cjs 读取 ~/.zcode 原生凭据），防止外部配置文件重新开启 remote 或 yolo。
+  const emptyXdg = path.join(tmpdir(), 'aic-zcode-xdg-empty');
+  try { mkdirSync(emptyXdg, { recursive: true }); } catch { /* 忽略 */ }
   return {
+    XDG_CONFIG_HOME: emptyXdg,
     ZCODE_BIN: zcodeJs,
     ZCODE_NODE: process.execPath,
     ZCODE_ACP_RUNTIME: 'node',
@@ -148,7 +153,6 @@ export function createZcodeAdapter(o: ZcodeOptions = {}): AgentAdapter {
     modeRank: (m) => MODE_RANK[m] ?? 99,
     extensions: ['_zcode/turnState'],
     dirEnvKeys: ['ZCODE_HOME'],
-    launchModel: (model) => ({ env: { ZCODE_MODEL: model } }),
     onNotification: (ctx, method) => {
       if (method.startsWith('_zcode/')) ctx.log('debug', `[agent:zcode] 私有通知 ${method}`);
     },
@@ -195,7 +199,7 @@ export function createZcodeAdapter(o: ZcodeOptions = {}): AgentAdapter {
     authMethods: [],
     permissionLevels: ['readonly', 'ask'] satisfies PermissionLevel[],
     autoProbe: false,
-    launchModel: true,
+    launchModel: false,
     workspaceConfig: 'trusted_only',
     experimentalProfile: () => false,
     sessionStore: () => 'shared',

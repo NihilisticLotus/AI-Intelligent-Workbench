@@ -6,8 +6,8 @@
 
 | 文档 | 说明 |
 |---|---|
-| [design/design.md](design/design.md) | 架构设计 v0.4.66：新增 Google Antigravity 原生 ACP 接入、受控 ZCode 桥接（build 模式）与新版 Codex 适配，补充 `.gemini` 写保护与探测临时目录异步清理；局域网 UAC 检查、审批和事务边界；数据目录所有权与实时事件顺序；G1 必要元数据例外与 N2 独立副本；第三方设置归属、独立任务、自有循环、三协议、预算与恢复 |
-| [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.48：Agent 管理与选择器新增 Google Antigravity（`G` 徽标与双主题色）并开放 ZCode 正式连接与对话；局域网开启受阻提示和残留规则清理、改动文件定位；目录确认与草稿恢复、手机布局及设备访问；非 git 应用结果与撤销应用；新建任务起始页、详细六节与统一选择器 |
+| [design/design.md](design/design.md) | 架构设计 v0.4.67：2026-11-26 全项目审查安全与稳定性加固；Google Antigravity 原生 ACP 接入、受控 ZCode 桥接（build 模式）与新版 Codex 适配，`.gemini` 写保护与探测临时目录异步清理；局域网 UAC 检查、审批和事务边界；数据目录所有权与实时事件顺序；G1 必要元数据例外与 N2 独立副本；第三方设置归属、独立任务、自有循环、三协议、预算与恢复 |
+| [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.49：2026-11-26 全项目审查修复（Markdown 远程图片防外联、待交接思考强度、表单失败重试与 Agent 卡片文案）；Google Antigravity（`G` 徽标与双主题色）与 ZCode 正式接入；局域网开启受阻提示和残留规则清理、改动文件定位；目录确认与草稿恢复、手机布局及设备访问；非 git 应用结果与撤销应用；新建任务起始页、详细六节与统一选择器 |
 | [prototype/index.html](prototype/index.html) | 可点击原型（双击打开）：工作台、看板、Agent、资产、生成、自动化、监控、能力 |
 
 ## 调研
@@ -37,6 +37,7 @@
 | 目录 | 说明 |
 |---|---|
 | [acceptance/](acceptance/) | 每一步的验收记录 |
+| [acceptance/workbench-review-2026-11-26.md](acceptance/workbench-review-2026-11-26.md) | 2026-11-26 全项目代码审查与修复验收：关闭 ISSUE-0180、0182～0188，新增 17 项回归单测，全仓 1,256 / 5，深浅双主题与 390×844 浏览器复核 |
 | [acceptance/step-1.8.md](acceptance/step-1.8.md) | 2026-11-26 第 1.8 步通过：Antigravity 官方 `agy acp` 接入、ZCode 受控桥接（`build` 模式）、Codex 2.12.0 升级，三家真实冒烟与三端自动交接合并验收，1,239 / 5 |
 | [全工作台代码审查](acceptance/workbench-review-2026-11-21.md) | 2026-11-21 全工作台审查范围、问题与回归验证 |
 | [acceptance/step-1.7.md](acceptance/step-1.7.md) | 局域网浏览器和手机端适配的分阶段验收、证据与当前进度 |
@@ -49,8 +50,9 @@
 | [ISSUE-0147](issues/ISSUE-0147-lan-pairing-qr.md) | 局域网扫码暂缓，保留地址与配对码流程 |
 | [ISSUE-0148](issues/ISSUE-0148-lan-port-test-exclusion.md) | Windows 回环顺延测试的相邻端口夹具 |
 | [ISSUE-0149](issues/ISSUE-0149-lan-phone-acceptance.md) · [ISSUE-0179](issues/ISSUE-0179-lan-uac-preflight.md) | 手机真机验收与 Windows UAC 现场条件 |
-| [ISSUE-0180](issues/ISSUE-0180-hello-worktree-feature-flag.md) | `/api/v1/hello` 的 `Worktrees` 功能开关状态对齐（排入 2.1） |
+| [ISSUE-0180](issues/ISSUE-0180-hello-worktree-feature-flag.md) | `/api/v1/hello` 的 `Worktrees`/`RealAgents`/`FsBrowse` 功能开关动态对齐（已于 2026-11-26 审查修复关闭） |
 | [ISSUE-0181](issues/ISSUE-0181-phase1-antigravity-zcode-codex-refresh.md) | 第一阶段 1.8：Google Antigravity 接入与新版 ZCode、Codex 适配测试（已完成关闭） |
+| [ISSUE-0182～0188](issues/README.md) | 2026-11-26 全项目代码审查修复项（ACP 权限归一、ZCode 配置隔离、权限规则守卫、局域网接口边界、工作区恢复、环境脱敏与网页安全/交接体验，已全部关闭） |
 
 ### 2026-11-14 用量审查修复
 

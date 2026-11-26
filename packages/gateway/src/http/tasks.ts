@@ -44,7 +44,7 @@ export function taskRoutes(s: Services) {
   r.post('/tasks/:id/queue', async c => c.json(s.tasks.moveQueuedTask(c.req.param('id'), (await readBody(c, MoveQueuedTaskBody)).position)));
   r.delete('/tasks/:id', async (c) => {
     const id = c.req.param('id');
-    if (s.workspaces.get(id)) await confirmRemote(c, s, 'workspace.delete_task', id);
+    await confirmRemote(c, s, 'workspace.delete_task', id);
     return c.json(await s.tasks.deleteTask(id));
   });
   r.post('/tasks/:id/merge', async (c) => {

@@ -9,7 +9,7 @@ import { IndependentCommandExecutor } from './independent/commands';
 export class AttachmentFileReader {
   private root: string;
   private active = 0;
-  private waiting = new Set<() => void>();
+  private waiting = new Set<() => boolean>();
   constructor(dataDirectory: string, private executor: IndependentCommandExecutor) { this.root = realpathSync.native(dataDirectory); }
   private async acquire(signal: AbortSignal) {
     if (signal.aborted) throw new Error('附件读取已取消');
@@ -17,10 +17,21 @@ export class AttachmentFileReader {
     else await new Promise<void>((resolve, reject) => {
       if (this.waiting.size >= 32) { reject(new Error('附件读取等待已满')); return; }
       const abort = () => { this.waiting.delete(ready); signal.removeEventListener('abort', abort); reject(new Error('附件读取已取消')); };
-      const ready = () => { this.waiting.delete(ready); signal.removeEventListener('abort', abort); if (signal.aborted) reject(new Error('附件读取已取消')); else { this.active++; resolve(); } };
+      const ready = () => {
+        this.waiting.delete(ready); signal.removeEventListener('abort', abort);
+        if (signal.aborted) { reject(new Error('附件读取已取消')); return false; }
+        this.active++; resolve(); return true;
+      };
       this.waiting.add(ready); signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort();
     });
-    return () => { this.active--; this.waiting.values().next().value?.(); };
+    return () => {
+      this.active--;
+      while (this.active < 2 && this.waiting.size > 0) {
+        const next = this.waiting.values().next().value;
+        if (!next) break;
+        if (next()) break;
+      }
+    };
   }
   async read(taskId: string, snapshot: AttachmentSnapshot, signal: AbortSignal, maxBytes: number): Promise<Buffer> {
     const release = await this.acquire(signal);

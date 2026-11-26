@@ -1,10 +1,11 @@
 # ISSUE-0180：`/api/v1/hello` 中 `FeatureKey.Worktrees` 仍固定为 `false`
 
-- 状态：open
+- 状态：fixed
 - 类型：bug
 - 严重度：low
 - 发现于：2026-11-26（第二阶段调研盘点代码基线时发现）
-- 目标里程碑：2.1
+- 关闭：2026-11-26
+- 目标里程碑：2.1（提前于 2026-11-26 全项目审查修复）
 
 ## 现象
 
@@ -32,3 +33,4 @@
 ## 时间线
 
 - 2026-11-26：盘点工作台现有文档与代码差异时发现并建单，排入 `docs/plans/phase-2.md` 第 2.1 步。
+- 2026-11-26 修复并关闭：全项目代码审查中将 `packages/gateway/src/http/system.ts` 的 `/api/v1/hello` 开关改为动态读取真实服务端状态（`Worktrees: s.workspaces.git.available`、`RealAgents: s.agents.all().some(a => a.real)`、`FsBrowse: isLocalRequest(c)`），补齐回归测试 `packages/gateway/test/review-2026-11-26.test.ts`，详见 [workbench-review-2026-11-26.md](../acceptance/workbench-review-2026-11-26.md)。

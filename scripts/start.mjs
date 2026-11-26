@@ -1,7 +1,7 @@
 // “启动 AI Console.bat” 调用的启动器：首次安装依赖 → 网页需要时构建 → 启动 Gateway（由它打开浏览器）。
 // 放在 Node 里做，而不是写在 .bat 里：cmd 在 UTF-8 代码页下调用 npm.cmd 之后会读错批处理文件的位置，导致中文行被截断。
 import { spawn, spawnSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { webNeedsBuild } from './web-build.mjs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,8 +29,13 @@ say('  关闭这个窗口会停止 AI Console');
 say('==============================================');
 say();
 
-if (!existsSync(path.join(root, 'node_modules', '.package-lock.json'))) {
-  say('第一次运行，正在安装依赖，大约需要一两分钟……');
+const lockFile = path.join(root, 'package-lock.json');
+const installedLock = path.join(root, 'node_modules', '.package-lock.json');
+const tsx = path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs');
+const depsNeedInstall = !existsSync(installedLock) || !existsSync(tsx)
+  || (existsSync(lockFile) && statSync(lockFile).mtimeMs > statSync(installedLock).mtimeMs);
+if (depsNeedInstall) {
+  say(existsSync(installedLock) ? '检测到依赖有更新，正在同步依赖，大约需要一两分钟……' : '第一次运行，正在安装依赖，大约需要一两分钟……');
   if (!npm(['ci', '--no-fund', '--no-audit'])) fail('安装依赖失败。请检查网络连接后，重新双击“启动 AI Console”。');
   say();
 }
@@ -45,7 +50,6 @@ say('正在启动服务，浏览器会自动打开。');
 say('使用期间请保持这个窗口开着，关闭这个窗口会停止 AI Console。');
 say();
 
-const tsx = path.join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs');
 const server = path.join(root, 'packages', 'gateway', 'src', 'server.ts');
 // 正式启动不带任何开发用变量：即使用户或系统环境里设置了它们，也不会传给 Gateway
 const env = { ...process.env };
@@ -53,9 +57,11 @@ for (const k of Object.keys(env)) {
   if (/^AIC_DEV/i.test(k)) delete env[k];
 }
 const child = spawn(process.execPath, [tsx, '--disable-warning=ExperimentalWarning', server], { cwd: root, stdio: 'inherit', env });
-// Ctrl+C、关闭窗口（Windows 上是 SIGHUP）时子进程会一起收到信号并自己收尾，这里只等它退出
+// Ctrl+C、Ctrl+Break、关闭窗口（Windows 上是 SIGHUP）时子进程会一起收到信号并自己收尾，这里只等它退出
 process.on('SIGINT', () => {});
 process.on('SIGHUP', () => {});
+process.on('SIGBREAK', () => {});
+child.on('error', (err) => fail(`启动服务失败：${err.message}`));
 child.on('exit', (code) => {
   say();
   if (code === 3) {

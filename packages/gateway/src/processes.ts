@@ -37,6 +37,7 @@ export class ProcessRegistry implements ProcessTracker {
     const starts = await processStartTimes(rows.map((r) => r.pid));
     let killed = 0;
     for (const r of rows) {
+      if (this.live.has(r.pid)) continue;
       const actual = starts.get(r.pid);
       const recorded = Number(r.created_at);
       if (actual !== undefined && Number.isFinite(recorded) && Math.abs(actual - recorded) < START_TOLERANCE_MS) {
@@ -44,8 +45,8 @@ export class ProcessRegistry implements ProcessTracker {
         killed++;
         this.log(`[agents] 结束上次遗留的 ${r.agent} 进程 ${r.pid}`);
       }
+      try { this.db.run('DELETE FROM agent_processes WHERE pid = ? AND created_at = ?', r.pid, r.created_at); } catch { /* 忽略 */ }
     }
-    try { this.db.run('DELETE FROM agent_processes WHERE pid IN (' + rows.map(() => '?').join(',') + ')', ...rows.map((r) => r.pid)); } catch { /* 忽略 */ }
     return killed;
   }
 }

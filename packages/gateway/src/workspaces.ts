@@ -15,7 +15,10 @@ import { WorkspaceTransferReply, type WorkspaceTransferItem } from '@aic/protoco
 export const SNAPSHOT_FILE_LIMIT = 50 * 1024 * 1024;
 export const COPY_CONFIRM_LIMIT = 100 * 1024 * 1024;
 export const FILE_DIFF_LIMIT = 1024 * 1024;
-const IGNORED = new Set(['.git', 'node_modules', 'dist', '.venv', 'Library', 'Temp', 'Intermediate', 'DerivedDataCache', 'Binaries', '.aic-data'].map(x => x.toLowerCase()));
+const IGNORED = new Set([
+  '.git', 'node_modules', 'dist', '.venv', 'Library', 'Temp', 'Intermediate', 'DerivedDataCache', 'Binaries',
+  '.aic-data', '.claude', '.codex', '.codebuddy', '.workbuddy', '.zcode', '.gemini', '.ssh', '.aws', '.azure',
+].map(x => x.toLowerCase()));
 
 export class WorkspaceError extends Error {
   constructor(readonly code: string, message: string, readonly files: string[] = [], readonly bytes?: number) { super(message); }
@@ -755,12 +758,14 @@ export class WorkspaceManager {
     }
     return [...new Set(files)];
   }
+  private carriedSet(record: WorkspaceRecord): Set<string> {
+    return new Set(record.kind==='worktree'?record.sourceFiles.map(f=>process.platform==='win32'?f.path.toLowerCase():f.path):[]);
+  }
   private async originalReady(record: WorkspaceRecord): Promise<WorkspaceOperationResult | null> {
     const actual=await this.currentBranch(record.projectPath);
     if (!record.baseBranch || actual!==record.baseBranch) return {status:'wrong_branch',expected:record.baseBranch,actual};
     // 带入副本的本地文件在项目里是未跟踪文件，合并不会碰它们；只排除这些未跟踪项，任何已跟踪改动仍阻止（ISSUE-0099）。
-    const carried=new Set(record.kind==='worktree'?record.sourceFiles.map(f=>process.platform==='win32'?f.path.toLowerCase():f.path):[]);
-    const files=(await this.dirtyFiles(record.projectPath,carried));
+    const files=(await this.dirtyFiles(record.projectPath,this.carriedSet(record)));
     return files.length ? {status:'dirty',files} : null;
   }
 
@@ -960,7 +965,7 @@ export class WorkspaceManager {
           // 原项目在操作前已确认干净；这里只撤回本次失败压缩合并写入的索引和文件。
           await this.git.checked(['reset','--merge',before],original);
         }
-        if(await this.head(record.projectPath)===before && !(await this.dirtyFiles(record.projectPath)).length)this.db.run('DELETE FROM workspace_operations WHERE task_id=?',taskId);
+        if(await this.head(record.projectPath)===before && !(await this.dirtyFiles(record.projectPath,this.carriedSet(record))).length)this.db.run('DELETE FROM workspace_operations WHERE task_id=?',taskId);
         throw e;
       }
       const commit=await this.head(record.projectPath);
@@ -985,7 +990,7 @@ export class WorkspaceManager {
         const state=await this.git.run(['rev-parse','--verify','REVERT_HEAD'],opts);
         if(state.code===0)await this.git.checked(['revert','--abort'],opts);
         else if(await this.head(record.projectPath)===actual)await this.git.checked(['reset','--merge',actual],opts);
-        if(await this.head(record.projectPath)===actual&&!(await this.dirtyFiles(record.projectPath)).length)this.saveOperation(operation);throw e;
+        if(await this.head(record.projectPath)===actual&&!(await this.dirtyFiles(record.projectPath,this.carriedSet(record))).length)this.saveOperation(operation);throw e;
       }
       const commit=await this.head(record.projectPath);
       this.saveOperation({...operation,state:'rolled_back',rollbackCommit:commit,finishedAt:Date.now()});
@@ -1005,7 +1010,7 @@ export class WorkspaceManager {
         if(record.kind!=='worktree'||await this.currentBranch(record.projectPath)!==record.baseBranch){unresolved.push(id);continue;}
         const head=await this.head(record.projectPath),opts={cwd:record.projectPath};
         if(head===pending.headBefore) {
-          if((await this.dirtyFiles(record.projectPath)).length){unresolved.push(id);continue;}
+          if((await this.dirtyFiles(record.projectPath,this.carriedSet(record))).length){unresolved.push(id);continue;}
           if(pending.kind==='merge')this.db.run('DELETE FROM workspace_operations WHERE task_id=?',id);
           else {const {pending:_pending,...rest}=operation;this.saveOperation({...rest,state:'merged'});}
         }else {
@@ -1085,6 +1090,26 @@ export class WorkspaceManager {
         catch (e) {
           if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
           this.db.run('DELETE FROM workspace_records WHERE task_id=?',taskId); return;
+        }
+      }
+      // 原项目或副本目录已被用户在资源管理器中删除/移走时，仍允许安全清理受管副本与登记记录（避免任务/项目卡死无法删除）
+      if (pending) {
+        const expected = await this.location(pending);
+        if (!samePath(expected, pending.path)) fail('workspace.path', '工作副本登记路径不匹配。');
+        const exists = async (p: string) => { try { await lstat(p); return true; } catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return false; throw e; } };
+        const [copyExists, projectExists] = await Promise.all([exists(expected), exists(pending.projectPath)]);
+        if (!copyExists || !projectExists) {
+          if (copyExists) await rm(expected, { recursive: true, force: true });
+          if (pending.gitDir) {
+            const shadow = await this.location(pending, 'shadow');
+            if (samePath(shadow, pending.gitDir)) await rm(shadow, { recursive: true, force: true });
+          }
+          if (pending.kind === 'worktree' && projectExists && pending.branch?.startsWith(`aic/${taskId}`)) {
+            await this.git.run(['worktree', 'prune'], { cwd: pending.projectPath }).catch(() => {});
+            await this.git.run(['branch', '-D', pending.branch], { cwd: pending.projectPath }).catch(() => {});
+          }
+          this.finishRemoval(taskId);
+          return;
         }
       }
       const record = await this.checkedRecord(taskId);

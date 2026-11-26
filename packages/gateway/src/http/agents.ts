@@ -31,7 +31,10 @@ export function agentRoutes(s: Services) {
     return c.json(out);
   });
 
-  r.patch('/agents/:kind', async (c) => c.json(await s.agentSvc.patch(kindOf(c), await readBody(c, PatchAgentBody))));
+  r.patch('/agents/:kind', async (c) => {
+    requireLocal(c, '请在这台电脑上修改 Agent 设置');
+    return c.json(await s.agentSvc.patch(kindOf(c), await readBody(c, PatchAgentBody)));
+  });
 
   r.post('/agents/:kind/login', async (c) => {
     requireLocal(c, LOCAL_LOGIN);
@@ -55,6 +58,7 @@ export function agentRoutes(s: Services) {
   });
 
   r.post('/agents/:kind/test', async (c) => {
+    requireLocal(c, '请在这台电脑上测试 Agent 连接');
     const kind = kindOf(c);
     const ct = c.req.header('content-type') ?? '';
     const body = ct ? await readBody(c, AgentTestBody) : {};

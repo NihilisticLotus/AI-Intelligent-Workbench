@@ -1,6 +1,7 @@
 # AI Console 设计文档
 
-> 版本 0.4.66 · 2026-11-26 · 状态：设计中
+> 版本 0.4.67 · 2026-11-26 · 状态：设计中
+> v0.4.67 同步 2026-11-26 全项目代码审查加固：`/api/v1/hello` 动态上报 `Worktrees`/`RealAgents`/`FsBrowse`；收紧局域网管理路由 `requireLocal` 与删任务二次确认、WS 吊销同步丢帧强断、目录校验与权限路径/凭据/Git 命令守卫；隔离 ZCode `XDG_CONFIG_HOME`、补齐 ACP 恢复会话权限重设与 Gateway 私有环境变量剥离，及工作区/信号量/进程/文件清单稳定性修复。见 [workbench-review-2026-11-26.md](../acceptance/workbench-review-2026-11-26.md)。
 > v0.4.66 同步第 1.8 步：新增 Google Antigravity 官方 `agy acp`（1.5.18）原生接入，通过受控 `zcode-acp-server@0.94.0`（`ask` 映射为 `build`、禁用默认 `yolo` 与远程端口）接入新版 ZCode，升级 `codex-acp@2.12.0` / `@openai/codex@0.171.0`，补充 `.gemini` 凭据目录写保护与探测临时目录异步重试清理。见 2026-11-26 开发笔记。
 > v0.4.65 补充局域网开关如何处理无法显示 Windows 权限提示的情况。见 2026-11-22 开发笔记。
 > v0.4.64 补充工作副本终态与任务状态的事务边界、审批截止时刻以及服务配置与密文的共同提交。见 2026-11-21 第二轮审查开发笔记。

@@ -1,5 +1,5 @@
 // 文件夹浏览：只列目录，用于“添加项目”。客户端不接触本机路径拼接，只把返回的 path 原样传回。
-import { existsSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import type { FsBrowseResult, FsEntry } from '@aic/protocol';
@@ -21,12 +21,16 @@ const hasGit = (dir: string) => { try { return existsSync(P.join(dir, '.git')); 
  * 校验并规范化客户端传来的路径。
  * 只接受绝对路径；拒绝 `..` 段（路径穿越）、UNC / 设备路径（\\server、\\?\）和控制字符。
  */
+const RESERVED_WIN_DEVICE = /^(?:con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
+const PROTECTED_PROJECT_SEGMENTS = new Set(['.claude', '.codex', '.codebuddy', '.workbuddy', '.zcode', '.gemini', '.ssh', '.aws', '.azure', '.aic-data']);
+
 export function normalizeDirPath(input: string): string {
   if (typeof input !== 'string' || input.length === 0 || input.length > 1000) throw Errors.badRequest('路径不正确');
   if (/[\u0000-\u001f]/.test(input)) throw Errors.badRequest('路径里有不允许的字符');
   if (/^[\\/]{2}/.test(input)) throw Errors.badRequest('不支持网络路径或设备路径', '请选择本机磁盘上的文件夹');
   const segs = input.split(/[\\/]+/);
   if (segs.some((s) => s === '..')) throw Errors.badRequest('路径里不能包含“..”');
+  if (isWin && segs.some((s) => RESERVED_WIN_DEVICE.test(s))) throw Errors.badRequest('路径包含系统保留设备名');
   if (isWin) {
     if (!/^[A-Za-z]:([\\/]|$)/.test(input)) throw Errors.badRequest('请使用完整路径，例如 D:\\Projects');
     // 盘符后的冒号之外不允许再出现冒号（NTFS 备用数据流）
@@ -108,11 +112,21 @@ export function browse(input?: string, page: { cursor?: string | undefined; limi
   };
 }
 
-/** 添加项目时校验路径：必须是存在的文件夹 */
+/** 添加项目时校验路径：必须是存在的普通文件夹，且不能是磁盘根目录、用户主目录本身、系统目录或凭据目录 */
 export function validateProjectDir(input: string): { path: string; isGit: boolean } {
   const dir = normalizeDirPath(input);
   let st;
-  try { st = statSync(dir); } catch { throw Errors.badRequest('找不到这个文件夹', '请用“浏览”选择一个已存在的文件夹'); }
+  try { st = lstatSync(dir); } catch { throw Errors.badRequest('找不到这个文件夹', '请用“浏览”选择一个已存在的文件夹'); }
+  if (st.isSymbolicLink()) throw Errors.badRequest('不能选择符号链接或目录联接作为项目目录');
   if (!st.isDirectory()) throw Errors.badRequest('请选择文件夹，而不是文件');
+  const norm = dir.replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
+  const home = homedir().replaceAll('\\', '/').replace(/\/+$/, '').toLowerCase();
+  if (dir === P.parse(dir).root || norm === home) throw Errors.badRequest('不能直接把磁盘根目录或用户主目录添加为项目', '请选择具体的项目子文件夹');
+  if (/^[a-z]:\/(?:windows|program files(?: \(x86\))?|programdata)(?:\/|$)/.test(norm) || /^\/(?:etc|usr|bin|sbin|boot|sys|proc)(?:\/|$)/.test(norm)) {
+    throw Errors.badRequest('不能把系统目录添加为项目');
+  }
+  if (norm.split('/').some((s) => PROTECTED_PROJECT_SEGMENTS.has(s.replace(/[. ]+$/, '')))) {
+    throw Errors.badRequest('不能把凭据或工作台私有数据目录添加为项目');
+  }
   return { path: dir, isGit: hasGit(dir) };
 }

@@ -2,7 +2,7 @@
 import { clip } from '../redact';
 import type { PermissionOptionKind, PermissionRequest } from '../types';
 import { isRecord, str } from '../util';
-import { mapToolKind, toolTarget } from './updates';
+import { inferToolKind, toolTarget } from './updates';
 
 const STD_KINDS = new Set<PermissionOptionKind>(['allow_once', 'allow_always', 'reject_once', 'reject_always']);
 
@@ -71,10 +71,10 @@ export function normalizePermission(params: Record<string, unknown>, ctx: { agen
     auto = rej ? { optionId: rej } : 'cancelled';
   }
 
-  // 标题：toolCall.title；没有时按工具生成（CodeBuddy 用 _meta 里的工具名）
+  // 标题：toolCall.title；没有时按工具生成（CodeBuddy / ZCode 用 _meta 里的工具名）
   const meta = toolCall && isRecord(toolCall._meta) ? toolCall._meta : {};
-  const toolName = str(meta['codebuddy.ai/toolName']);
-  const kind = toolCall ? mapToolKind(toolCall.kind) : 'other';
+  const toolName = str(meta['codebuddy.ai/toolName']) ?? (isRecord(meta.claudeCode) ? str(meta.claudeCode.toolName) : null);
+  const kind = toolCall ? inferToolKind(toolCall) : 'other';
   const title = (toolCall && str(toolCall.title))
     ?? (toolCallId ? ctx.activeTitle?.(toolCallId) : undefined)
     ?? (toolName ? `${ctx.agentName} 请求使用工具：${toolName}` : `${ctx.agentName} 请求${KIND_VERB[kind] ?? '使用工具'}`);
@@ -90,14 +90,25 @@ export function normalizePermission(params: Record<string, unknown>, ctx: { agen
   const command=typeof rawCommand==='string'?rawCommand:Array.isArray(rawCommand)&&rawCommand.every(x=>typeof x==='string')?rawCommand.map(x=>/\s/.test(x)?JSON.stringify(x):x).join(' '):null;
   const paths:string[]=[];
   if(toolCall&&Array.isArray(toolCall.locations))for(const location of toolCall.locations)if(isRecord(location)&&typeof location.path==='string')paths.push(location.path);
-  if(ri)for(const key of ['path','file_path','cwd','Path'])if(typeof ri[key]==='string')paths.push(ri[key]);
-  if(ri&&Array.isArray(ri.paths))for(const value of ri.paths)if(typeof value==='string')paths.push(value);
-  const operationTool=command!==null?'shell':kind==='edit'||kind==='delete'?'edit':kind==='read'||kind==='search'?'read':'any';
+  if(toolCall&&Array.isArray(toolCall.content))for(const item of toolCall.content)if(isRecord(item)&&item.type==='diff'&&typeof item.path==='string')paths.push(item.path);
+  if(ri)for(const key of ['path','file_path','filePath','notebook_path','cwd','Cwd','Path','TargetFile','AbsolutePath','DirectoryPath','SearchPath','SearchDirectory'])if(typeof ri[key]==='string'&&ri[key])paths.push(ri[key] as string);
+  if(ri&&Array.isArray(ri.paths))for(const value of ri.paths)if(typeof value==='string'&&value)paths.push(value);
+  let sandboxWrite=false;
+  if(ri&&isRecord(ri.permissions)&&isRecord(ri.permissions.fileSystem)) {
+    const fsPerm=ri.permissions.fileSystem;
+    if(Array.isArray(fsPerm.write))for(const v of fsPerm.write)if(typeof v==='string'&&v){paths.push(v);sandboxWrite=true;}
+    if(Array.isArray(fsPerm.read))for(const v of fsPerm.read)if(typeof v==='string'&&v)paths.push(v);
+  }
+  const reqCwd = ri ? (str(ri.cwd) ?? str(ri.Cwd)) : null;
+  const customCwd = !!(reqCwd && ctx.cwd && reqCwd.replaceAll('\\','/').replace(/\/+$/,'').toLowerCase() !== ctx.cwd.replaceAll('\\','/').replace(/\/+$/,'').toLowerCase());
+  const deletion = kind === 'delete' || (ri ? str(ri.edit_mode) === 'delete' : false)
+    || !!(toolCall && Array.isArray(toolCall.content) && toolCall.content.some(c => isRecord(c) && isRecord(c._meta) && c._meta.kind === 'delete'));
+  const operationTool=command!==null?'shell':(kind==='edit'||kind==='delete'||sandboxWrite)?'edit':kind==='read'||kind==='search'?'read':'any';
 
   return {
     request: {
-      operation:{tool:operationTool,command:command?.slice(0,32000)??null,paths:[...new Set(paths)].slice(0,100).map(p=>p.slice(0,4096)),deletion:kind==='delete',
-        complete:operationTool!=='any'&&(operationTool==='shell'?command!==null&&command.length<=32000:paths.length>0)&&paths.length<=100&&paths.every(p=>p.length<=4096)},
+      operation:{tool:operationTool,command:command?.slice(0,32000)??null,paths:[...new Set(paths)].slice(0,100).map(p=>p.slice(0,4096)),deletion,
+        complete:operationTool!=='any'&&(operationTool==='shell'?command!==null&&command.length<=32000&&!customCwd:paths.length>0)&&paths.length<=100&&paths.every(p=>p.length<=4096)},
       toolId: toolCallId ?? '',
       title: clip(title, 300),
       reason: clip(reason, 2000),

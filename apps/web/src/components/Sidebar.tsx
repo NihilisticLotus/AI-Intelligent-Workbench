@@ -70,7 +70,8 @@ export function Sidebar({ onSearch }: { onSearch: () => void }) {
   };
 
   const isCur = (r: Route['page']) => route.page === r;
-  const onlineText = conn === 'down' ? '服务已停止' : conn === 'online' ? '服务运行中，仅本机访问' : conn === 'replaying' ? '正在同步…' : conn === 'connecting' || conn === 'idle' ? '正在连接…' : '正在重新连接…';
+  const lanConnected = useApp((s) => !!s.hello?.lanConnection);
+  const onlineText = conn === 'down' ? '服务已停止' : conn === 'online' ? (lanConnected ? '已通过局域网连接' : '服务运行中，仅本机访问') : conn === 'replaying' ? '正在同步…' : conn === 'connecting' || conn === 'idle' ? '正在连接…' : '正在重新连接…';
   const night = theme !== 'light';
   const themeTip = night ? '夜间模式（点击切换到日间模式）' : '日间模式（点击切换到夜间模式）';
 

@@ -61,11 +61,11 @@ export function findAntigravity(override?: string | null, env: NodeJS.ProcessEnv
   }
   const pathRaw = env.PATH ?? env.Path ?? process.env.PATH ?? '';
   for (const dir of pathRaw.split(path.delimiter)) {
-    const trimmed = dir.trim();
+    const trimmed = dir.trim().replace(/^"+|"+$/g, '');
     if (trimmed) cands.push(path.join(trimmed, exeName));
   }
   for (const c of cands) {
-    if (existsSync(c)) return c;
+    try { if (statSync(c).isFile()) return c; } catch { /* 跳过不存在或不可访问路径 */ }
   }
   return null;
 }
@@ -96,7 +96,7 @@ export function createAntigravityAdapter(rt: AntigravityOptions): AgentAdapter {
     modeFor: (level: PermissionLevel) => (level === 'readonly' ? 'plan' : level === 'ask' ? 'default' : level === 'workspace' ? 'accept-edits' : 'auto'),
     modeRank: (m) => MODE_RANK[m] ?? 99,
     extensions: [],
-    launchModel: (model) => ({ args: ['--model', model] }),
+    launchModel: (model) => ({ args: [`--model=${model}`] }),
     authMethodsFromInit: (init) => initAuthMethods(init).map((m) => ANTIGRAVITY_AUTH_METHODS.find((x) => x.id === m.id) ?? {
       id: m.id, name: m.name, description: m.description, flow: 'browser' as const,
     }),

@@ -431,16 +431,31 @@ export function ApprovalCard({ approval, resolvedInLog, task }: { approval: Appr
 // ---------------------------------------------------------------------
 // 文本渲染：段落、``` 代码块、`行内代码`。不使用 innerHTML，Agent 输出不会被当成 HTML 执行
 // ---------------------------------------------------------------------
+function safeMarkdownUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:' ? parsed.toString() : '';
+  } catch {
+    return '';
+  }
+}
+
 export function RichText({ text }: { text: string }) {
   return (
     <div className="md">
       <Markdown
         remarkPlugins={[remarkGfm]}
+        urlTransform={safeMarkdownUrl}
         components={{
           a: ({ href, children }) => (
-            <a href={href} title={href} rel="noreferrer noopener"
-              onClick={(e) => { if (!href || !/^https?:\/\//i.test(href)) return; e.preventDefault(); void platform.openExternal(href); }}>{children}</a>
+            href && /^https?:\/\//i.test(href) ? (
+              <a href={href} title={href} rel="noreferrer noopener"
+                onClick={(e) => { e.preventDefault(); void platform.openExternal(href); }}>{children}</a>
+            ) : (
+              <span title={href || undefined}>{children}</span>
+            )
           ),
+          img: ({ alt }) => <span className="muted">[已拦截外部图片：{alt?.trim() || '未命名图片'}]</span>,
           pre: ({ children }) => <pre aria-label="代码">{children}</pre>,
           table: ({ children }) => <div className="md-table"><table>{children}</table></div>,
         }}

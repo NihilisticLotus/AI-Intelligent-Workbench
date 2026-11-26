@@ -16,7 +16,7 @@
 | 1.5 任务与工作区 | 已完成（2026-11-15，按批准范围）；真实补验缺口见 11.15 与 step-1.5 | git worktree；非 git 项目的影子快照；改动（diff）面板；合并 / 丢弃 / 回滚；权限规则和“总是允许”；演示 / 独立隔离任务开放“工作区内自动 / 全自动”（第三方延期）；看板；“详细 → 输出”改为工作副本的改动 | 8、9、13 | 在 git 项目和非 git 项目各完成一个改代码的任务，并分别合并和回滚 |
 | 1.6 上下文与交接 | 已完成；第 12.13 节六项通过，真实分轮续做及原生切回见 12.14 | 任务账本、`.aic/TASK.md`、自动交接 H2–H4、覆盖校验、`aic_history` 工具、交接分隔条；换 Agent 发送消息时才交接；换账号已由 9.15 与 9.29 覆盖 | 7；ui 6.5、6.8 | 同一任务从 Claude Code 交接到 Codex，全程不弹窗，交接后继续完成且不重复已做的改动；选了别的 Agent 但没发消息时不交接、可以撤销 |
 | 1.7 局域网浏览器 | 已实现并通过本机验收，11 月 22 日补充点击开启时的 UAC 检查。等待本机启用 UAC、重启并完成手机验收（[ISSUE-0149](../issues/ISSUE-0149-lan-phone-acceptance.md)）。结论见 13.14 | 局域网开关、防火墙规则、配对码、设备管理；网页手机端适配（2026-11-19 补充） | 16、15.3；ui 8 | 在手机浏览器上配对后完成一次审批；已有页面在手机浏览器上可用 |
-| 1.8 Antigravity 与 ZCode、Codex 更新支持及测试 | 待执行（2026-11-26 新增，规格见第 14 节；跟踪单 [ISSUE-0181](../issues/ISSUE-0181-phase1-antigravity-zcode-codex-refresh.md)、[ISSUE-0020](../issues/ISSUE-0020-zcode-acp-bridge.md)、[ISSUE-0009](../issues/ISSUE-0009-codex-global-cli-config.md)） | 新增 Google Antigravity 官方 `agy acp` 适配器；通过受控 `zcode-acp-server` 接入新版 ZCode；升级 `codex-acp` 适配新版 Codex 并复核配置兼容；补齐离线契约测试、真实冒烟与跨 Agent 交接测试 | design 6、7.4、9；ui 5.5、6.1、6.5 | Antigravity、新版 ZCode、新版 Codex 均能在网页里检测、选模型、带审批完成对话，并互相完成一次自动交接 |
+| 1.8 Antigravity 与 ZCode、Codex 更新支持及测试 | 已完成（2026-11-26，结论见第 14.5 节与 [step-1.8](../acceptance/step-1.8.md)） | 新增 Google Antigravity 官方 `agy acp` 适配器；通过受控 `zcode-acp-server` 接入新版 ZCode；升级 `codex-acp` 适配新版 Codex 并复核配置兼容；补齐离线契约测试、真实冒烟与跨 Agent 交接测试 | design 6、7.4、9；ui 5.5、6.1、6.5 | Antigravity、新版 ZCode、新版 Codex 均能在网页里检测、选模型、带审批完成对话，并互相完成一次自动交接 |
 
 编号对照（2026-11-08 之前的记录里写的步号）：原 1.3 → 1.5，原 1.4 → 1.6，原 1.5 → 1.7。旧的验收记录、devlog、问题单不改写；仍未关闭的问题单在时间线里追加新目标。
 
@@ -2318,3 +2318,10 @@ ISSUE-0131 的原生记录已定位到工具名称查找落空，接收提示已
 3. **安全与审批实测有效**：三家在“需审批”档位下改文件或执行命令时**均确实停下弹出审批卡片**；点击“拒绝”后文件确实未被修改、命令确实未执行；无任何绕过审批的默认 `yolo` / `skip-permissions` 行为；全过程未读取任何第三方凭据文件。
 4. **跨 Agent 交接闭环**：同一任务在 Antigravity、Codex、ZCode 之间切换续做时，H2～H4 自动交接全程不报错、不丢上下文。
 5. **工程门禁全绿**：`npm run typecheck`、`npm test`、`npm run build` 全部离线通过，深浅双主题与窄屏布局均已在浏览器核验，证据写入 `docs/acceptance/step-1.8.md`。
+
+### 14.5 验收结论（2026-11-26）
+
+- 按用户批准完成官方 `agy` CLI `1.5.18` 安装与精确版本依赖升级（`@agentclientprotocol/codex-acp@2.12.0`、`@openai/codex@0.171.0`、`zcode-acp-server@0.94.0`）。第 14.4 节五项完成标准全部达到，详细数据与截图见 [1.8 验收记录](../acceptance/step-1.8.md)。
+- 核查 `zcode-acp-server@0.94.0` 确认 `guarded` 具有自动写文件的 `yolo` 语义，故将工作台“需审批（`ask`）”严格映射为 `build`（“只读”映射为 `plan`），实测修改文件稳定弹出审批且拒绝后不写盘；同步修复了 Windows 下子进程退出瞬间占用探测临时目录导致 `POST /agents/:kind/test` 抛 `EPERM` 500 的问题。
+- 三家真实 Agent 端到端冒烟（含允许/拒绝双向审批、换模型与思考强度、`session/resume`）全部通过；浏览器深浅双主题及 `375×812` 视口实操完成 `Antigravity → ZCode → Codex` 两次 H2 自动交接、网页审批卡放行、改动对比与合并回 `main`。
+- 冻结源码单次全量检查通过：`npm run typecheck` 零错误，默认离线 `npm test` **1,239 通过 / 5 跳过**，`npm run build` 通过。[ISSUE-0181](../issues/ISSUE-0181-phase1-antigravity-zcode-codex-refresh.md)、[ISSUE-0020](../issues/ISSUE-0020-zcode-acp-bridge.md)、[ISSUE-0009](../issues/ISSUE-0009-codex-global-cli-config.md) 已关闭。

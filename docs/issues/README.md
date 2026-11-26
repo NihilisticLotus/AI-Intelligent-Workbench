@@ -12,7 +12,7 @@
 | [ISSUE-0006](ISSUE-0006-always-allow-rules.md) | “总是允许”审批规则尚未实现 | fixed | 待办 | 2026-11-06 | 2026-11-15 |
 | [ISSUE-0007](ISSUE-0007-claude-terminal-login.md) | Claude Code 订阅登录没有 ACP authenticate，能否全程图形化未实测 | wontfix | 外部依赖 | 2026-11-06 | 2026-11-08 |
 | [ISSUE-0008](ISSUE-0008-codebuddy-login-fragile.md) | CodeBuddy 登录态在探测中失效，且与 WorkBuddy 共用登录 | fixed | 外部依赖 | 2026-11-06 | 2026-11-07 |
-| [ISSUE-0009](ISSUE-0009-codex-global-cli-config.md) | 本机全局 codex 0.120 读不了当前的 config.toml，改用 codex-acp 自带的 0.165 | open | 外部依赖 | 2026-11-06 | |
+| [ISSUE-0009](ISSUE-0009-codex-global-cli-config.md) | 本机全局 codex 0.120 读不了当前的 config.toml，改用 codex-acp 自带的 0.165 | fixed | 外部依赖 | 2026-11-06 | 2026-11-26 |
 | [ISSUE-0010](ISSUE-0010-codebuddy-smoke-not-run.md) | CodeBuddy 未登录，真实会话冒烟和浏览器验收没有执行 | fixed | 验收未通过 | 2026-11-06 | 2026-11-07 |
 | [ISSUE-0011](ISSUE-0011-claude-tool-title-placeholder.md) | Claude 的工具行标题停在“Preparing file…” | fixed | bug | 2026-11-06 | 2026-11-08 |
 | [ISSUE-0012](ISSUE-0012-real-resume-and-reject-unverified.md) | 真实 Agent 的会话恢复和拒绝审批没有完整验证 | fixed | 验收未通过 | 2026-11-06 | 2026-11-08 |
@@ -23,7 +23,7 @@
 | [ISSUE-0017](ISSUE-0017-login-500-rec-before-init.md) | 点 CodeBuddy 的登录按钮报“服务内部错误” | fixed | bug | 2026-11-07 | 2026-11-07 |
 | [ISSUE-0018](ISSUE-0018-chat-fragmented-replies.md) | 思考强度提示堆叠；Agent 回复被拆成多条 | fixed | bug | 2026-11-07 | 2026-11-07 |
 | [ISSUE-0019](ISSUE-0019-reply-display-not-codex-like.md) | 回复的结构和格式与常见 Agent 软件差别大（参照 Codex） | fixed | bug | 2026-11-07 | 2026-11-07 |
-| [ISSUE-0020](ISSUE-0020-zcode-acp-bridge.md) | ZCode 还不能对话，需要接入 zcode-acp 桥接 | open | 待办 | 2026-11-07 | |
+| [ISSUE-0020](ISSUE-0020-zcode-acp-bridge.md) | ZCode 还不能对话，需要接入 zcode-acp 桥接 | fixed | 待办 | 2026-11-07 | 2026-11-26 |
 | [ISSUE-0021](ISSUE-0021-quota-hint-garbled.md) | 额度错误的提示把英文原文截了一段拼进中文 | fixed | bug | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0022](ISSUE-0022-turn-hang-no-timeout.md) | Claude 回合卡住两分钟以上没有任何输出，也没有超时 | fixed | bug | 2026-11-08 | 2026-11-08 |
 | [ISSUE-0023](ISSUE-0023-step-1.3-real-input-unverified.md) | 第 1.3 步真实截图和选择器仍待补验 | fixed | 验收未通过（未验证） | 2026-11-08 | 2026-11-11 |
@@ -186,4 +186,4 @@
 | [ISSUE-0178](ISSUE-0178-secret-reference-transaction.md) | 配置保存中断可能留下无归属的密文 | fixed | bug | 2026-11-21 | 2026-11-21 |
 | [ISSUE-0179](ISSUE-0179-lan-uac-preflight.md) | 局域网开关缺少 Windows 无法弹出 UAC 时的处理约定 | fixed | 验收未通过 | 2026-11-21 | 2026-11-22 |
 | [ISSUE-0180](ISSUE-0180-hello-worktree-feature-flag.md) | `/api/v1/hello` 中 `FeatureKey.Worktrees` 仍固定为 `false` | open | bug | 2026-11-26 | — |
-| [ISSUE-0181](ISSUE-0181-phase1-antigravity-zcode-codex-refresh.md) | 第一阶段新增 Google Antigravity 接入及 ZCode、Codex 更新兼容与回归测试 | open | 待办 | 2026-11-26 | — |
+| [ISSUE-0181](ISSUE-0181-phase1-antigravity-zcode-codex-refresh.md) | 第一阶段新增 Google Antigravity 接入及 ZCode、Codex 更新兼容与回归测试 | fixed | 待办 | 2026-11-26 | 2026-11-26 |

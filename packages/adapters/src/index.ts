@@ -4,6 +4,7 @@ import type { AcpRuntime } from './acp/session';
 import { createClaudeAdapter } from './claude';
 import { createCodexAdapter } from './codex';
 import { createCodebuddyAdapter, createWorkbuddyAdapter } from './codebuddy';
+import { createAntigravityAdapter } from './antigravity';
 import { createFakeAdapter } from './fake';
 import { createZcodeAdapter } from './zcode';
 
@@ -12,7 +13,8 @@ export { createFakeAdapter, FAKE_MODELS, FAKE_EFFORTS, type FakeAgentOptions } f
 export { createClaudeAdapter, claudePaths, CLAUDE_AUTH_METHODS, CLAUDE_SESSION_META, CLAUDE_SCRUB_ENV } from './claude';
 export { createCodexAdapter, codexPaths, CODEX_AUTH_METHODS } from './codex';
 export { createCodebuddyAdapter, createWorkbuddyAdapter, findCodebuddy, findCodebuddyStandalone, isLiteOnlyEngine, CODEBUDDY_AUTH_METHODS, WORKBUDDY_AUTH_METHODS, WORKBUDDY_APP_METHOD } from './codebuddy';
-export { createZcodeAdapter, findZcode, pingAppServer, ZCODE_BRIDGE_PENDING } from './zcode';
+export { createAntigravityAdapter, findAntigravity, hasAntigravityApp, ANTIGRAVITY_AUTH_METHODS, ANTIGRAVITY_CLI_MISSING_WITH_APP, ANTIGRAVITY_NOT_FOUND, type AntigravityOptions } from './antigravity';
+export { createZcodeAdapter, findZcode, pingAppServer, zcodeBridgePaths, zcodeBridgeEnv, ZCODE_AUTH_METHODS, ZCODE_BRIDGE_PENDING, type ZcodeOptions } from './zcode';
 export { AcpConnection, DEFAULT_TIMEOUTS, type AcpTimeouts, type AcpConnectionOptions } from './acp/connection';
 export { AcpSession, acpSpawn, acpProbe, agentEnv, type AcpAgentSpec, type AcpRuntime } from './acp/session';
 export { buildChildEnv, buildNativeEnv, shouldStrip, killTree, killTreeSync, isAlive, processStartTimes, descendants, runCli, type LaunchSpec } from './acp/launch';
@@ -31,19 +33,22 @@ export interface CreateAdaptersOptions extends AcpRuntime {
   codebuddyPath?: string | null;
   /** WorkBuddy 内置引擎位置（不传则自动查找） */
   workbuddyPath?: string | null;
+  /** Antigravity CLI（agy）位置（不传则自动查找） */
+  antigravityPath?: string | null;
   /** ZCode 内置引擎位置（不传则自动查找） */
   zcodePath?: string | null;
 }
 
-/** 演示 Agent + 三个真实 Agent */
+/** 演示 Agent + 全部已接入真实 Agent */
 export function createAdapters(opts: CreateAdaptersOptions): AgentAdapter[] {
   return [
     createFakeAdapter({ speed: opts.fakeSpeed ?? 1 }),
     createClaudeAdapter(opts),
     createCodexAdapter(opts),
+    createAntigravityAdapter({ ...opts, enginePath: opts.antigravityPath ?? null }),
     createCodebuddyAdapter({ ...opts, enginePath: opts.codebuddyPath ?? null }),
     createWorkbuddyAdapter({ ...opts, enginePath: opts.workbuddyPath ?? null }),
-    createZcodeAdapter({ enginePath: opts.zcodePath ?? null, log: opts.log }),
+    createZcodeAdapter({ ...opts, enginePath: opts.zcodePath ?? null }),
   ];
 }
 export { createSpecAdapter, specFromOptions, type SpecAdapterOptions } from './generic';

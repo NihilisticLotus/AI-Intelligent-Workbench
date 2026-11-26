@@ -44,6 +44,7 @@ export const agentFallback: Record<AgentKind, { name: string; mono: string }> = 
   codebuddy: { name: 'CodeBuddy', mono: 'B' },
   zcode: { name: 'ZCode', mono: 'Z' },
   workbuddy: { name: 'WorkBuddy', mono: 'W' },
+  antigravity: { name: 'Antigravity', mono: 'G' },
   independent: { name: 'AI Console 独立 Agent', mono: 'A' },
 };
 

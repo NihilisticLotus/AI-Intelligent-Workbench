@@ -12,7 +12,7 @@ describe('任务自动权限范围',{timeout:30000},()=>{
     expect(task.workspace?.kind).toBe('copy');expect(task.permissionLevels).toEqual(['readonly','ask','workspace','full']);expect(task.permission).toBe(permission);
     expect((await service.patch(task.id,{permission})).permission).toBe(permission);
   });
-  it.each(['claude','codex','codebuddy','workbuddy','zcode'] as AgentKind[])('第三方 %s 即使声明四档也不能创建自动任务',async kind=>{
+  it.each(['claude','codex','antigravity','codebuddy','workbuddy','zcode'] as AgentKind[])('第三方 %s 即使声明四档也不能创建自动任务',async kind=>{
     const fake=createFakeAdapter({speed:0});gateway=await startGw({adapters:[{...fake,id:kind,permissionLevels:['readonly','ask','workspace','full']}]});
     const token=await gateway.pair(),project=await makeProject(gateway,token);
     await gateway.api('PATCH',`/agents/${kind}`,{token,body:{enabled:true}});

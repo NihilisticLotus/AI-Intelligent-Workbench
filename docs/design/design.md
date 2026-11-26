@@ -1,6 +1,7 @@
 # AI Console 设计文档
 
-> 版本 0.4.65 · 2026-11-22 · 状态：设计中
+> 版本 0.4.66 · 2026-11-26 · 状态：设计中
+> v0.4.66 同步第 1.8 步：新增 Google Antigravity 官方 `agy acp`（1.5.18）原生接入，通过受控 `zcode-acp-server@0.94.0`（`ask` 映射为 `build`、禁用默认 `yolo` 与远程端口）接入新版 ZCode，升级 `codex-acp@2.12.0` / `@openai/codex@0.171.0`，补充 `.gemini` 凭据目录写保护与探测临时目录异步重试清理。见 2026-11-26 开发笔记。
 > v0.4.65 补充局域网开关如何处理无法显示 Windows 权限提示的情况。见 2026-11-22 开发笔记。
 > v0.4.64 补充工作副本终态与任务状态的事务边界、审批截止时刻以及服务配置与密文的共同提交。见 2026-11-21 第二轮审查开发笔记。
 > v0.4.63 明确数据目录的单实例所有权、退出收尾和事务产生的实时事件顺序。
@@ -89,7 +90,7 @@
 
 ## 1. 目标
 
-把本机已安装的 AI Agent（Claude Code、Codex、CodeBuddy、WorkBuddy、ZCode）整合到一个图形化工作台里：
+把本机已安装的 AI Agent（Claude Code、Codex、Google Antigravity、CodeBuddy、WorkBuddy、ZCode）整合到一个图形化工作台里：
 
 - 统一入口：一个界面里对话、派发任务、看进度、审批操作。
 - 随时切换：同一任务内切换模型、账号或 Agent，上下文尽量不丢。
@@ -227,11 +228,12 @@ AI_Console/
 
 | Agent | 引擎位置 | 协议 | 备注 |
 |---|---|---|---|
-| Claude Code | npm 全局 `claude` | ACP：`@agentclientprotocol/claude-agent-acp` | 支持订阅登录与 API Key；`@zed-industries/claude-code-acp` 已废弃 |
-| Codex | npm 全局 `codex` | ACP：`@agentclientprotocol/codex-acp`；备选 `codex app-server` | 支持 ChatGPT 登录与 API Key；适配器自带 codex，需用 `CODEX_PATH` 指向本机版本，保证登录状态和版本一致 |
+| Claude Code | 工作台自带 `@agentclientprotocol/claude-agent-acp`（0.100.0）或本机 `claude` | ACP：`@agentclientprotocol/claude-agent-acp` | 支持订阅登录与 API Key；`@zed-industries/claude-code-acp` 已废弃 |
+| Codex | 适配器自带 `@openai/codex`（锁定 0.171.0，与桌面端共用 `~/.codex`） | ACP：`@agentclientprotocol/codex-acp`（锁定 2.12.0） | 不设全局 `CODEX_PATH`，避免本机旧全局 CLI 无法解析新版桌面端 `config.toml`（ISSUE-0009） |
+| Antigravity | 本机安装的官方 CLI `%LOCALAPPDATA%\agy\bin\agy.exe`（v1.5.18） | 原生 `agy acp --disable-telemetry`（ACP v1 over stdio） | 与 Antigravity 桌面版共用系统安全凭据登录态；`readonly` 映射 `plan`、`ask` 映射 `default` |
 | CodeBuddy | 工作台自带的官方独立版 `@tencent-ai/codebuddy-code`（packages/adapters 的依赖，锁定 2.181.0） | 原生 `--acp`（stdio） | 2026-11-07 起改用独立版（ISSUE-0016）；账号属于 codebuddy.ai，在工作台里用浏览器登录；模型含 glm-5.1、kimi-k2.5、minimax-m2.7、deepseek-v3-2 等 |
 | WorkBuddy | `%LOCALAPPDATA%\Programs\WorkBuddy\resources\app.asar.unpacked\cli\…`（WorkBuddy 内置引擎） | 原生 `--acp`（stdio），仅完整引擎 | 账号属于 workbuddy.cn，在 WorkBuddy 里登录；2.165.0 起只带精简引擎 `codebuddy-lite-wb.mjs`，ACP 模式下没有响应，检测为“暂不支持”（ISSUE-0016） |
-| ZCode | `%LOCALAPPDATA%\Programs\ZCode\resources\glm\zcode.cjs`（v0.17.1） | `zcode app-server`（自有 ZCode Protocol） | 需写桥接层；备选 `-p --json` 单次模式 |
+| ZCode | `%LOCALAPPDATA%\Programs\ZCode\resources\glm\zcode.cjs`（v0.17.1，桌面端 3.18.2+） | 锁定 `zcode-acp-server@0.94.0` 桥接 `zcode app-server` | 强制 `ZCODE_ACP_RUNTIME=node`、关闭远程端口与自动续跑；`readonly` 映射 `plan`、`ask` 映射 `build`（禁用默认 `yolo` 及具有自动写盘语义的 `guarded`，见 ISSUE-0020） |
 
 CodeBuddy 编辑器本体是 VS Code 改版，没有可调用的 Agent 命令行。原来借用 WorkBuddy 内置的引擎，但 WorkBuddy 自动更新会替换它（2.165.0 起变成精简版），而且两者本来就是两套账号。2026-11-07 按用户决定拆成两个独立的 Agent：CodeBuddy 用工作台自带的官方独立版引擎，不再依赖 WorkBuddy 的安装目录和更新；WorkBuddy 只在带完整引擎时可用，精简引擎能否经 ACP 驱动待研究。CodeBuddy 的 `--acp` 有官方文档（https://www.codebuddy.ai/docs/cli/acp ），提到 loadSession 和 `_codebuddy.ai/*` 私有扩展；其余能力 M2 实测。
 
@@ -308,7 +310,7 @@ interface AgentCaps {
 
 #### 6.4.1 第三方 Agent 的自身配置
 
-- Claude Code、Codex、CodeBuddy、WorkBuddy、ZCode 使用各自已经配置的 API、登录和模型，包括用户在该软件内添加的自定义模型。
+- Claude Code、Codex、Antigravity、CodeBuddy、WorkBuddy、ZCode 使用各自已经配置的 API、登录和模型，包括用户在该软件内添加的自定义模型。
 - AI Console 不替它们切换 API 服务、不注入工作台的 API Key、不代为登录或登出，也不改写或复制它们的设置与凭据文件。需要配置或登录时，引导用户到对应软件完成，再回工作台重新检测。
 - 模型和思考强度通过 Agent 声明的会话能力选择，只作用于工作台当前会话；不能改写该软件的全局默认设置。Agent 未暴露的自定义模型如实显示为不可用，不猜模型名或借用其他账号目录。
 - 第三方新建或恢复会话时，显式模型缺失、设置失败或实际值不一致，必须在 prompt 前关闭会话并保留原选择，不能改用默认模型计费；只有 model=null 采用原生默认。思考强度单独失败保持提示，并再次确认模型没有漂移（ISSUE-0093，用户批准）。

@@ -1,6 +1,6 @@
 # 第二阶段开发计划：安全加固、AI 制作班底协作、能力中心与日常自动化
 
-> 2026-11-26 · 依据调研报告 [openmausbot-openmanus.md](../research/openmausbot-openmanus.md)、架构设计 [design.md](../design/design.md) v0.4.65、界面设计 [ui-design.md](../design/ui-design.md) v0.3.47、第一阶段计划 [phase-1.md](phase-1.md) 第 2 节接口规则
+> 2026-11-26 · 依据调研报告 [openmausbot-openmanus.md](../research/openmausbot-openmanus.md)、架构设计 [design.md](../design/design.md) v0.4.66、界面设计 [ui-design.md](../design/ui-design.md) v0.3.48、第一阶段计划 [phase-1.md](phase-1.md) 第 2 节接口规则
 
 ---
 
@@ -19,7 +19,7 @@
 
 ### 1.2 当前现状基线
 
-1. **代码与测试基线**：`main` 分支（提交 `a2d06ac`），第一阶段 1.1～1.6 全部完成；1.7（局域网浏览器与手机适配）代码已写完并通过本机回环模拟验收（1,226 项离线测试通过、3 项真实模型冒烟按配置跳过），等待本机开启 Windows UAC（管理员操作确认弹窗）重启后做手机真机验收（[ISSUE-0149](../issues/ISSUE-0149-lan-phone-acceptance.md)）；**1.8（2026-11-26 新增，见 [phase-1.md 第 14 节](phase-1.md#14-18-实现规格antigravity-接入与-zcodecodex-更新支持及测试) 与 [ISSUE-0181](../issues/ISSUE-0181-phase1-antigravity-zcode-codex-refresh.md)）将在进入本阶段前，先行补齐对本机新增 Google Antigravity 以及多次更新后的 ZCode、Codex 的接入与全套回归测试**。
+1. **代码与测试基线**：第一阶段 1.1～1.6 与 **1.8（新增 Google Antigravity 接入及新版 ZCode、Codex 更新兼容与交接测试，见 [step-1.8.md](../acceptance/step-1.8.md)）已全部完成**，全仓离线测试 **1,239 项通过、5 项真实模型冒烟按配置跳过**；1.7（局域网浏览器与手机适配）代码已写完并通过本机回环模拟验收，等待本机开启 Windows UAC（管理员操作确认弹窗）重启后做手机真机验收（[ISSUE-0149](../issues/ISSUE-0149-lan-phone-acceptance.md)，不阻塞 2.1 启动）。
 2. **网络安全真实起点（如实声明）**：**到目前为止，我们没有做过专门的网络安全工作**。现有的设备配对令牌、Host/Origin 请求头校验、局域网敏感操作电脑端二次确认、Windows 防火墙规则、独立 Agent 密钥的 Windows DPAPI 加密以及日志脱敏，都只是随各步功能顺带做的基础防护，**不能视为已完成的安全体系**。因此第二阶段把网络安全加固排在第一步（2.1），作为后续连外部工具、跑自动化、收通知、看网页的硬性前提。
 3. **本仓文档与代码现状差异提醒**（供执行各步的 Agent 核对，以代码为准）：
    - 工程使用 `npm workspaces`、Node 24 内置 `node:sqlite`、原生 TypeScript + CSS 变量网页，不使用 `pnpm`、Drizzle、Tailwind 或 React；

@@ -2,7 +2,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ErrorCode } from '@aic/protocol';
 import {
-  AgentError, buildNativeEnv, createClaudeAdapter, createCodebuddyAdapter, createCodexAdapter,
+  AgentError, buildNativeEnv, createAntigravityAdapter, createClaudeAdapter, createCodebuddyAdapter, createCodexAdapter,
   createWorkbuddyAdapter, createZcodeAdapter, specFromOptions, type AccountProfile,
 } from '../src/index';
 import { codexModelEnv } from '../src/codex';
@@ -10,7 +10,7 @@ import { acpSpawn } from '../src/acp/session';
 import { FIXTURE, RecordingHost, scenario } from './helpers';
 
 const rt = { log: () => {} };
-const adapters = [createClaudeAdapter(rt), createCodexAdapter(rt), createCodebuddyAdapter(rt), createWorkbuddyAdapter(rt), createZcodeAdapter()];
+const adapters = [createClaudeAdapter(rt), createCodexAdapter(rt), createAntigravityAdapter(rt), createCodebuddyAdapter(rt), createWorkbuddyAdapter(rt), createZcodeAdapter()];
 const key = 'sk-fake-native-boundary-1234';
 afterEach(() => vi.unstubAllEnvs());
 

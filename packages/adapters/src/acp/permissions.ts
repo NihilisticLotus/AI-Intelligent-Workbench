@@ -79,18 +79,18 @@ export function normalizePermission(params: Record<string, unknown>, ctx: { agen
     ?? (toolCallId ? ctx.activeTitle?.(toolCallId) : undefined)
     ?? (toolName ? `${ctx.agentName} 请求使用工具：${toolName}` : `${ctx.agentName} 请求${KIND_VERB[kind] ?? '使用工具'}`);
 
-  // 详情：完整的命令或文件路径（rawInput）
-  const ri = toolCall && isRecord(toolCall.rawInput) ? toolCall.rawInput : null;
+  // 详情：完整的命令或文件路径（rawInput 或 Antigravity 的 args / PascalCase 字段）
+  const ri = toolCall ? (isRecord(toolCall.rawInput) ? toolCall.rawInput : isRecord(toolCall.args) ? toolCall.args : null) : null;
   let detail = toolCall ? toolTarget(toolCall) : null;
   if (!detail && ri) {
     try { detail = clip(JSON.stringify(ri), 2000); } catch { detail = null; }
   }
-  const reason = ri ? (str(ri.description) ?? str(ri.reason) ?? str(ri.explanation) ?? '') : '';
-  const rawCommand=ri?.command;
+  const reason = ri ? (str(ri.description) ?? str(ri.reason) ?? str(ri.explanation) ?? str(ri.toolSummary) ?? '') : '';
+  const rawCommand=ri?.command??ri?.CommandLine;
   const command=typeof rawCommand==='string'?rawCommand:Array.isArray(rawCommand)&&rawCommand.every(x=>typeof x==='string')?rawCommand.map(x=>/\s/.test(x)?JSON.stringify(x):x).join(' '):null;
   const paths:string[]=[];
   if(toolCall&&Array.isArray(toolCall.locations))for(const location of toolCall.locations)if(isRecord(location)&&typeof location.path==='string')paths.push(location.path);
-  if(ri)for(const key of ['path','file_path','cwd'])if(typeof ri[key]==='string')paths.push(ri[key]);
+  if(ri)for(const key of ['path','file_path','cwd','Path'])if(typeof ri[key]==='string')paths.push(ri[key]);
   if(ri&&Array.isArray(ri.paths))for(const value of ri.paths)if(typeof value==='string')paths.push(value);
   const operationTool=command!==null?'shell':kind==='edit'||kind==='delete'?'edit':kind==='read'||kind==='search'?'read':'any';
 

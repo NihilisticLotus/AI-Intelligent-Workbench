@@ -15,8 +15,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import {
-  createClaudeAdapter, createCodebuddyAdapter, createCodexAdapter, type AgentAdapter, type AgentConnection, type AgentUpdate,
-  type PermissionOutcome, type PermissionRequest, type SessionHost,
+  createAntigravityAdapter, createClaudeAdapter, createCodebuddyAdapter, createCodexAdapter, createZcodeAdapter,
+  type AgentAdapter, type AgentConnection, type AgentUpdate, type PermissionOutcome, type PermissionRequest, type SessionHost,
 } from '../src/index';
 
 const ENABLED = process.env.AIC_REAL_AGENTS === '1';
@@ -24,14 +24,19 @@ const ONLY = (process.env.AIC_REAL_AGENTS_ONLY ?? '').split(',').map((s) => s.tr
 const ECHO = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'echo-mcp.mjs');
 const STEP_MS = 5 * 60_000;
 const OK_PROMPT = '只回复 OK 两个字母，不要使用任何工具。';
+const REJECT_PROMPT = '在当前目录新建 blocked.txt，内容为 no。如果工具被拒绝，不要尝试其他办法，直接回复 DENIED。';
+const AGY_REJECT_PROMPT = '必须使用 run_command 运行命令 node -e "require(\'fs\').writeFileSync(\'blocked.txt\',\'no\')"，禁止使用 write_file。如果命令被拒绝，不要改用其他工具，直接回复 DENIED。';
 const FILE_PROMPT = '在当前目录新建 hello.txt，内容为 hi';
+const AGY_FILE_PROMPT = '必须使用 run_command 运行命令 node -e "require(\'fs\').writeFileSync(\'hello.txt\',\'hi\')"';
 
 const logs: string[] = [];
 const rt = { log: (level: string, msg: string) => { if (level !== 'debug') logs.push(`${level} ${msg}`); } };
 const KINDS: { kind: string; name: string; make: () => AgentAdapter }[] = [
   { kind: 'claude', name: 'Claude Code', make: () => createClaudeAdapter(rt) },
   { kind: 'codex', name: 'Codex', make: () => createCodexAdapter(rt) },
+  { kind: 'antigravity', name: 'Antigravity', make: () => createAntigravityAdapter(rt) },
   { kind: 'codebuddy', name: 'CodeBuddy', make: () => createCodebuddyAdapter({ ...rt, enginePath: null }) },
+  { kind: 'zcode', name: 'ZCode', make: () => createZcodeAdapter(rt) },
 ];
 const report: Record<string, Record<string, unknown>> = {};
 
@@ -88,24 +93,45 @@ describe.skipIf(!ENABLED)('真实 Agent 冒烟（AIC_REAL_AGENTS=1）', () => {
         const cfg = conn.config!();
         Object.assign(r, { sessionNewMs: newMs, caps: conn.caps, models: cfg.models.map((m) => m.id), model: cfg.model, efforts: cfg.efforts, effort: cfg.effort, mode: cfg.mode });
         expect(conn.agentSessionId).toBeTruthy();
-        // 注入的 MCP 在建会话时就被拉起（ISSUE-0001 实测结论；Codex 在后台启动，稍等）
-        const until = Date.now() + 15_000;
-        while (!existsSync(echoLog) && Date.now() < until) await new Promise((res) => setTimeout(res, 200));
-        r.mcpStarted = existsSync(echoLog);
-        expect.soft(r.mcpStarted).toBe(true);
+        // 注入的 MCP 在建会话或首轮实际建后端会话（ZCode 惰性会话）时被拉起
+        const waitMcp = async (ms: number) => {
+          const until = Date.now() + ms;
+          while (!existsSync(echoLog) && Date.now() < until) await new Promise((res) => setTimeout(res, 200));
+          return existsSync(echoLog);
+        };
+        r.mcpStartedOnNew = await waitMcp(5_000);
 
         // ① 只回复 OK
         host.reset();
         const [p1, p1Ms] = await timed(() => conn.prompt({ text: OK_PROMPT }, signal()));
+        r.mcpStarted = r.mcpStartedOnNew || await waitMcp(10_000);
+        expect.soft(r.mcpStarted).toBe(true);
         Object.assign(r, { ok1Stop: p1.stopReason, ok1Ms: p1Ms, ok1Replied: /OK/i.test(host.text), ok1Tools: host.tools() });
         expect(p1.stopReason).toBe('end_turn');
         expect.soft(r.ok1Replied).toBe(true);
 
-        // ② 一次审批：新建 hello.txt，允许后文件应确实生成
+        // ② 一次拒绝审批：新建 blocked.txt（Antigravity 默认模式对副本内 write_file 免问、对命令请求审批），拒绝后文件绝不能生成
+        host.reset();
+        host.allowWrites = false;
+        const beforeReject = host.requests.length;
+        const rejPrompt = k.kind === 'antigravity' ? AGY_REJECT_PROMPT : REJECT_PROMPT;
+        const [pRej, pRejMs] = await timed(() => conn.prompt({ text: rejPrompt }, signal()));
+        const blocked = path.join(work, 'blocked.txt');
+        const rejReqs = host.requests.slice(beforeReject);
+        Object.assign(r, {
+          rejectStop: pRej.stopReason, rejectMs: pRejMs,
+          rejectApprovals: rejReqs.map((q) => ({ title: q.title, options: q.options.map((o) => o.kind) })),
+          blockedAbsent: !existsSync(blocked),
+        });
+        expect.soft(rejReqs.length).toBeGreaterThan(0);
+        expect(existsSync(blocked)).toBe(false);
+
+        // ③ 一次允许审批：新建 hello.txt，允许后文件应确实生成
         host.reset();
         host.allowWrites = true;
         const before = host.requests.length;
-        const [p2, p2Ms] = await timed(() => conn.prompt({ text: FILE_PROMPT }, signal()));
+        const allowPrompt = k.kind === 'antigravity' ? AGY_FILE_PROMPT : FILE_PROMPT;
+        const [p2, p2Ms] = await timed(() => conn.prompt({ text: allowPrompt }, signal()));
         host.allowWrites = false;
         const hello = path.join(work, 'hello.txt');
         const newReqs = host.requests.slice(before);

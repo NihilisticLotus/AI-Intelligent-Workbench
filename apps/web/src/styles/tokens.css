@@ -37,6 +37,7 @@
   --ag-codebuddy: #b896f6;
   --ag-zcode: #a2cf63;
   --ag-workbuddy: #f08fb8;
+  --ag-antigravity: #5ea1ff;
   --ag-fake: #a7b0c4;  /* 演示 Agent：中性蓝灰，避免和真实 Agent 混淆 */
 
   --font-ui: "Microsoft YaHei UI", "Microsoft YaHei", "PingFang SC", system-ui, sans-serif;
@@ -90,6 +91,7 @@
   --ag-codebuddy: #7a4ed1;
   --ag-zcode: #4f8a12;
   --ag-workbuddy: #b03a6e;
+  --ag-antigravity: #1a66d2;
   --ag-fake: #56607a;
   --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.14), 0 0 0 1px var(--line);
 }

@@ -3,10 +3,12 @@ import type { AgentKind } from '@aic/protocol';
 
 export const VERIFIED: Partial<Record<AgentKind, { adapter: string | null; engine: string | null }[]>> = {
   claude: [{ adapter: '0.100.0', engine: '2.1.316' }],
-  codex: [{ adapter: '2.5.0', engine: '0.165.0' }],
+  codex: [{ adapter: '2.12.0', engine: '0.171.0' }],
   // CodeBuddy 用工作台自带的官方独立版引擎；WorkBuddy 只有 2.115.0（带完整引擎）验证过，2.165.0 起只带精简引擎（ISSUE-0016）
   codebuddy: [{ adapter: null, engine: '2.181.0' }],
   workbuddy: [{ adapter: null, engine: '2.115.0' }],
+  antigravity: [{ adapter: null, engine: '1.5.18' }],
+  zcode: [{ adapter: '0.94.0', engine: '0.17.1' }],
 };
 
 export function isVerified(kind: AgentKind, adapter: string | null | undefined, engine: string | null | undefined): boolean {

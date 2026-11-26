@@ -14,13 +14,14 @@ export function toolTarget(u: Record<string, unknown>): string | null {
     const l = u.locations.find(isRecord);
     if (l && typeof l.path === 'string') return l.path;
   }
-  const ri = u.rawInput;
-  if (isRecord(ri)) {
-    const cmd = ri.command;
+  const ri = isRecord(u.rawInput) ? u.rawInput : isRecord(u.args) ? u.args : null;
+  if (ri) {
+    const cmd = ri.command ?? ri.CommandLine;
     if (typeof cmd === 'string') return cmd;
     if (Array.isArray(cmd) && cmd.every((x) => typeof x === 'string')) return cmd.join(' ');
     if (typeof ri.file_path === 'string') return ri.file_path;
     if (typeof ri.path === 'string') return ri.path;
+    if (typeof ri.Path === 'string') return ri.Path;
   }
   return null;
 }

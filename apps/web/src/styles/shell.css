@@ -173,6 +173,7 @@ kbd { display: inline-block; padding: 0 5px; border: 1px solid var(--line); bord
 .ag.codebuddy { background: var(--ag-codebuddy); }
 .ag.zcode { background: var(--ag-zcode); }
 .ag.workbuddy { background: var(--ag-workbuddy); }
+.ag.antigravity { background: var(--ag-antigravity); }
 :root[data-theme="light"] .ag { color: #fff; }
 
 /* 模型 / Agent / 账号 合一切换器 */

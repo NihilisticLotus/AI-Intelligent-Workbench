@@ -5,7 +5,7 @@ import { createHash } from 'node:crypto';
 import { IndependentRelativePath } from '@aic/protocol';
 import { Errors } from '../util';
 
-const blocked = new Set(['.git', '.aic-data', '.claude', '.codex', '.codebuddy', '.workbuddy', '.zcode', '.ssh', '.aws', '.azure', 'auth.json', 'credentials.json', 'credentials', '.npmrc', '.netrc', '.pypirc']);
+const blocked = new Set(['.git', '.aic-data', '.claude', '.codex', '.codebuddy', '.workbuddy', '.zcode', '.gemini', '.ssh', '.aws', '.azure', 'auth.json', 'credentials.json', 'credentials', '.npmrc', '.netrc', '.pypirc']);
 export function protectedFilePart(input: string) {
   const part = input.toLowerCase();
   return blocked.has(part) || part === '.env' || part.startsWith('.env.') || part.startsWith('.aic-stage-') || part.startsWith('.aic-old-') || /\.(pem|key|pfx|p12)$/.test(part);

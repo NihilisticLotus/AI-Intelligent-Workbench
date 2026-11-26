@@ -588,7 +588,7 @@ export class WorkspaceManager {
 
   async checkpointFile(taskId:string,checkpoint:string,name:string):Promise<string> {
     const relative=workspaceRelative(name), parts=relative.toLowerCase().split('/');
-    if(parts.some(p=>['.git','.aic','.claude','.codex','.codebuddy','.workbuddy','.zcode'].includes(p))) throw Errors.forbidden('历史查询只读取项目文件');
+    if(parts.some(p=>['.git','.aic','.claude','.codex','.codebuddy','.workbuddy','.zcode','.gemini'].includes(p))) throw Errors.forbidden('历史查询只读取项目文件');
     if(!checkpoint.startsWith('refs/aic/checkpoints/'+taskId+'/') || !/^[1-9]\d*$/.test(checkpoint.slice(('refs/aic/checkpoints/'+taskId+'/').length))) throw Errors.forbidden('检查点不属于这个任务');
     return this.exclusive(taskId,async()=>{
       const record=await this.checkedRecord(taskId);

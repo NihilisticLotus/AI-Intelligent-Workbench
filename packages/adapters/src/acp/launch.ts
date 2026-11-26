@@ -9,8 +9,8 @@ const STRIP_EXACT = new Set([
   'CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_EXECUTABLE', 'NO_BROWSER', 'SSH_CONNECTION', 'SSH_CLIENT', 'SSH_TTY',
   'CLAUDE_CODE_REMOTE', 'APP_SERVER_LOGS',
   'DEFAULT_AUTH_REQUEST', 'MODEL_PROVIDER', 'AIC_PROVIDER_KEY',
-  // Gateway 自己跑在 Claude Code / Claude 桌面端里时（开发预览）继承的宿主变量：可能让子进程沿用宿主的登录、
-  // 把自己当成子会话。联调时排查登录状态发现这些变量会传进 Agent，预防性删掉。
+  // Gateway 自己跑在 Claude Code / Antigravity / Codex 等宿主里时（开发预览）继承的宿主会话变量：
+  // 可能让子进程沿用宿主的内部通道或把自己当成嵌套子会话，预防性删掉。
   'CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_EFFORT', 'CLAUDE_CODE_OAUTH_TOKEN', 'CLAUDE_CODE_OAUTH_REFRESH_TOKEN', 'CLAUDE_CODE_OAUTH_SCOPES',
   'CLAUDE_CODE_ENTRYPOINT', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION', 'CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST',
   'CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH', 'CLAUDE_CODE_API_KEY_HELPER_TTL_MS',
@@ -18,7 +18,15 @@ const STRIP_EXACT = new Set([
 const STRIP_PREFIX = [
   'ANTHROPIC_', 'CLAUDE_CODE_USE_', 'OPENAI_', 'CODEX_', 'CODEBUDDY_', 'ACC_PRODUCT_CONFIG',
   'CLAUDE_CODE_HOST_', 'CLAUDE_CODE_MESSAGING_', 'CLAUDE_CODE_DESKTOP_', 'CLAUDE_AGENT_SDK_',
+  'ANTIGRAVITY_', 'AGY_', 'ZCODE_ACP_',
 ];
+const NATIVE_HOST_EXACT = new Set([
+  'AIC_PROVIDER_KEY', 'DEFAULT_AUTH_REQUEST',
+  'CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION',
+  'CODEX_SESSION_ID', 'CODEX_THREAD_ID', 'CODEX_TOOL_CALL_ID', 'CODEX_CI', 'CODEX_PERMISSION_PROFILE',
+  'CODEX_APP_RUNTIME_CLI_PATH', 'CODEX_APP_TOOLS_PIPE_PATH', 'CODEX_INTERNAL_ORIGINATOR_OVERRIDE',
+]);
+const NATIVE_HOST_PREFIX = ['ANTIGRAVITY_', 'AGY_', 'ZCODE_ACP_'];
 
 export function shouldStrip(name: string, value?: string): boolean {
   const n = name.toUpperCase();
@@ -41,11 +49,11 @@ export function buildChildEnv(overlay: Record<string, string> = {}, base: NodeJS
 
 /** 原生接入保留软件自己的 API、认证和配置目录；仅清理工作台残留与宿主会话标识。 */
 export function buildNativeEnv(overlay: Record<string, string> = {}, base: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  const transient = new Set(['AIC_PROVIDER_KEY', 'DEFAULT_AUTH_REQUEST', 'CLAUDECODE', 'CLAUDE_PID', 'CLAUDE_CODE_SESSION_ID', 'CLAUDE_CODE_CHILD_SESSION']);
   const out: Record<string, string> = {};
   for (const [key, value] of Object.entries(base)) {
-    if (value === undefined || transient.has(key.toUpperCase())) continue;
-    if (key.toUpperCase() === 'HOME' && process.platform === 'win32' && value.startsWith('/')) continue;
+    const upper = key.toUpperCase();
+    if (value === undefined || NATIVE_HOST_EXACT.has(upper) || NATIVE_HOST_PREFIX.some((p) => upper.startsWith(p))) continue;
+    if (upper === 'HOME' && process.platform === 'win32' && value.startsWith('/')) continue;
     out[key] = value;
   }
   return { ...out, ...overlay };

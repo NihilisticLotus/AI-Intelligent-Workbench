@@ -1,5 +1,5 @@
-// Codex：经 @agentclientprotocol/codex-acp 2.5.0 接入（phase-1.md 6.3）。
-// 只用适配器自带的 codex（0.165），不设 CODEX_PATH：本机全局 0.120 读不了当前的 ~/.codex/config.toml（ISSUE-0009）。
+// Codex：经 @agentclientprotocol/codex-acp 2.12.0 接入（phase-1.md 6.3、第 14 节）。
+// 只用适配器自带的 codex（0.171.0），不设 CODEX_PATH：本机全局旧版 0.120 读不了新版 ~/.codex/config.toml（ISSUE-0009）。
 // 两者共用 CODEX_HOME（默认 ~/.codex），登录态相同。我们不读这个目录里的任何文件。
 import { existsSync } from 'node:fs';
 import path from 'node:path';
@@ -9,6 +9,7 @@ import { buildNativeEnv, runCli } from '../acp/launch';
 import { acpProbe, acpSpawn, type AcpAgentSpec, type AcpRuntime } from '../acp/session';
 import { initAuthMethods, nativeAccountEnv, pkgDirOf, readVersion, resolveFrom } from '../common';
 import type { AgentAdapter, AuthMethodInfo, DetectResult } from '../types';
+import { isRecord } from '../util';
 import { isVerified } from '../verified';
 
 const NAME = 'Codex';
@@ -48,10 +49,22 @@ export function createCodexAdapter(rt: AcpRuntime): AgentAdapter {
     // “需审批”映射到 read-only：on-request，写文件和越出沙箱的命令都要申请（workspace-write 下工作区内的修改不会询问）
     modeFor: (level: PermissionLevel) => (level === 'readonly' || level === 'ask' ? 'read-only' : level === 'workspace' ? 'workspace-write' : 'agent-full-access'),
     modeRank: (m) => MODE_RANK[m] ?? 99,
-    extensions: [],
+    extensions: ['_auth/status_update', 'auth/status_update'],
     dirEnvKeys: ['CODEX_HOME'],
     // H1：模型并进 CODEX_CONFIG（codex-acp 启动时读取的会话配置）
     launchModel: (model, env) => ({ env: codexModelEnv(model, env) }),
+    onNotification: (ctx, method, params) => {
+      if (!isRecord(params)) return;
+      if (method === '_auth/status_update') {
+        const st = isRecord(params.authStatus) ? params.authStatus : params;
+        // 只读登录布尔状态，绝不记录邮箱与账号名
+        if (st.kind === 'none') ctx.emit({ kind: 'auth', loggedIn: false });
+        else if (typeof st.kind === 'string') ctx.emit({ kind: 'auth', loggedIn: true });
+      } else if (method === 'auth/status_update') {
+        if (params.state === 'unauthenticated') ctx.emit({ kind: 'auth', loggedIn: false });
+        else if (params.state === 'authenticated') ctx.emit({ kind: 'auth', loggedIn: true });
+      }
+    },
     authMethodsFromInit: (init) => initAuthMethods(init)
       .filter((m) => m.id === 'chat-gpt' || m.id === 'api-key')
       .map((m) => CODEX_AUTH_METHODS.find((x) => x.id === m.id)!),

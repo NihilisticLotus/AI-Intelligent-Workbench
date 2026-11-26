@@ -1,38 +1,88 @@
-// ZCode（智谱）适配器：本步只做检测和连接测试，对话要等协议桥接（design.md 6.5，计划 M6）。
-// ZCode 没有 ACP 模式，只有自家的 ZCode Protocol（`zcode app-server`，stdio 上的 JSON 行）。
-// 2026-11-07 实测本机 0.17.1：`--version` 可用；app-server 启动后会推送 startup/storageState，
-// 但不认 ACP 的 initialize（回 invalid-message），所以现在无法直接对话。
-// 我们不读 ZCode 的登录文件（~/.zcode），登录状态一律记为“没能判断”。
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+// ZCode（智谱）适配器：通过精确锁定版本的开源桥接器 `zcode-acp-server`（Apache-2.0）驱动本机 ZCode 内置引擎（phase-1.md 第 14 节，ISSUE-0020）。
+// 安全边界：
+// 1. 不读取 ~/.zcode 下的任何凭据或配置文件；登录状态仅通过 ACP session/new 返回的可用服务状态判断。
+// 2. 强制用当前 Node 进程启动桥接器（ZCODE_ACP_RUNTIME=node），关闭远程 hub（ZCODE_ACP_REMOTE=0）与自动挂机续跑（ZCODE_ACP_QUOTA_AUTO_RESUME=0）。
+// 3. 强制覆盖桥接器默认的 yolo 全自动模式：只读映射为 plan，需审批映射为 build（文件修改与命令执行均须请求工作台审批；注意 ZCode 的 guarded 具有 yolo 自动写文件语义，仅拦截高危 shell，故归入更宽松档位）。
+import { existsSync, mkdtempSync, rmSync, statSync } from 'node:fs';
 import { spawn } from 'node:child_process';
-import path from 'node:path';
 import { tmpdir } from 'node:os';
+import path from 'node:path';
 import type { PermissionLevel } from '@aic/protocol';
+import { AcpConnection } from '../acp/connection';
+import { agentErrors, isAuthError } from '../acp/errors';
 import { buildNativeEnv, guardStdio, killTree, runCli } from '../acp/launch';
-import { agentErrors } from '../acp/errors';
-import type { AgentAdapter, DetectResult, LogFn, ProbeResult, ProbeStep } from '../types';
+import { acpProbe, acpSpawn, agentEnv, type AcpAgentSpec, type AcpRuntime } from '../acp/session';
+import { initAuthMethods, nativeAccountEnv, pkgDirOf, readVersion, resolveFrom } from '../common';
+import { redact } from '../redact';
+import type { AgentAdapter, AuthMethodInfo, DetectResult } from '../types';
+import { isRecord, str } from '../util';
 import { isVerified } from '../verified';
-import { nativeAccountEnv } from '../common';
 
 const NAME = 'ZCode';
+const LOGIN_CACHE_MS = 10 * 60_000;
+/** 保留旧常量导出以兼容既有引用 */
 export const ZCODE_BRIDGE_PENDING = '已找到 ZCode，但它用自家的通信协议，工作台还不能和它对话。协议桥接会在后续步骤提供（design.md 6.5）';
-const NOT_FOUND = '没有找到 ZCode。安装 ZCode 后点 [重新检测]';
+const NOT_FOUND = '没有找到 ZCode。安装 ZCode 桌面端后点 [重新检测]';
+const BRIDGE_NOT_FOUND = '找不到 zcode-acp-server，请重新安装 AI Console 的依赖';
+const NOT_LOGGED_IN = '还没有登录或未启用模型服务：请在 ZCode 桌面端完成登录，然后点 [重新检测]';
 
-/** 引擎位置：%LOCALAPPDATA%\Programs\ZCode\resources\glm\zcode.cjs；override 用于测试 */
+const MODE_RANK: Record<string, number> = {
+  plan: 0,
+  build: 1,
+  edit: 2,
+  guarded: 3,
+  auto: 4,
+  yolo: 5,
+};
+
+export const ZCODE_AUTH_METHODS: AuthMethodInfo[] = [
+  { id: 'zcode-credentials', name: '在 ZCode 桌面端登录', description: '沿用 ZCode 桌面端已登录的智谱 / Coding Plan 账号', flow: 'external_app' },
+];
+
+/** 引擎位置：%LOCALAPPDATA%\Programs\ZCode\resources\glm\zcode.cjs（或 macOS 应用包）；override 用于测试 */
 export function findZcode(override?: string | null): string | null {
   if (override) return existsSync(override) ? override : null;
-  const base = process.env.LOCALAPPDATA;
-  if (!base) return null;
-  const js = path.join(base, 'Programs', 'ZCode', 'resources', 'glm', 'zcode.cjs');
-  return existsSync(js) ? js : null;
+  if (process.platform === 'win32') {
+    const base = process.env.LOCALAPPDATA;
+    if (!base) return null;
+    const js = path.join(base, 'Programs', 'ZCode', 'resources', 'glm', 'zcode.cjs');
+    return existsSync(js) ? js : null;
+  }
+  if (process.platform === 'darwin') {
+    const mac = '/Applications/ZCode.app/Contents/Resources/glm/zcode.cjs';
+    return existsSync(mac) ? mac : null;
+  }
+  return null;
 }
 
-export interface ZcodeOptions {
+export function zcodeBridgePaths() {
+  const pkg = resolveFrom('zcode-acp-server/package.json');
+  const dir = pkgDirOf(pkg);
+  const entry = dir ? path.join(dir, 'dist', 'index.js') : null;
+  return { pkg, entry, adapterVersion: readVersion(pkg) };
+}
+
+/** 受控桥接环境变量：固定 Node 运行时、禁远程端口、禁默认 yolo */
+export function zcodeBridgeEnv(zcodeJs: string, mode: string): Record<string, string> {
+  return {
+    ZCODE_BIN: zcodeJs,
+    ZCODE_NODE: process.execPath,
+    ZCODE_ACP_RUNTIME: 'node',
+    ZCODE_ACP_REMOTE: '0',
+    ZCODE_ACP_QUOTA_AUTO_RESUME: '0',
+    ZCODE_ACP_SHOW_COMPLETION_STATUS: '0',
+    ZCODE_ACP_LANG: 'zh',
+    ZCODE_ACP_MODE: mode,
+  };
+}
+
+export interface ZcodeOptions extends Partial<AcpRuntime> {
   enginePath?: string | null;
-  log?: LogFn;
+  /** 测试时覆盖桥接入口（例如指向 fake-acp-agent.mjs） */
+  bridgeEntry?: string | null;
 }
 
-/** 启动 app-server，等它推送第一条 JSON 消息（证明引擎能跑起来、协议通道是通的），然后关掉 */
+/** 启动底层 app-server 等首条 JSON 消息（保留供诊断与单测调用） */
 export function pingAppServer(js: string, timeoutMs = 15_000): Promise<{ ok: boolean; firstMethod: string | null; detail: string | null }> {
   return new Promise((resolve) => {
     const cwd = mkdtempSync(path.join(tmpdir(), 'aic-zcode-'));
@@ -63,55 +113,147 @@ export function pingAppServer(js: string, timeoutMs = 15_000): Promise<{ ok: boo
   });
 }
 
+/** 从 session/new 的返回判断 ZCode 桌面端是否已有可用登录凭据（不读 ~/.zcode 文件） */
+function hasSelectableProvider(resp: unknown): boolean | null {
+  if (!isRecord(resp) || !Array.isArray(resp.configOptions)) return null;
+  const modelOpt = resp.configOptions.find((c) => isRecord(c) && c.category === 'model') as Record<string, unknown> | undefined;
+  if (!modelOpt) return null;
+  const meta = isRecord(modelOpt._meta) && isRecord(modelOpt._meta.zcode) ? modelOpt._meta.zcode : null;
+  if (meta && Array.isArray(meta.providers)) {
+    return meta.providers.some((p) => isRecord(p) && p.selectable === true);
+  }
+  return Array.isArray(modelOpt.options) ? modelOpt.options.length > 0 : null;
+}
+
 export function createZcodeAdapter(o: ZcodeOptions = {}): AgentAdapter {
-  const version = async (js: string) => {
-    const r = await runCli({ entry: js, args: ['--version'] }, { env: buildNativeEnv(), timeoutMs: 20_000 });
-    const m = /\d+\.\d+\.\d+/.exec(r.stdout);
-    return m ? m[0] : null;
+  const rt: AcpRuntime = { log: o.log ?? (() => {}), ...(o.tracker ? { tracker: o.tracker } : {}), ...(o.timeouts ? { timeouts: o.timeouts } : {}) };
+  const bridge = zcodeBridgePaths();
+  const versionCache = new Map<string, string | null>();
+  const loginCache = new Map<string, { at: number; loggedIn: boolean | null }>();
+
+  const bridgeEntry = () => o.bridgeEntry ?? bridge.entry;
+
+  const spec: AcpAgentSpec = {
+    kind: 'zcode',
+    displayName: NAME,
+    usesNativeConfig: true,
+    launch: () => {
+      const js = findZcode(o.enginePath);
+      if (!js) throw agentErrors.notInstalled('zcode', NAME, NOT_FOUND);
+      const entry = bridgeEntry();
+      if (!entry || !existsSync(entry)) throw agentErrors.notInstalled('zcode', NAME, BRIDGE_NOT_FOUND);
+      return { entry, args: [] };
+    },
+    modeFor: (level: PermissionLevel) => (level === 'readonly' ? 'plan' : level === 'ask' ? 'build' : level === 'workspace' ? 'edit' : 'yolo'),
+    modeRank: (m) => MODE_RANK[m] ?? 99,
+    extensions: ['_zcode/turnState'],
+    dirEnvKeys: ['ZCODE_HOME'],
+    launchModel: (model) => ({ env: { ZCODE_MODEL: model } }),
+    onNotification: (ctx, method) => {
+      if (method.startsWith('_zcode/')) ctx.log('debug', `[agent:zcode] 私有通知 ${method}`);
+    },
+    authMethodsFromInit: (init) => initAuthMethods(init).map((m) => ZCODE_AUTH_METHODS.find((x) => x.id === m.id) ?? {
+      id: m.id, name: m.name, description: m.description, flow: 'external_app' as const,
+    }),
   };
+
+  async function readEngineVersion(js: string): Promise<string | null> {
+    let key = js;
+    try { key = `${js}|${statSync(js).mtimeMs}`; } catch { /* 用路径 */ }
+    if (versionCache.has(key)) return versionCache.get(key) ?? null;
+    const r = await runCli({ entry: js, args: ['--version'] }, { env: buildNativeEnv(), timeoutMs: 20_000 });
+    const v = /\d+\.\d+\.\d+/.exec(r.stdout)?.[0] ?? null;
+    if (v) versionCache.set(key, v);
+    return v;
+  }
+
+  async function checkLogin(js: string, env: Record<string, string>, secrets: string[]): Promise<boolean | null> {
+    const full = agentEnv(spec, { ...env, ...zcodeBridgeEnv(js, 'plan') });
+    let conn: AcpConnection | null = null;
+    try {
+      conn = await AcpConnection.start({
+        kind: 'zcode', displayName: NAME, launch: spec.launch(full), cwd: tmpdir(), env: full, redact: secrets, log: rt.log, label: 'detect',
+        ...(rt.tracker ? { tracker: rt.tracker } : {}),
+        timeouts: { ...rt.timeouts, initialize: Math.min(rt.timeouts?.initialize ?? 30_000, 30_000) },
+      });
+      const resp = await conn.request<Record<string, unknown>>('session/new', { cwd: tmpdir(), mcpServers: [] }, conn.timeouts.session, 'session');
+      return hasSelectableProvider(resp);
+    } catch (e) {
+      if (isAuthError(e)) return false;
+      rt.log('warn', `[agent:zcode] 检查登录状态失败：${redact(e instanceof Error ? e.message : String(e), secrets)}`);
+      return null;
+    } finally {
+      await conn?.close().catch(() => {});
+    }
+  }
+
   return {
-    id: 'zcode', displayName: NAME, real: true, usesNativeConfig: true,
+    id: 'zcode',
+    displayName: NAME,
+    real: true,
+    usesNativeConfig: true,
     authMethods: [],
     permissionLevels: ['readonly', 'ask'] satisfies PermissionLevel[],
     autoProbe: false,
-    workspaceConfig: 'ignored',
+    launchModel: true,
+    workspaceConfig: 'trusted_only',
+    experimentalProfile: () => false,
+    sessionStore: () => 'shared',
 
-    async detect(): Promise<DetectResult> {
+    async detect(opts = {}): Promise<DetectResult> {
       const js = findZcode(o.enginePath);
+      const entry = bridgeEntry();
+      const adapterVer = o.bridgeEntry ? '0.94.0' : bridge.adapterVersion;
       const base: DetectResult = {
-        installed: !!js, version: null, enginePath: js, loggedIn: false, message: js ? ZCODE_BRIDGE_PENDING : NOT_FOUND,
-        adapterVersion: null, engineVersion: null, engineSource: 'app', engineLocation: 'ZCode 内置引擎',
-        verified: false, authMethods: [], loginCheck: 'unknown', checkedAt: Date.now(),
+        installed: false, version: adapterVer, enginePath: js, loggedIn: false, message: null,
+        adapterVersion: adapterVer, engineVersion: null, engineSource: 'app', engineLocation: 'ZCode 内置引擎（经 zcode-acp 桥接）',
+        verified: false, authMethods: ZCODE_AUTH_METHODS, loginCheck: 'unknown', checkedAt: Date.now(),
       };
-      if (!js) return base;
-      const v = await version(js).catch(() => null);
-      return { ...base, version: v, engineVersion: v, verified: isVerified('zcode', null, v), unsupported: true };
+      if (!js) return { ...base, message: NOT_FOUND };
+      if (!entry || !existsSync(entry)) return { ...base, message: BRIDGE_NOT_FOUND };
+      const engineVer = await readEngineVersion(js).catch(() => null);
+      const verified = isVerified('zcode', adapterVer, engineVer);
+      const env = opts.env ?? {};
+      const cacheKey = `${js}|${adapterVer ?? ''}|${engineVer ?? ''}`;
+      const cached = loginCache.get(cacheKey);
+      let loggedIn: boolean | null;
+      if (!opts.force && cached && Date.now() - cached.at < LOGIN_CACHE_MS) loggedIn = cached.loggedIn;
+      else {
+        loggedIn = await checkLogin(js, env, opts.redact ?? []);
+        loginCache.set(cacheKey, { at: Date.now(), loggedIn });
+      }
+      return {
+        ...base,
+        installed: true,
+        version: engineVer ?? adapterVer,
+        engineVersion: engineVer,
+        verified,
+        loggedIn: loggedIn === true,
+        loginCheck: loggedIn === null ? 'unknown' : 'acp',
+        message: loggedIn === null ? '没能判断登录状态' : loggedIn ? null : NOT_LOGGED_IN,
+      };
     },
 
-    async login() { throw agentErrors.unsupported(NAME, '在工作台里登录（请在 ZCode 里登录）'); },
+    async login() { throw agentErrors.unsupported(NAME, '在工作台里登录（请在 ZCode 桌面端登录）'); },
     buildEnv: nativeAccountEnv,
     async listModels() { return []; },
     async listEfforts() { return null; },
-    async spawn() { throw agentErrors.unsupported(NAME, `对话：${ZCODE_BRIDGE_PENDING}`); },
-    async probeCapabilities() { throw agentErrors.unsupported(NAME, '能力探测'); },
 
-    /** 测试连接：找到引擎 → 读版本 → 启动 app-server 等第一条消息 → 说明对话还要等桥接 */
-    async probe(): Promise<ProbeResult> {
-      const steps: ProbeStep[] = [];
-      const step = (label: string, ok: boolean, t0: number, detail?: string) => steps.push({ ts: Date.now(), label, ok, ms: Date.now() - t0, ...(detail ? { detail } : {}) });
-      let t = Date.now();
+    spawn(opts) {
       const js = findZcode(o.enginePath);
-      step('找到引擎', !!js, t, js ? 'ZCode 内置引擎' : NOT_FOUND);
-      if (!js) return { ok: false, steps, caps: null, config: null, authMethods: null };
-      t = Date.now();
-      const v = await version(js).catch(() => null);
-      step('读取版本', !!v, t, v ?? '没有读到版本号');
-      t = Date.now();
-      const ping = await pingAppServer(js);
-      step('启动 app-server（ZCode 自家协议）', ping.ok, t, ping.ok ? `收到 ${ping.firstMethod ?? '消息'}` : ping.detail ?? undefined);
-      steps.push({ ts: Date.now(), label: '开始对话', ok: false, ms: 0, detail: ZCODE_BRIDGE_PENDING });
-      o.log?.('info', `[agent:zcode] 连接测试：版本 ${v ?? '未知'}，app-server ${ping.ok ? '有响应' : '无响应'}`);
-      return { ok: false, steps, caps: null, config: null, authMethods: null };
+      const mode = spec.modeFor(opts.permission) ?? 'build';
+      const extra = js ? zcodeBridgeEnv(js, mode) : {};
+      return acpSpawn(spec, rt, { ...opts, env: { ...(opts.env ?? {}), ...extra } });
     },
+    async probeCapabilities(conn) {
+      if (!conn.caps) throw agentErrors.protocol('zcode', NAME, '会话没有能力信息');
+      return conn.caps;
+    },
+    probe(opts) {
+      const js = findZcode(o.enginePath);
+      const extra = js ? zcodeBridgeEnv(js, 'plan') : {};
+      return acpProbe(spec, rt, { ...opts, env: { ...opts.env, ...extra } });
+    },
+    mapPermissionLevel(level) { return { modeId: spec.modeFor(level) ?? undefined }; },
   };
 }

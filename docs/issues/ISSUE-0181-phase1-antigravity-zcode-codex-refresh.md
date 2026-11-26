@@ -1,9 +1,10 @@
 # ISSUE-0181：第一阶段新增 Google Antigravity 接入及 ZCode、Codex 更新兼容与回归测试
 
-- 状态：open
+- 状态：fixed
 - 类型：待办
 - 严重度：medium
 - 发现于：2026-11-26（用户指出本机已增加 Google Antigravity，且 ZCode 与 Codex 经历多次软件更新，需在第一阶段补齐支持与测试）
+- 关闭：2026-11-26
 - 目标里程碑：1.8
 
 ## 背景与本机核查结果（2026-11-26）
@@ -27,3 +28,4 @@
 ## 时间线
 
 - 2026-11-26：用户提出需求，完成本机程序版本与官方协议只读核查，写入 `docs/plans/phase-1.md` 第 1.8 步（第 14 节），排在第二阶段启动之前执行。
+- 2026-11-26 完成并关闭：按用户授权安装官方 `agy` `1.5.18`，升级锁定 `@agentclientprotocol/codex-acp@2.12.0` / `@openai/codex@0.171.0` 并引入 `zcode-acp-server@0.94.0`（`ask` 映射为 `build`）；修复连接测试探测目录 Windows `EPERM` 清理问题；完成离线契约测试（全仓 1,239 通过 / 5 跳过）、三家真实模型端到端冒烟及浏览器 `Antigravity → ZCode → Codex` 两次 H2 自动交接与合并验收，详见 [docs/acceptance/step-1.8.md](../acceptance/step-1.8.md)。

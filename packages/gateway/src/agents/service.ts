@@ -1,6 +1,7 @@
 // Agent 服务：检测结果缓存、能力缓存（agent_caps）、登录流程、测试连接、并发上限（phase-1.md 6.2.4、6.3、6.5.1、6.6.2）。
 // GET /agents 只读缓存；探测只在 Gateway 启动、[重新检测]、登录完成、测试连接时执行。
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import path from 'node:path';
 import {
   WORKBUDDY_APP_METHOD, type AgentAdapter, type AgentCaps as AdapterCaps, type DetectResult, type LoginHandle, type SessionConfigState,
@@ -114,8 +115,9 @@ export class AgentService {
     return this.detected.get(kind) ?? this.detect(kind);
   }
 
-  /** Gateway 启动时：检测全部 Agent，并为支持自动探测的 Agent（Claude）补齐能力缓存 */
+  /** Gateway 启动时：清理上次残留的探测临时目录，检测全部 Agent，并为支持自动探测的 Agent（Claude）补齐能力缓存 */
   async startup() {
+    this.cleanStaleProbeDirs();
     await Promise.all(this.registry.all().filter((a) => this.enabled(a.id)).map(async (a) => {
       await this.detect(a.id).catch(() => {});
       this.pushStatus(a.id);
@@ -166,7 +168,7 @@ export class AgentService {
       } catch (e) {
         this.o.log(`[agents] ${kind} 自动探测失败：${(e as Error).message}`);
       } finally {
-        rmSync(dir, { recursive: true, force: true });
+        await this.cleanProbeDir(dir);
       }
     })().finally(() => this.probing.delete(kind));
     this.probing.set(kind, p);
@@ -177,6 +179,23 @@ export class AgentService {
     const base = path.join(this.o.dataDir, 'probe');
     mkdirSync(base, { recursive: true });
     return mkdtempSync(path.join(base, 'p-'));
+  }
+
+  private async cleanProbeDir(dir: string) {
+    try {
+      await rm(dir, { recursive: true, force: true, maxRetries: 4, retryDelay: 80 });
+    } catch {
+      // Windows 上桥接子进程（如 zcode app-server）退出瞬间可能短暂占用 cwd 句柄；忽略并在下次启动时清扫残留。
+    }
+  }
+
+  private cleanStaleProbeDirs() {
+    const base = path.join(this.o.dataDir, 'probe');
+    try {
+      for (const name of readdirSync(base)) {
+        if (name.startsWith('p-')) void this.cleanProbeDir(path.join(base, name));
+      }
+    } catch { /* probe 目录尚不存在时忽略 */ }
   }
 
   // ---------- 能力缓存 ----------
@@ -511,7 +530,7 @@ export class AgentService {
       this.pushStatus(kind);
       return { ok: r.ok, steps: r.steps };
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      await this.cleanProbeDir(dir);
     }
   }
 

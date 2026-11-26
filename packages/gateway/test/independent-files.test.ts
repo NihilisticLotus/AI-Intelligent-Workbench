@@ -114,7 +114,7 @@ describe('独立项目文本工具', () => {
     for (let i = 0; i < 400; i++) f.put(`many/${String(i).padStart(4, '0')}-${'x'.repeat(175)}`, '');
     const limited = await f.files.list({ directory: 'many', query: '', maxEntries: 2000 }); expect(limited.truncated).toBe(true); expect(Buffer.byteLength(JSON.stringify(limited.paths))).toBeLessThan(64 * 1024);
     expect((await f.files.list({ directory: null, query: '', maxEntries: 1 })).truncated).toBe(true);
-    for (const name of ['.codex/auth.json', '.workbuddy/a', '.zcode/a', '.env.local', 'auth.json', 'certificate.pem', '.aic-stage-fixture', '.aic-old-fixture']) expect(() => workspaceRelative(name)).toThrow();
+    for (const name of ['.codex/auth.json', '.workbuddy/a', '.zcode/a', '.gemini/a', '.env.local', 'auth.json', 'certificate.pem', '.aic-stage-fixture', '.aic-old-fixture']) expect(() => workspaceRelative(name)).toThrow();
     for (const name of ['.aic-stage-fixture', '.aic-old-fixture']) await expect(f.host.read(name)).rejects.toMatchObject({ status: 403, body: { code: 'auth.forbidden' } });
   });
   it('搜索使用字面文本、限制命中与片段，跳过二进制并保留行号', async () => {

@@ -52,7 +52,7 @@ function commandPaths(command:string) {
 }
 function protectedTarget(value:string,write:boolean) {
   const target=value.replaceAll('\\','/').toLowerCase();
-  if(/(?:^|\/)(?:\.claude|\.codex|\.codebuddy|\.workbuddy|\.zcode)(?:\/|$)/.test(target))return true;
+  if(/(?:^|\/)(?:\.claude|\.codex|\.codebuddy|\.workbuddy|\.zcode|\.gemini)(?:\/|$)/.test(target))return true;
   if(write&&/(?:^|\/)\.git(?:\/|$)/.test(target))return true;
   return write&&(/^[a-z]:\/(?:windows|program files(?: \(x86\))?|programdata)(?:\/|$)/.test(target)||/^\/(?:etc|usr|bin|sbin|boot|sys|proc)(?:\/|$)/.test(target));
 }

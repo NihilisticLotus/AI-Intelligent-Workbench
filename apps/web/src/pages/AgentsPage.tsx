@@ -117,7 +117,7 @@ export function AgentsPage() {
       if (on) {
         toast(`已打开 ${a.displayName}，检测完成`);
         select(a.kind, true);
-        if (a.kind === 'zcode') void runTest({ ...a, enabled: true });
+        if (a.kind === 'zcode' || a.kind === 'antigravity') void runTest({ ...a, enabled: true });
       } else toast(`已关闭 ${a.displayName}：不再检测，新建任务和切换器里不显示。已有任务的记录保留`);
     } catch (e) { toastErrorOf(e, { kind: a.kind }); } finally { setToggling(null); }
   };

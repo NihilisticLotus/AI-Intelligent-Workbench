@@ -43,7 +43,7 @@ public sealed class AicFileGuard : IDisposable {
     }
     static bool Blocked(string part) {
         string value = part.ToLowerInvariant();
-        return new HashSet<string> { ".git", ".aic-data", ".claude", ".codex", ".codebuddy", ".workbuddy", ".zcode", ".ssh", ".aws", ".azure", "auth.json", "credentials.json", "credentials", ".npmrc", ".netrc", ".pypirc" }.Contains(value)
+        return new HashSet<string> { ".git", ".aic-data", ".claude", ".codex", ".codebuddy", ".workbuddy", ".zcode", ".gemini", ".ssh", ".aws", ".azure", "auth.json", "credentials.json", "credentials", ".npmrc", ".netrc", ".pypirc" }.Contains(value)
             || value == ".env" || value.StartsWith(".env.") || value.StartsWith(".aic-stage-") || value.StartsWith(".aic-old-") || value.EndsWith(".pem") || value.EndsWith(".key") || value.EndsWith(".pfx") || value.EndsWith(".p12");
     }
     static void Component(string part, bool projectFile = false) {

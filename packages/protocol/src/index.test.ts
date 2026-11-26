@@ -52,6 +52,7 @@ describe('协议', () => {
   it('1.2 新增字段：老数据照样能解析，新字段可以带上', () => {
     const ag = { kind: 'claude', displayName: 'Claude Code', status: 'ready', version: '0.100.0', verified: true, models: [], efforts: null, message: null };
     expect(AgentInfo.parse(ag).kind).toBe('claude');
+    expect(AgentInfo.parse({ ...ag, kind: 'antigravity', displayName: 'Antigravity' }).kind).toBe('antigravity');
     expect(AgentInfo.parse(ag).usesNativeConfig).toBeUndefined();
     expect(AgentInfo.parse({ ...ag, usesNativeConfig: true }).usesNativeConfig).toBe(true);
     expect(AgentInfo.safeParse({ ...ag, usesNativeConfig: 'true' }).success).toBe(false);

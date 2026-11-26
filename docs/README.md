@@ -23,12 +23,14 @@
 | [research/model-capability-detection.md](research/model-capability-detection.md) | 2026-11-08 | 各协议模型元数据、上下文语义、图片与思考参数、来源及未知状态 |
 | [research/independent-agent-engines.md](research/independent-agent-engines.md) | 2026-11-08 | Pi、Cline、OpenCode、Goose 的能力矩阵、认证风险与离线选型门槛 |
 | [research/deepseek-harness.md](research/deepseek-harness.md) | 2026-11-08 | DeepSeek Harness 固定源码：服务与循环、工具 schema、失败尝试、上下文与能力声明；对照现有宿主及后续采用门槛 |
+| [research/openmausbot-openmanus.md](research/openmausbot-openmanus.md) | 2026-11-26 | OpenMausBot 与 OpenManus 固定版本只读调研：9 维能力与安全核查、对照矩阵、取舍、Apache-2.0 借用边界及网络安全前置条件 |
 
 ## 计划
 
 | 文档 | 说明 |
 |---|---|
 | [plans/phase-1.md](plans/phase-1.md) | 第一阶段：本机浏览器版，7 步，进度见第 1 节；第 2 节是接口规则，第 12.14 节是 1.6 验收结论 |
+| [plans/phase-2.md](plans/phase-2.md) | 第二阶段：安全加固基线、监控与花费上限、能力中心、常驻岗位与长期记忆、多岗位协作与侧聊、日常自动化及受控浏览朗读（9 步） |
 
 ## 过程记录
 
@@ -46,6 +48,7 @@
 | [ISSUE-0147](issues/ISSUE-0147-lan-pairing-qr.md) | 局域网扫码暂缓，保留地址与配对码流程 |
 | [ISSUE-0148](issues/ISSUE-0148-lan-port-test-exclusion.md) | Windows 回环顺延测试的相邻端口夹具 |
 | [ISSUE-0149](issues/ISSUE-0149-lan-phone-acceptance.md) · [ISSUE-0179](issues/ISSUE-0179-lan-uac-preflight.md) | 手机真机验收与 Windows UAC 现场条件 |
+| [ISSUE-0180](issues/ISSUE-0180-hello-worktree-feature-flag.md) | `/api/v1/hello` 的 `Worktrees` 功能开关状态对齐（排入 2.1） |
 
 ### 2026-11-14 用量审查修复
 

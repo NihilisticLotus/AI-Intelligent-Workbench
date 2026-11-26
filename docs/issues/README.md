@@ -186,3 +186,4 @@
 | [ISSUE-0178](ISSUE-0178-secret-reference-transaction.md) | 配置保存中断可能留下无归属的密文 | fixed | bug | 2026-11-21 | 2026-11-21 |
 | [ISSUE-0179](ISSUE-0179-lan-uac-preflight.md) | 局域网开关缺少 Windows 无法弹出 UAC 时的处理约定 | fixed | 验收未通过 | 2026-11-21 | 2026-11-22 |
 | [ISSUE-0180](ISSUE-0180-hello-worktree-feature-flag.md) | `/api/v1/hello` 中 `FeatureKey.Worktrees` 仍固定为 `false` | open | bug | 2026-11-26 | — |
+| [ISSUE-0181](ISSUE-0181-phase1-antigravity-zcode-codex-refresh.md) | 第一阶段新增 Google Antigravity 接入及 ZCode、Codex 更新兼容与回归测试 | open | 待办 | 2026-11-26 | — |

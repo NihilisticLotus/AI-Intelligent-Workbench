@@ -29,7 +29,7 @@
 
 | 文档 | 说明 |
 |---|---|
-| [plans/phase-1.md](plans/phase-1.md) | 第一阶段：本机浏览器版，7 步，进度见第 1 节；第 2 节是接口规则，第 12.14 节是 1.6 验收结论 |
+| [plans/phase-1.md](plans/phase-1.md) | 第一阶段：本机浏览器版，8 步（1.8 新增 Antigravity 及 ZCode、Codex 更新支持与测试，见第 14 节）；第 2 节是接口规则，第 12.14 节是 1.6 验收结论 |
 | [plans/phase-2.md](plans/phase-2.md) | 第二阶段：安全加固基线、监控与花费上限、能力中心、常驻岗位与长期记忆、多岗位协作与侧聊、日常自动化及受控浏览朗读（9 步） |
 
 ## 过程记录
@@ -49,6 +49,7 @@
 | [ISSUE-0148](issues/ISSUE-0148-lan-port-test-exclusion.md) | Windows 回环顺延测试的相邻端口夹具 |
 | [ISSUE-0149](issues/ISSUE-0149-lan-phone-acceptance.md) · [ISSUE-0179](issues/ISSUE-0179-lan-uac-preflight.md) | 手机真机验收与 Windows UAC 现场条件 |
 | [ISSUE-0180](issues/ISSUE-0180-hello-worktree-feature-flag.md) | `/api/v1/hello` 的 `Worktrees` 功能开关状态对齐（排入 2.1） |
+| [ISSUE-0181](issues/ISSUE-0181-phase1-antigravity-zcode-codex-refresh.md) | 第一阶段 1.8：新增 Google Antigravity 接入与新版 ZCode、Codex 适配测试 |
 
 ### 2026-11-14 用量审查修复
 

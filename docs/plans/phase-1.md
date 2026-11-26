@@ -16,10 +16,11 @@
 | 1.5 任务与工作区 | 已完成（2026-11-15，按批准范围）；真实补验缺口见 11.15 与 step-1.5 | git worktree；非 git 项目的影子快照；改动（diff）面板；合并 / 丢弃 / 回滚；权限规则和“总是允许”；演示 / 独立隔离任务开放“工作区内自动 / 全自动”（第三方延期）；看板；“详细 → 输出”改为工作副本的改动 | 8、9、13 | 在 git 项目和非 git 项目各完成一个改代码的任务，并分别合并和回滚 |
 | 1.6 上下文与交接 | 已完成；第 12.13 节六项通过，真实分轮续做及原生切回见 12.14 | 任务账本、`.aic/TASK.md`、自动交接 H2–H4、覆盖校验、`aic_history` 工具、交接分隔条；换 Agent 发送消息时才交接；换账号已由 9.15 与 9.29 覆盖 | 7；ui 6.5、6.8 | 同一任务从 Claude Code 交接到 Codex，全程不弹窗，交接后继续完成且不重复已做的改动；选了别的 Agent 但没发消息时不交接、可以撤销 |
 | 1.7 局域网浏览器 | 已实现并通过本机验收，11 月 22 日补充点击开启时的 UAC 检查。等待本机启用 UAC、重启并完成手机验收（[ISSUE-0149](../issues/ISSUE-0149-lan-phone-acceptance.md)）。结论见 13.14 | 局域网开关、防火墙规则、配对码、设备管理；网页手机端适配（2026-11-19 补充） | 16、15.3；ui 8 | 在手机浏览器上配对后完成一次审批；已有页面在手机浏览器上可用 |
+| 1.8 Antigravity 与 ZCode、Codex 更新支持及测试 | 待执行（2026-11-26 新增，规格见第 14 节；跟踪单 [ISSUE-0181](../issues/ISSUE-0181-phase1-antigravity-zcode-codex-refresh.md)、[ISSUE-0020](../issues/ISSUE-0020-zcode-acp-bridge.md)、[ISSUE-0009](../issues/ISSUE-0009-codex-global-cli-config.md)） | 新增 Google Antigravity 官方 `agy acp` 适配器；通过受控 `zcode-acp-server` 接入新版 ZCode；升级 `codex-acp` 适配新版 Codex 并复核配置兼容；补齐离线契约测试、真实冒烟与跨 Agent 交接测试 | design 6、7.4、9；ui 5.5、6.1、6.5 | Antigravity、新版 ZCode、新版 Codex 均能在网页里检测、选模型、带审批完成对话，并互相完成一次自动交接 |
 
 编号对照（2026-11-08 之前的记录里写的步号）：原 1.3 → 1.5，原 1.4 → 1.6，原 1.5 → 1.7。旧的验收记录、devlog、问题单不改写；仍未关闭的问题单在时间线里追加新目标。
 
-后续阶段（不在本计划内）：监控和调用统计（用 1.4 的用量数据）、自动化、快速判断、能力中心（MCP / Skill，“详细 → 连接”的完整列表在这里）、侧聊、资产和三维预览、媒体生成、ZCode 桥接（ISSUE-0020，用户决定先不接）、桌面软件、手机应用、外网中转。第二阶段的取舍、安全前提与分步计划见 [phase-2.md](phase-2.md)（配套调研见 [../research/openmausbot-openmanus.md](../research/openmausbot-openmanus.md)）。
+后续阶段（不在本计划内）：监控和调用统计（用 1.4 的用量数据）、自动化、快速判断、能力中心（MCP / Skill，“详细 → 连接”的完整列表在这里）、侧聊、资产和三维预览、媒体生成、桌面软件、手机应用、外网中转。ZCode 桥接（ISSUE-0020）已于 2026-11-26 提入本计划第 1.8 步；第二阶段的取舍、安全前提与分步计划见 [phase-2.md](phase-2.md)（配套调研见 [../research/openmausbot-openmanus.md](../research/openmausbot-openmanus.md)）。
 
 排序理由：1.3 先把已有功能修稳、验实，界面和用量统计是用户最近反复确认的需求，所以 1.3、1.4 排在工作区之前；“输出”一节和改动面板依赖工作副本，交接依赖任务账本和工作副本的 diff，所以工作区在交接前面。
 
@@ -2255,3 +2256,65 @@ ISSUE-0131 的原生记录已定位到工具名称查找落空，接收提示已
 - 地址和六位码可以配对，扫码暂缓。mDNS 推迟到手机应用阶段。[ISSUE-0147](../issues/ISSUE-0147-lan-pairing-qr.md)
 - 2026-11-21 再次审查第 1.7 步。修复运行时网络类别变化、配对领取与吊销、电脑接手待确认请求、手机计时、访问审计范围和吊销后的手机界面。待验收范围继续由 ISSUE-0149 跟踪。[本轮审查与复验](../acceptance/step-1.7.md#2026-11-21-第二次代码审查)
 - 2026-11-22 用户选定在点击开启时解释 UAC 不可用的原因，并在本机自行启用 UAC 和重启。工作台在规则写操作前检查权限环境，关闭时先断开手机，残留规则可在恢复权限提示后从网页清理。实际 UAC、规则和手机主路径继续由阶段 7 的真机验收核对。[ISSUE-0179](../issues/ISSUE-0179-lan-uac-preflight.md)
+
+---
+
+## 14. 1.8 实现规格：Antigravity 接入与 ZCode、Codex 更新支持及测试
+
+> 2026-11-26 新增 · 用户要求：本机新增了 Google Antigravity，且 ZCode 与 Codex 均经过多次软件更新，第一阶段需补齐对这三者的支持与完整测试，再进入第二阶段。跟踪单：[ISSUE-0181](../issues/ISSUE-0181-phase1-antigravity-zcode-codex-refresh.md)、[ISSUE-0020](../issues/ISSUE-0020-zcode-acp-bridge.md)、[ISSUE-0009](../issues/ISSUE-0009-codex-global-cli-config.md)。
+
+### 14.1 本机与上游现状核查（2026-11-26 只读核实）
+
+1. **Google Antigravity（新增接入）**：
+   - **本机现状**：已安装 Antigravity 桌面版 `2.35.2.0`（`%LOCALAPPDATA%\Programs\antigravity\Antigravity.exe`），但尚未安装独立的官方命令行程序 `agy`（Windows 官方默认路径为 `%LOCALAPPDATA%\agy\bin\agy.exe`）。
+   - **官方协议能力**（据 `antigravity.google/docs/cli/acp` 与 `ide/extensions/acp`）：官方 `agy acp` 原生内置 **ACP v1 标准服务端**（走 `stdio` JSON-RPC，自报 `Antigravity ACP Server`），与本机 Antigravity 桌面版共用系统凭据管理器中的统一登录态（无需重复登录，工作台也不需要读任何凭据文件）。原生支持模型选择、思考强度（`Low` / `Medium` / `High` / `Extra` / `Max`）、文件差异、工具执行审批（Allow / Deny）、图片与资源附件、会话加载与恢复（`load` / `resume`）。未登录时返回 `-32000 Authentication required` 并提供登录方式声明。
+2. **ZCode（智谱，由“仅检测”升级为可对话 + 适配新版桌面端）**：
+   - **本机现状**：本机 ZCode 桌面版已升级至 `3.18.2.10443`；核对其内置引擎 `%LOCALAPPDATA%\Programs\ZCode\resources\glm\zcode.cjs`（`--version` 报告 `0.17.1`），仍只提供自家私有协议 `zcode app-server`，无官方 `--acp` 参数。
+   - **上游桥接现状**：此前 [zcode-acp.md](../research/zcode-acp.md) 评估可行的开源桥接包 `zcode-acp-server`（Apache-2.0）已从 `0.82.3` 更新至 `0.94.0`。按既有安全结论，必须锁定精确版本、跳过安装脚本（`--ignore-scripts`）、不启动其远程 hub，并在启动时显式传入 `ZCODE_ACP_MODE` 把它默认的 `yolo`（全自动免审批）强制收紧为“只读 → `plan`、需审批 → `guarded` / `edit`”。
+3. **Codex（OpenAI，适配器升级与新版配置兼容回归）**：
+   - **本机与仓库差距**：仓库当前仍锁定 11 月 6 日的 `@agentclientprotocol/codex-acp@2.5.0`（内含 `@openai/codex@0.165.0`）与 `@agentclientprotocol/sdk@2.4.0`；本机同时装有新版桌面端（含 `Codex++`）和旧全局 `codex-cli 0.120.0`，而 npm 官方上游已演进至 `@agentclientprotocol/codex-acp@2.12.0`、`@openai/codex@0.172.0`、`@agentclientprotocol/sdk@2.12.0`。
+   - **关注点**：桌面端多次更新可能继续往共享的 `~/.codex/config.toml` 写入新配置项（曾引发 ISSUE-0009），需升级适配器与内置引擎精确版本，验证新版配置读取、登录态检测、权限档位映射、模型与思考强度切换及会话交接。
+
+### 14.2 动工前需用户确认项与默认规则
+
+1. **硬边界不变**：
+   - 严守本文第 2 节接口规则：客户端只走 `/api/v1` REST + WebSocket，类型只在 `packages/protocol` 定义，网页零本机路径拼接。
+   - 认证归属不变：Antigravity、ZCode、Codex 均沿用各自软件在本机保存的登录与配置；**严禁读取** `~/.gemini`、`~/.zcode`、`~/.codex/auth.json`、`~/.claude`、`~/.codebuddy`、`~/.workbuddy` 及 `.aic-data`。
+   - 权限边界不变：三个真实 Agent 在工作台里只开放“只读（`readonly`）”和“需审批（`ask`）”两档，默认“需审批”；严禁给 Antigravity 传 `--dangerously-skip-permissions`，严禁让 ZCode 落回默认 `yolo`。
+2. **需用户同意的依赖与环境准备（动手改 `package.json` 或装 CLI 前必须先获用户确认）**：
+   - **本机安装官方 `agy` CLI**：由用户在终端执行官方安装命令（或明确授权 Agent 执行）将 `agy.exe` 安装至 `%LOCALAPPDATA%\agy\bin\agy.exe`；若暂未安装，工作台 Agent 页必须能清晰检测出“已安装 Antigravity 桌面版，但缺少 `agy` 命令行组件”并在界面给出一步到位的中文说明与 `[重新检测]` 按钮，不能报错崩溃。
+   - **升级/新增精确版本 npm 依赖（需用户同意）**：
+     - `@agentclientprotocol/codex-acp`：`2.5.0` → 升级锁定最新稳定版（当前 `2.12.0`，Apache-2.0，连同 `overrides` 中的 `@openai/codex` win32 二进制锁定精确版本 `0.172.0`）；评估是否需同步升级 `@agentclientprotocol/sdk`（若升级须确保 Claude Code 与 CodeBuddy 全量测试零退步）。
+     - `zcode-acp-server`：新增锁定精确版本（当前 `0.94.0`，Apache-2.0），必须确认 `postinstall` 脚本被安全隔离或仅由 Gateway 直接以 `node dist/index.js` 子进程方式调用且不拉起其远程端口。
+   - **真实模型冒烟额度确认**：跑真实连接与交接冒烟前，向用户说明每家预计发送 **≤ 4 条极短验证消息**（对话 1 条、需审批写文件与拒绝各 1 条、跨 Agent 交接 1 条），获准后再发真实请求。
+
+### 14.3 分阶段执行计划（每阶段按单次会话可完成并自验划分）
+
+#### 阶段 1（1.8-A）：Codex 版本升级与更新兼容回归测试
+1. **改动**：在用户同意依赖升级后，更新 `packages/adapters/package.json` 与根 `package.json` 的 `overrides`，锁定新版 `@agentclientprotocol/codex-acp` 与 `@openai/codex`；核对 `packages/adapters/src/codex/index.ts` 中 `login status` 输出格式、`modeFor`（`read-only` / `workspace-write`）、`CODEX_CONFIG` 模型注入及 `configOptions` 解析在新版下是否变化；将新验证组合加入 `packages/adapters/src/verified.ts`。
+2. **测试**：跑通全部现有离线契约测试，补充新版返回字段兼容单测；在本机真实环境执行 `[测试连接]`、登录状态识别、模型与思考强度切换、一次需审批文件修改（点允许与点拒绝各验证一次）及工作副本 Diff 生成，更新 `ISSUE-0009` 时间线。
+
+#### 阶段 2（1.8-B）：新增 Google Antigravity 官方 ACP 接入与测试
+1. **改动**：
+   - `packages/protocol`：`AgentKind` 枚举新增 `'antigravity'`（保持向后兼容）。
+   - `packages/adapters/src/antigravity/index.ts`：实现 `createAntigravityAdapter`。自动按优先级查找环境变量覆盖、`PATH` 中的 `agy`、`%LOCALAPPDATA%\agy\bin\agy.exe`（同时检测 `%LOCALAPPDATA%\Programs\antigravity\Antigravity.exe` 用于区分“完全未安装”与“仅装了桌面版未装 CLI”两种友好提示文案）；启动参数固定为 `['acp', '--disable-telemetry']`；映射权限档位与 `thought_level` / 模型 `configOptions`；处理 `-32000 Authentication required` 错误并映射为工作台的“请在 Antigravity 或终端完成登录”操作按钮；登记 `verified.ts`。
+   - `packages/gateway` 与 `apps/web`：注册 Antigravity 适配器，在 Agent 管理页、新建任务起始页、统一模型选择器、交接分隔条中补齐 Antigravity 的中文名称、标识与状态展示。
+2. **测试**：用扩展后的 `fake-acp-agent.mjs` 编写完整离线契约测试（未装 CLI、仅装桌面版提示、未登录 `-32000`、模型与五档思考强度 `Low`～`Max`、流式输出、工具审批允许/拒绝、会话恢复）；本机装好 `agy` 后完成真实连接探测、识图、带审批改动与工作副本合并测试。
+
+#### 阶段 3（1.8-C）：ZCode 协议桥接接入与新版 3.18.2 实测（收尾 ISSUE-0020）
+1. **改动**：在用户同意引入 `zcode-acp-server` 精确版本后，改写 `packages/adapters/src/zcode/index.ts`：保留 `findZcode` 查找 `%LOCALAPPDATA%\Programs\ZCode\resources\glm\zcode.cjs`（同时读取桌面版 `ZCode.exe` 或引擎版本用于 `verified.ts` 展示），由 Gateway 使用当前 Node 直接启动 `zcode-acp-server` 的 stdio 入口，传入 `ZCODE_BIN`；**强制按任务权限注入 `ZCODE_ACP_MODE`**（`readonly` → `plan`，`ask` → `guarded`，绝不留空落回默认 `yolo`），并兼容其 `elicitation/create` 或 `session/request_permission` 审批回调；去掉旧的 `unsupported: true` 占位拦截，更新网页 Agent 页卡片状态。
+2. **测试**：离线测试覆盖“未安装 ZCode”“桥接启动”“强制非 `yolo` 参数断言”“审批弹出与拒绝生效（拒绝后目标文件确实未改动）”“会话恢复与取消”；在本机新版 ZCode `3.18.2` 上完成真实连接探测、换模型、带审批编辑与拒绝验证，更新 `ISSUE-0020`。
+
+#### 阶段 4（1.8-D）：多 Agent 交叉交接（H2～H4）、全工作台回归与验收记录
+1. **联调与补测**：
+   - 在 Git 项目与非 Git 普通文件夹项目上，实测 **Antigravity ↔新版 Codex ↔ 新版 ZCode**（及现有 Claude Code / CodeBuddy）之间的中途换 Agent 自动交接（验证 `.aic/TASK.md`、历史账本与已改文件摘要准确传递，接手方不重复劳动、不误删前序成果）。
+   - 在浏览器深色/浅色双主题及手机窄屏（375px / 430px）下检查 Agent 管理页（新增 Antigravity 后卡片布局不挤压）、统一模型选择器下拉列表、任务交接条与“详细”面板显示正常。
+2. **收尾文档**：新建 `docs/acceptance/step-1.8.md` 记录完整测试矩阵、真实调用条数与截图证据；更新本文第 1 节 `1.8` 状态、`docs/README.md`、`docs/design/design.md` 第 6 节、`docs/design/ui-design.md` 第 5.5 / 6.5 节版本号及 `docs/devlog/` 当月记录。
+
+### 14.4 完成标准
+
+1. **三家全部就绪**：Agent 管理页中 Google Antigravity、新版 ZCode、新版 Codex 均能正确识别安装状态与版本号，`[测试连接]` 全部通过且已登记进 `verified.ts`（版本变更时能按规标黄提示“未验证版本”）。
+2. **零命令行完成日常使用**：选模型、调思考强度、发消息、传图片、点允许/拒绝审批、看工作副本改动对比、合并与回滚，三家均在网页界面内顺畅完成。
+3. **安全与审批实测有效**：三家在“需审批”档位下改文件或执行命令时**均确实停下弹出审批卡片**；点击“拒绝”后文件确实未被修改、命令确实未执行；无任何绕过审批的默认 `yolo` / `skip-permissions` 行为；全过程未读取任何第三方凭据文件。
+4. **跨 Agent 交接闭环**：同一任务在 Antigravity、Codex、ZCode 之间切换续做时，H2～H4 自动交接全程不报错、不丢上下文。
+5. **工程门禁全绿**：`npm run typecheck`、`npm test`、`npm run build` 全部离线通过，深浅双主题与窄屏布局均已在浏览器核验，证据写入 `docs/acceptance/step-1.8.md`。

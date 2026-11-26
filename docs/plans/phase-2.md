@@ -1,6 +1,6 @@
 # 第二阶段开发计划：安全加固、AI 制作班底协作、能力中心与日常自动化
 
-> 2026-11-26 · 依据调研报告 [openmausbot-openmanus.md](../research/openmausbot-openmanus.md)、架构设计 [design.md](../design/design.md) v0.4.66、界面设计 [ui-design.md](../design/ui-design.md) v0.3.48、第一阶段计划 [phase-1.md](phase-1.md) 第 2 节接口规则
+> 2026-11-26 · 依据调研报告 [openmausbot-openmanus.md](../research/openmausbot-openmanus.md)、架构设计 [design.md](../design/design.md) v0.4.67、界面设计 [ui-design.md](../design/ui-design.md) v0.3.49、第一阶段计划 [phase-1.md](phase-1.md) 第 2 节接口规则
 
 ---
 
@@ -19,13 +19,13 @@
 
 ### 1.2 当前现状基线
 
-1. **代码与测试基线**：第一阶段 1.1～1.6 与 **1.8（新增 Google Antigravity 接入及新版 ZCode、Codex 更新兼容与交接测试，见 [step-1.8.md](../acceptance/step-1.8.md)）已全部完成**，全仓离线测试 **1,239 项通过、5 项真实模型冒烟按配置跳过**；1.7（局域网浏览器与手机适配）代码已写完并通过本机回环模拟验收，等待本机开启 Windows UAC（管理员操作确认弹窗）重启后做手机真机验收（[ISSUE-0149](../issues/ISSUE-0149-lan-phone-acceptance.md)，不阻塞 2.1 启动）。
-2. **网络安全真实起点（如实声明）**：**到目前为止，我们没有做过专门的网络安全工作**。现有的设备配对令牌、Host/Origin 请求头校验、局域网敏感操作电脑端二次确认、Windows 防火墙规则、独立 Agent 密钥的 Windows DPAPI 加密以及日志脱敏，都只是随各步功能顺带做的基础防护，**不能视为已完成的安全体系**。因此第二阶段把网络安全加固排在第一步（2.1），作为后续连外部工具、跑自动化、收通知、看网页的硬性前提。
+1. **代码与测试基线**：第一阶段 1.1～1.6、**1.8（新增 Google Antigravity 接入及新版 ZCode、Codex 更新兼容与交接测试，见 [step-1.8.md](../acceptance/step-1.8.md)）** 以及 **2026-11-26 全项目四维代码审查与加固（[workbench-review-2026-11-26.md](../acceptance/workbench-review-2026-11-26.md)，关闭 ISSUE-0180、0182～0188）** 均已完成，全仓离线测试 **1,256 项通过、5 项真实模型冒烟按配置跳过**；1.7（局域网浏览器与手机适配）代码已写完并通过本机回环模拟验收，等待本机开启 Windows UAC（管理员操作确认弹窗）重启后做手机真机验收（[ISSUE-0149](../issues/ISSUE-0149-lan-phone-acceptance.md)，不阻塞 2.1 启动）。
+2. **网络安全真实起点（如实声明）**：**到目前为止，我们仍未完成成体系的网络安全工作**。现有的设备配对令牌、Host/Origin 校验、2026-11-26 审查中收紧的局域网 `requireLocal` 边界、权限规则与 Markdown 外联拦截、独立 Agent 密钥的 Windows DPAPI 加密以及日志脱敏，都是随功能和代码审查补齐的局部防护，**不能替代专门的安全体系**。因此第 2.1 步依然作为第二阶段第一步，把“消息来源防伪围栏、统一子进程环境变量白名单、公共出站防内网探测门禁、安全防护状态可视化与局域网只读锁对齐”建成可被 2.2～2.9 复用的底层护栏。
 3. **本仓文档与代码现状差异提醒**（供执行各步的 Agent 核对，以代码为准）：
    - 工程使用 `npm workspaces`、Node 24 内置 `node:sqlite`、原生 TypeScript + CSS 变量网页，不使用 `pnpm`、Drizzle、Tailwind 或 React；
    - 密钥由 `packages/gateway/src/secrets.ts` 通过 Windows DPAPI 加密存入 SQLite `secrets` 表；
    - `design.md` 第 7.2 节规划的 L2 项目长期记忆表（`project_memory`）目前尚未在 `db.ts` 中建立；
-   - `/api/v1/hello`（`packages/gateway/src/http/system.ts:36`）中 `FeatureKey.Worktrees` 仍为 `false`（已在 [ISSUE-0180](../issues/ISSUE-0180-hello-worktree-feature-flag.md) 登记，并入 2.1 核对修正）。
+   - `/api/v1/hello`（`packages/gateway/src/http/system.ts`）中 `FeatureKey.Worktrees`、`RealAgents`、`FsBrowse` 已在 2026-11-26 全项目审查中改为动态上报（[ISSUE-0180](../issues/ISSUE-0180-hello-worktree-feature-flag.md) 已关闭），2.1 只需保持回归验证，不再重复修改。
 
 ### 1.3 本阶段范围与非目标（哪些留到第三阶段或不做）
 
@@ -315,3 +315,88 @@
    - 第 1.8 步以及第二阶段 2.1～2.7 步的核心开发与验证均在电脑本机回环（`127.0.0.1`）完成，**不需要干等电脑开启 UAC 重启**。
 3. **涉及局域网暴露与手机端新交互的部分，仍以 ISSUE-0149 通过为硬门槛**：
    - 第 **2.8 步**中“允许局域网内其他机器（如打包机）往本机发 Webhook 回调”，以及把新增的敏感管理操作开放给局域网设备访问，**必须等 `ISSUE-0149` 真机验收通过后再开放**；建议在你方便重启电脑的 15 分钟空档穿插完成 `ISSUE-0149`（届时还能顺手在手机浏览器上看到 1.8 新接入的 Antigravity 与 ZCode）。
+
+
+---
+
+## 7. 第 2.1 步实现规格与任务拆解（网络安全加固基线与防注入围栏）
+
+> 2026-11-26 基于提交 `771f571`（1.8 封板 + 全项目四维审查加固）细化。本步目标是把后续接入 MCP 工具（2.3）、多岗位协作（2.6）、定时与 Webhook 自动化（2.7～2.8）和受控网页浏览（2.9）所依赖的**四道公共安全底盘**一次建好，并在设置页给制作人一个看得懂的“安全防护状态”总览。
+
+### 7.1 前置基线与已提前完成的护栏（不重复返工）
+
+在 2026-11-26 全项目代码审查（`771f571`，[workbench-review-2026-11-26.md](../acceptance/workbench-review-2026-11-26.md)）中，原 2.1 草案里的以下条目**已经实现并通过 1,256 项离线单测验证**，2.1 直接复用，不重复开发：
+
+1. **动态功能开关对齐（ISSUE-0180）**：`packages/gateway/src/http/system.ts` 中 `/api/v1/hello` 已按实际环境动态返回 `Worktrees`、`RealAgents`、`FsBrowse`。
+2. **局域网后端写保护边界（ISSUE-0185）**：10 处仅本机管理路由（含独立服务的创建、删除、密钥/地址/协议修改、默认模型与网络设置、项目增改、交接/工作区设置、Agent 启停与连接测试）已加上 `requireLocal`，`DELETE /tasks/:id` 局域网无条件走电脑端二次确认，WebSocket 吊销后同步丢弃排队帧并 250ms 强断。
+3. **第三方 ACP 环境变量剥离与日志脱敏（ISSUE-0187）**：`packages/adapters/src/acp/launch.ts` 已剥离 Gateway 私有环境变量（`AIC_DATA_DIR`、`AIC_PORT`、`AIC_PROVIDER_KEY` 等，保留测试夹具 `AIC_FAKE_*`）；`packages/adapters/src/redact.ts` 已补齐 `AIza`、`ghp_`/`github_pat_`、`AKIA`、`?key=`、`x-aic-key`、`aic_session_` 等脱敏规则。
+4. **Markdown 远程图片防外联与链接安全（ISSUE-0188）**：`apps/web/src/components/Chat.tsx` 与 `platform/browser.ts` 已拦截远程图片静默外联并将非 `http(s)` 链接降级为纯文本。
+
+因此，**第 2.1 步把全部精力集中在尚未建成的 4 块核心安全底盘与界面闭环**：
+- **底盘 A**：消息来源防伪信封（`Provenance Envelope`）与全/半角/不可见字符防伪造转义；
+- **底盘 B**：公共受控子进程环境变量白名单构造器（供独立命令及后续 2.3 MCP / 2.9 浏览器统一调用）与跨层防泄漏契约校验；
+- **底盘 C**：公共出站防内网探测门禁（`Egress Policy`，抽离并升级自 `metadata-http.ts`，补齐 `::ffff:` IPv4 映射解包、本机 Gateway 端口拦截与通用严格公网模式）；
+- **界面闭环**：只读安全自检摘要接口 `GET /api/v1/security/status`、设置页“安全防护状态”可视化卡片，以及把局域网前端控件与后端 `requireLocal` 边界 100% 对齐（消除手机端仍能点到 403 按钮的体验缺口）。
+
+### 7.2 零新增依赖声明与开源合规
+
+- **新增 npm 依赖**：**0 个**（全程仅使用 Node.js 24 内置 `node:net`、`node:dns`、`node:http`、`node:https` 与已有 `zod` / `hono` / React / Vite）。
+- **外部付费调用**：**0 次**（本步纯离线 + 演示 Agent + 合成 DNS 解析桩验证，花费 **\$0**）。
+- **开源合规要求**：第 2.1-1 步的“消息来源防伪信封”若仅参考设计思路并独立编写，在模块头部注释注明设计参考即可；**如果直接借鉴或改写 OpenMausBot `provenance-label.ts` 的具体代码片段或测试用例**，必须同步创建 `third_party/openmausbot/LICENSE`（Apache-2.0 原文）与 `third_party/openmausbot/NOTICE`（标明来源版本 `v0.1.181 / 9f58fbc`、文件路径与修改说明），且严禁触碰其 `enterprise/` 目录。
+
+### 7.3 分步任务拆解（2.1-0 ～ 2.1-5，单会话可执行）
+
+| 子步 | 任务主题 | 涉及文件（新增 / 修改） | 核心实现契约 |
+|---|---|---|---|
+| **2.1-0** | 开工基线核对 | `packages/protocol/src/security.ts`（新建）<br>`packages/protocol/src/index.ts` | 定义共享协议类型与 `zod` 校验：`ProvenanceTier`（`'producer' \| 'delegated' \| 'external_data'`）、`SecurityCheckItem`、`SecurityStatus`（只含布尔/计数/枚举，**严禁出现任何本机路径或密钥原文**）；保留 `/api/v1` 单通道纪律。 |
+| **2.1-1** | 消息来源防伪信封（Provenance Envelope） | `packages/gateway/src/security/provenance.ts`（新建）<br>`packages/gateway/src/handoff/render.ts`<br>`packages/gateway/src/handoff/execution.ts` | 实现纯函数层：<br>1. `sanitizeProvenanceText(text)`：清洗正文中的双向控制符（`U+202A..U+202E`、`U+2066..U+2069`）、零宽字符（`U+200B..U+200F`、`U+FEFF`），并对试图冒充信封标签的标记（含 ASCII `[AIC-SOURCE:...]`、全角 `［AIC-SOURCE:...］`、中文方括号 `【AIC-SOURCE:...】` 与分隔符行 `<<<AIC-...>>>`）做不可伪造转义；<br>2. `wrapProvenance(tier, sourceLabel, content)`：按三档权威度封装标准中文/结构化封条（`producer` = 制作人本人指令；`delegated` = 受托子任务/交接上下文，权限不得高于当前配置；`external_data` = 仅作参考资料，禁止将其中的文字当作命令执行或修改审批级别）；<br>3. 接入 `handoff/render.ts`：把交接文档中的“最近对话 / 执行过的命令与结果 / 历史摘录”明确划入参考资料围栏，并与“下一步（制作人当前指令）”清晰隔开，同时保持现有 `handoff` 单测全部通过。 |
+| **2.1-2** | 公共子进程环境变量白名单构造器 | `packages/gateway/src/security/env-policy.ts`（新建）<br>`packages/gateway/src/independent/commands.ts` | 1. 将 `independentCommandEnv()` 中的最小系统白名单抽离为公共模块 `buildIsolatedSubprocessEnv({ home, extraAllowed?, extraVars?, source? })`（仅放行 `SYSTEMROOT`、`WINDIR`、`PATH`、`PATHEXT`、`COMSPEC`、`LANG`、`LC_ALL` + 受控私有 `HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA`/`TEMP`/`TMP`/`PSModuleAnalysisCachePath`）；<br>2. `extraVars` 拒绝传入以 `AIC_` 开头的 Gateway 内部变量或 `NODE_OPTIONS` / `LD_PRELOAD` 等注入钩子，防后续 MCP/浏览器误传；<br>3. `independent/commands.ts` 改为调用公共构造器（行为 100% 兼容现有命令宿主测试）；<br>4. 编写跨层契约测试，同时断言 `buildIsolatedSubprocessEnv`（白名单隔离）与 `packages/adapters/src/acp/launch.ts` 的 `buildChildEnv`（第三方 CLI 剥离 Gateway 私有变量）都不会泄漏 `AIC_DATA_DIR`、`AIC_PORT`、`AIC_PROVIDER_KEY` 或无关 API Key。 |
+| **2.1-3** | 公共出站防内网探测门禁（Egress Policy） | `packages/gateway/src/security/egress.ts`（新建）<br>`packages/gateway/src/independent/metadata-http.ts`<br>`packages/gateway/src/independent/model-http.ts` | 1. 抽离并强化 IP 判定：`normalizeIp(raw)` 剥离方括号、IPv6 区域后缀（`%eth0`）并**把 IPv4 映射 IPv6 地址（`::ffff:127.0.0.1`、`::ffff:7f00:1`、`::ffff:169.254.169.254` 等）先还原为规范 IPv4 再查 `BlockList`**；<br>2. `isPublicAddress(address)` 统一封禁 `0.0.0.0/8`、`10.0.0.0/8`、`100.64.0.0/10`、`127.0.0.0/8`、`169.254.0.0/16`（含云元数据 `169.254.169.254`）、`172.16.0.0/12`、`192.168.0.0/16`、`198.18.0.0/15`、组播/保留网段与非公网 IPv6（`::`、`::1`、`fc00::/7`、`fe80::/10`、`2001:db8::/32`、`2002::/16`）；<br>3. `assertEgressUrl(url, options)` 仅允许 `http:`/`https:`、拒绝带用户名/密码的 URL、在传入 `blockedLocalPorts`（Gateway 本机及局域网监听端口）时即使显式允许 `localhost` 也绝不允许回打 Gateway 自身端口；<br>4. `createPinnedLookup(options)` 实现 DNS-pinned 校验（`all: true`，任一 A/AAAA 记录不合法即整次拒连，杜绝 DNS 重绑定与双栈绕过），默认**严格公网模式**供后续 2.3 MCP HTTP / 2.8 Webhook / 2.9 受控浏览器直接复用；<br>5. `metadata-http.ts` 与 `model-http.ts` 复用 `security/egress.ts` 的地址归一、分类与 pinned lookup（完整保留用户自配独立服务的 `allowFakeIpProxy` 与显式本机服务例外，确保已有 `independent-model-transport` / `discovery` 测试 100% 通过）。 |
+| **2.1-4** | 安全自检接口、设置页可视化与局域网前端只读锁对齐 | `packages/gateway/src/http/system.ts`<br>`apps/web/src/api/http.ts`<br>`apps/web/src/pages/security-status-section.tsx`（新建）<br>`apps/web/src/pages/SettingsPage.tsx`<br>`apps/web/src/pages/independent-agent-panel.tsx`<br>`apps/web/src/pages/AgentsPage.tsx`<br>`apps/web/src/pages/handoff-settings.tsx`<br>`apps/web/src/pages/workspace-settings.tsx` | 1. 新增 `GET /api/v1/security/status`（需设备鉴权，本机与局域网只读可查）：实时返回 `SecurityStatus`（消息来源防伪围栏、受控子进程白名单、出站防内网门禁及 `allowFakeIpProxy` 开关状态、Windows DPAPI 已加密密钥条目数、局域网开关与当前连接类型、Markdown 防外联状态）；**严禁返回任何路径、IP 明文或密钥内容**；<br>2. 在 `SettingsPage.tsx` 新增面向制作人的“安全防护状态”只读卡片（中文通俗状态标签 + 一句话作用说明，无技术黑话堆砌，支持深浅双主题与 390px 手机窄屏）；<br>3. 核对并补齐局域网（`useRemoteAccess() === true`）前端只读锁，与 `ISSUE-0185` 的后端 `requireLocal` 严格对齐：`independent-agent-panel.tsx` 在局域网隐藏或禁用“删除服务 / 设为默认 / 清空默认值”并提示“请到运行 AI Console 的电脑上操作”；`AgentsPage.tsx`、`handoff-settings.tsx`、`workspace-settings.tsx`、`network-settings.tsx` 在局域网下将仅本机开关/保存按钮置灰并显示一致的中文锁提示，避免手机端点击后撞 403 报错。 |
+| **2.1-5** | 全量门禁、浏览器实操与文档收口 | `packages/protocol/test/`、`packages/gateway/test/security-baseline.test.ts`（新建）<br>`apps/web/src/security-baseline.test.tsx`（新建）<br>`docs/design/{design,ui-design}.md`<br>`docs/acceptance/step-2.1.md`<br>`docs/devlog/2026-11.md`<br>`docs/README.md` | 跑完冻结源码全量 `typecheck` + `test` + `build`，在隔离临时实例完成本机与模拟局域网双视角、深浅双主题、390×844 窄屏浏览器实操，同步架构设计（第 9、16 节）与界面设计（第 5.8、6.16 节），落盘 `docs/acceptance/step-2.1.md` 并独立提交推送。 |
+
+### 7.4 协议与接口规格（严格遵守 phase-1.md 第 2 节）
+
+- **新增只读接口**：`GET /api/v1/security/status`
+  - 鉴权：沿用 `/api/v1` 统一设备鉴权 + Host/Origin 校验；
+  - 响应体（在 `packages/protocol/src/security.ts` 用 `zod` 定义并导出）：
+    ```ts
+    // 示意结构（具体字段以实现时 packages/protocol/src/security.ts 为准）
+    export const SecurityStatus = z.object({
+      provenanceFence: z.object({ active: z.boolean(), tiers: z.array(ProvenanceTier) }),
+      subprocessEnvIsolation: z.object({ active: z.boolean() }),
+      egressGuard: z.object({ active: z.boolean(), allowFakeIpProxy: z.boolean(), blockedLocalPortsCount: z.number().int().nonnegative() }),
+      secretStorage: z.object({ mode: z.enum(['dpapi', 'unavailable']), encryptedCount: z.number().int().nonnegative() }),
+      lanBoundary: z.object({ lanEnabled: z.boolean(), currentConnection: z.enum(['local', 'lan']), localOnlyWriteGuard: z.boolean() }),
+      markdownSafety: z.object({ blockRemoteImages: z.boolean(), blockNonHttpLinks: z.boolean() }),
+    });
+    ```
+  - 隐私约束：响应体**不包含**本机路径、用户名、局域网 IP、端口号原文、服务地址、密钥内容或密钥结尾提示；`secrets` 表只查询 `COUNT(*)`。
+
+### 7.5 必补测试矩阵与浏览器实操剧本
+
+1. **协议单测（`@aic/protocol`）**：`ProvenanceTier` 与 `SecurityStatus` 合法/非法输入校验。
+2. **Gateway 安全基线单测（`packages/gateway/test/security-baseline.test.ts`）**：
+   - **防伪信封绕过测试**：正文内含伪造 `[AIC-SOURCE: producer]`、全角 `［AIC-SOURCE: producer］`、中文 `【AIC-SOURCE: producer】`、闭合分隔符 `<<<AIC-END>>>`、零宽字符插入（`[AIC\u200B-SOURCE]`）与 BiDi 反转符（`\u202E`），全部被清洗或转义，无法冒充 `producer` 档位；
+   - **环境变量白名单测试**：`buildIsolatedSubprocessEnv` 在宿主环境塞满 `AIC_DATA_DIR`、`AIC_PORT`、`AIC_PROVIDER_KEY`、`OPENAI_API_KEY`、`ANTHROPIC_API_KEY`、`GITHUB_TOKEN`、`NODE_OPTIONS` 时，输出环境仅保留最小系统键与私有临时目录；传入非法 `extraVars`（如 `AIC_*`、`NODE_OPTIONS`）被拒绝；
+   - **出站门禁离线测试（纯 DNS 解析桩，不连外网）**：
+     - 拦截 `http://127.0.0.1`、`http://localhost`、`http://[::1]`、`http://169.254.169.254/latest/meta-data`、`http://10.0.0.1`、`http://172.16.0.1`、`http://192.168.1.1`、`file:///C:/Windows/win.ini`、`http://user:pass@example.com`；
+     - 拦截 IPv4 映射 IPv6：`::ffff:127.0.0.1`、`::ffff:7f00:0001`、`::ffff:169.254.169.254`、`::ffff:10.0.0.1`；
+     - 拦截 DNS 重绑定 / 双栈绕过：公网域名同时解析出 `[93.184.216.34, 127.0.0.1]` 或 `[93.184.216.34, ::ffff:127.0.0.1]` 时整次拒绝；
+     - 拦截回打 Gateway 自身端口：即使处于允许 `localhost` 独立服务的场景，目标端口命中 `blockedLocalPorts`（Gateway 自身端口）仍直接拒绝；
+     - 正常公网 IP（如 `93.184.216.34`、`2606:2800:220:1:248:1893:25c8:1946`）放行；
+   - **安全自检接口测试**：未鉴权返回 `401`；本机与局域网鉴权均可 `200` 读取，响应中不含任何路径、端口或密钥字符串；
+   - **局域网写保护集成测试**：局域网客户端尝试 `POST/DELETE /independent/services`、`PATCH /independent/services/:id`（改 `apiKey`/`baseUrl`）、`PUT /independent/default`、`PUT /independent/network`、`PUT /settings/handoff`、`PUT /settings/workspaces`、`PATCH /agents/:kind` 全部返回 `403`。
+3. **网页前端单测（`apps/web/src/security-baseline.test.tsx`）**：
+   - `SecurityStatusSection` 在本机与局域网连接下的状态渲染与说明文案；
+   - `IndependentAgentPanel` / `AgentsPage` / `WorkspaceSettingsSection` / `HandoffSettingsSection` 在 `remote = true` 时的只读锁状态与提示文案。
+4. **浏览器实操剧本（隔离临时目录，零真实付费调用）**：
+   - 本机浏览器打开 `#/settings`（深色 + 浅色双主题），核对新增“安全防护状态”卡片各项状态显示为“已开启”、文案清晰易懂；
+   - 在 `390×844` 手机窄屏下检查 `#/settings` 与 `#/agents` 无横向溢出；
+   - 通过本机回环替身模拟局域网设备进入 `#/agents` 与 `#/settings`，核对独立服务的添加/删除/设默认按钮及密钥输入框、交接/工作区/网络设置均已温和锁定并展示“请到运行 AI Console 的电脑上操作”，而查看任务、发消息与审批仍正常可用。
+
+### 7.6 完成标准与收尾交付物
+
+1. **全量门禁通过**：冻结源码后 `npm run typecheck`、`npm test`、`npm run build` 全部通过（零跳过新增测试、零新增 npm 依赖、零真实付费调用）。
+2. **四道安全底盘可复用**：`security/provenance.ts`、`security/env-policy.ts`、`security/egress.ts` 模块接口清晰且文档化，可直接被 2.3（MCP）、2.6（多岗位）、2.7（自动化）、2.8（Webhook）、2.9（受控浏览器）调用。
+3. **文档与提交闭环**：同步更新 `docs/design/design.md`（第 9、16 节）、`docs/design/ui-design.md`（第 5.8、6.16 节）、`docs/acceptance/step-2.1.md`（附深浅双主题与模拟局域网验证记录）、`docs/devlog/2026-11.md` 与 `docs/README.md`，按 `.agent/commit-convention.md` 提交并推送至 `main`。

@@ -7,6 +7,7 @@ import { AccessConfirmRequest, AccessConfirmResolved, AccessPrompt, DeviceSource
 export * from './access';
 export * from './workspaces';
 export * from './permissions';
+export * from './security';
 import { AlwaysAllowConfirmation } from './permissions';
 
 export const PROTOCOL_VERSION = 1;

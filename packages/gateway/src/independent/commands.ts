@@ -6,17 +6,11 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { IndependentCommandSpec, type IndependentCommandResult, type IndependentCommandHostOptions, type IndependentExecutorObserver } from '@aic/protocol';
 import { redact } from '@aic/adapters';
+import { buildIsolatedSubprocessEnv } from '../security/env-policy';
 
 /** 只取工具运行需要的系统项，不继承 API Key、代理认证、Node hooks 或 Agent 配置。 */
 export function independentCommandEnv(home: string, source: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  const result: Record<string, string> = {};
-  for (const [name, value] of Object.entries(source)) {
-    if (value !== undefined && ['SYSTEMROOT', 'WINDIR', 'PATH', 'PATHEXT', 'COMSPEC', 'LANG', 'LC_ALL'].includes(name.toUpperCase())) result[name.toUpperCase()] = value;
-  }
-  return { ...result, HOME: home, USERPROFILE: home, APPDATA: path.join(home, 'roaming'),
-    // Windows 已知目录可能为空，显式把 PowerShell 模块缓存限制在本次私有目录，避免相对路径落入项目。
-    PSModuleAnalysisCachePath: path.join(home, 'local', 'ModuleAnalysisCache'),
-    LOCALAPPDATA: path.join(home, 'local'), TEMP: path.join(home, 'temp'), TMP: path.join(home, 'temp') };
+  return buildIsolatedSubprocessEnv({ home, source });
 }
 
 export class IndependentCommandExecutor {

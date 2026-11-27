@@ -2,9 +2,9 @@
 import { lookup } from 'node:dns';
 import { request as httpRequest, Agent as HttpAgent, type IncomingMessage } from 'node:http';
 import { request as httpsRequest, Agent as HttpsAgent } from 'node:https';
-import { isIP } from 'node:net';
 import { IndependentBaseUrl, type IndependentProtocolDetail, type IndependentNetworkDetail } from '@aic/protocol';
-import { isFakeIpProxyAddress, metadataAddressAllowed, parseMetadataJson, type AddressPolicy } from './metadata-http';
+import { assertEgressUrl, createPinnedLookup, type PortListInput } from '../security/egress';
+import { parseMetadataJson, type AddressPolicy } from './metadata-http';
 
 export class ModelTransportError extends Error {
   /** detail 只在 reason 为 protocol 时使用（ISSUE-0054）：固定分类，不含上游内容 */
@@ -73,12 +73,24 @@ export async function postModel(input: {
   signal: AbortSignal; timeoutMs: number; onEvent: (data: string, event: string) => boolean; onJson: (json: unknown) => void;
   lookup?: typeof lookup;
   addressPolicy?: AddressPolicy;
+  blockedLocalPorts?: PortListInput;
 }) {
   if (!IndependentBaseUrl.safeParse(input.base.href.replace(/\/$/, '')).success || input.base.search || input.base.hash) throw new ModelTransportError('request');
   if (Buffer.byteLength(input.body) > 24 * 1024 * 1024) throw new ModelTransportError('limit');
   if (input.signal.aborted) throw new ModelTransportError('cancelled');
-  const url = new URL(input.base.href.replace(/\/$/, '') + '/' + input.endpoint), host = url.hostname.replace(/^\[|\]$/g, '');
-  if (isIP(host) && !metadataAddressAllowed(input.base, host, false, input.addressPolicy)) throw new ModelTransportError('request');
+  const url = new URL(input.base.href.replace(/\/$/, '') + '/' + input.endpoint);
+  const egressOptions = {
+    baseUrl: input.base,
+    allowLocalhost: true,
+    allowExplicitPrivateIp: true,
+    allowFakeIpProxy: input.addressPolicy?.allowFakeIpProxy === true,
+    blockedLocalPorts: input.blockedLocalPorts ?? input.addressPolicy?.blockedLocalPorts,
+  };
+  try {
+    assertEgressUrl(url, egressOptions);
+  } catch {
+    throw new ModelTransportError('request');
+  }
   const resolver = input.lookup ?? lookup;
   const agent = url.protocol === 'https:' ? new HttpsAgent({ keepAlive: false, proxyEnv: {} }) : new HttpAgent({ keepAlive: false, proxyEnv: {} });
   const abort = new AbortController(); let timedOut = false; let response: IncomingMessage | undefined;
@@ -88,18 +100,12 @@ export async function postModel(input: {
   let requestClosed: Promise<void> | undefined;
   try {
     await new Promise<void>((resolve, reject) => {
+      const pinnedLookup = createPinnedLookup(url, egressOptions, resolver, (_err, reason) =>
+        new ModelTransportError('network', null, undefined, reason === 'fake_ip_proxy' ? 'fake_ip_proxy' : undefined));
       const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, {
         agent, method: 'POST', signal: abort.signal, maxHeaderSize: 16 * 1024,
         headers: { ...input.headers, 'Content-Type': 'application/json', Accept: 'text/event-stream, application/json', 'Accept-Encoding': 'identity', 'Content-Length': Buffer.byteLength(input.body) },
-        lookup: (hostname, options, callback) => resolver(hostname, { ...options, all: true }, (error, addresses) => {
-          if (error || !addresses?.length || addresses.some((a) => !metadataAddressAllowed(input.base, a.address, false, input.addressPolicy))) {
-            // 与元数据读取同一判断：全部地址要么是 fake-ip、要么本来就允许，才提示去设置里打开开关
-            const fakeIp = !error && !input.addressPolicy?.allowFakeIpProxy && !!addresses?.length && addresses.some((a) => isFakeIpProxyAddress(a.address))
-              && addresses.every((a) => isFakeIpProxyAddress(a.address) || metadataAddressAllowed(input.base, a.address, false));
-            return callback(new ModelTransportError('network', null, undefined, fakeIp ? 'fake_ip_proxy' : undefined), '', 4);
-          }
-          const chosen = addresses[0]!; callback(null, options.all ? addresses : chosen.address, chosen.family);
-        }),
+        lookup: pinnedLookup,
       }, (res) => {
         response = res;
         void (async () => {

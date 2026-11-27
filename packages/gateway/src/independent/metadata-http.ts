@@ -2,41 +2,35 @@
 import { lookup } from 'node:dns';
 import { request as httpRequest, Agent as HttpAgent, type IncomingMessage } from 'node:http';
 import { request as httpsRequest, Agent as HttpsAgent } from 'node:https';
-import { BlockList, isIP } from 'node:net';
 import { createBrotliDecompress, createGunzip, createInflate } from 'node:zlib';
 import { createHash } from 'node:crypto';
 import { IndependentBaseUrl } from '@aic/protocol';
+import {
+  EgressPolicyError,
+  assertEgressUrl,
+  createPinnedLookup,
+  isAddressAllowed,
+  isFakeIpProxyAddress,
+  isPublicAddress,
+  type PortListInput,
+} from '../security/egress';
 
-const blocked = new BlockList();
-for (const [ip, bits] of [['0.0.0.0',8],['10.0.0.0',8],['100.64.0.0',10],['127.0.0.0',8],['169.254.0.0',16],['172.16.0.0',12],['192.0.0.0',24],['192.0.2.0',24],['192.168.0.0',16],['198.18.0.0',15],['198.51.100.0',24],['203.0.113.0',24],['224.0.0.0',4],['240.0.0.0',4]] as const) blocked.addSubnet(ip, bits);
-blocked.addSubnet('2001::', 23, 'ipv6'); blocked.addSubnet('2001:db8::', 32, 'ipv6'); blocked.addSubnet('2002::', 16, 'ipv6'); blocked.addSubnet('3fff::', 20, 'ipv6');
-const globalV6 = new BlockList(); globalV6.addSubnet('2000::', 3, 'ipv6');
-const local = new BlockList();
-for (const [ip,bits] of [['10.0.0.0',8],['127.0.0.0',8],['172.16.0.0',12],['192.168.0.0',16]] as const) local.addSubnet(ip,bits);
-local.addAddress('::1','ipv6'); local.addSubnet('fc00::',7,'ipv6');
-const hostOf = (url: URL) => url.hostname.replace(/^\[|\]$/g, '');
-export const isPublicMetadataAddress = (address: string) => {
-  const family = isIP(address); if (!family) return false;
-  return family === 4 ? !blocked.check(address) : globalV6.check(address, 'ipv6') && !blocked.check(address, 'ipv6');
-};
-
-/**
- * 本机透明代理（fake-ip 模式）把公网域名解析到 198.18.0.0/15 再自己接管连接（ISSUE-0053）。
- * 用户在设置里明确打开后，只放行“域名解析出来的”这一个网段；用户直接填写的 IP、其他私网和回环仍然拒绝，
- * 公共目录也不放行（匿名读取没有必要走用户的代理例外）。
- */
-const fakeIp = new BlockList(); fakeIp.addSubnet('198.18.0.0', 15);
-export const isFakeIpProxyAddress = (address: string) => isIP(address) === 4 && fakeIp.check(address);
-export interface AddressPolicy { allowFakeIpProxy?: boolean }
+export const isPublicMetadataAddress = (address: string) => isPublicAddress(address);
+export { isFakeIpProxyAddress };
+export interface AddressPolicy {
+  allowFakeIpProxy?: boolean;
+  blockedLocalPorts?: PortListInput;
+}
 
 /** 私网例外仅来自用户明确保存的 IP 或 localhost，不允许域名解析扩大范围。 */
 export function metadataAddressAllowed(base: URL, address: string, publicCatalog: boolean, policy: AddressPolicy = {}) {
-  const host = hostOf(base);
-  if (host === 'localhost') return !publicCatalog && (address === '127.0.0.1' || address === '::1');
-  if (isPublicMetadataAddress(address)) return true;
-  if (!publicCatalog && policy.allowFakeIpProxy === true && isIP(host) === 0 && isFakeIpProxyAddress(address)) return true;
-  if (publicCatalog) return false;
-  return isIP(host) !== 0 && host === address && local.check(address, isIP(address) === 6 ? 'ipv6' : 'ipv4');
+  return isAddressAllowed(base, address, {
+    baseUrl: base,
+    allowLocalhost: !publicCatalog,
+    allowExplicitPrivateIp: !publicCatalog,
+    allowFakeIpProxy: !publicCatalog && policy.allowFakeIpProxy === true,
+    blockedLocalPorts: policy.blockedLocalPorts,
+  });
 }
 
 /** 只解析有限 JSON，不保留原文；危险键和过深结构整体拒绝。 */
@@ -61,6 +55,8 @@ export async function readMetadataJson(input: {
   maxBytes?: number; timeoutMs?: number; signal?: AbortSignal;
   /** 用户在设置里打开的地址例外；缺省时不放行 fake-ip 网段 */
   addressPolicy?: AddressPolicy;
+  /** Gateway 自身监听端口（含局域网同端口）；即使允许 localhost 也禁止回打 */
+  blockedLocalPorts?: PortListInput;
   /** 测试只替换解析器，仍经过实际连接路径的地址检查。 */
   lookup?: typeof lookup;
 }) {
@@ -69,8 +65,20 @@ export async function readMetadataJson(input: {
   if (!IndependentBaseUrl.safeParse(base.href.replace(/\/$/, '')).success || url.origin !== base.origin || url.username || url.password || url.hash
     || !url.pathname.startsWith(base.pathname.replace(/\/$/, '') + '/') || (publicCatalog && (base.href !== 'https://models.dev/' || url.href !== 'https://models.dev/experimental/v2.0/api.json?type=chat'))) throw new MetadataHttpError('元数据请求目标不符合范围');
   if (publicCatalog && Object.keys(input.headers ?? {}).length) throw new MetadataHttpError('公共目录不能携带服务认证');
-  const hostname = hostOf(url);
-  if (isIP(hostname) && !metadataAddressAllowed(base, hostname, publicCatalog, input.addressPolicy)) throw new MetadataHttpError('元数据地址被网络规则拒绝');
+  const egressOptions = {
+    baseUrl: base,
+    allowLocalhost: !publicCatalog,
+    allowExplicitPrivateIp: !publicCatalog,
+    allowFakeIpProxy: !publicCatalog && input.addressPolicy?.allowFakeIpProxy === true,
+    blockedLocalPorts: input.blockedLocalPorts ?? input.addressPolicy?.blockedLocalPorts,
+  };
+  try {
+    assertEgressUrl(url, egressOptions);
+  } catch (error) {
+    throw new MetadataHttpError(error instanceof EgressPolicyError && error.reason === 'blocked_local_port'
+      ? '元数据地址被网络规则拒绝（不允许连接本机 AI Console 服务端口）'
+      : '元数据地址被网络规则拒绝');
+  }
   const resolver = input.lookup ?? lookup;
   // 新 Agent 不继承全局代理配置或连接池；固定 lookup 在每次实际连接前校验地址。
   const agent = url.protocol === 'https:' ? new HttpsAgent({ keepAlive: false, proxyEnv: {} }) : new HttpAgent({ keepAlive: false, proxyEnv: {} });
@@ -80,16 +88,16 @@ export async function readMetadataJson(input: {
   const timer = setTimeout(abort, input.timeoutMs ?? 15_000); timer.unref();
   try {
     return await new Promise<{ json: unknown; digest: string }>((resolve,reject) => {
+      const pinnedLookup = createPinnedLookup(url, egressOptions, resolver, (_err, reason) =>
+        new MetadataHttpError(reason === 'fake_ip_proxy'
+          ? '元数据域名解析到本机代理的 fake-ip 网段（198.18.x），可在设置里允许'
+          : reason === 'blocked_local_port'
+            ? '元数据地址被网络规则拒绝（不允许连接本机 AI Console 服务端口）'
+            : '元数据域名解析到受限地址'));
       const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, {
         method: 'GET', agent, signal: controller.signal, maxHeaderSize: 16 * 1024,
         headers: { Accept: 'application/json', 'Accept-Encoding': 'gzip, deflate, br', ...input.headers },
-        lookup: (host, options, callback) => {
-          resolver(host, { ...options, all: true }, (err, addresses) => {
-            if (err || !addresses?.length || addresses.some((a) => !metadataAddressAllowed(base, a.address, publicCatalog, input.addressPolicy))) return callback(new MetadataHttpError(!err && !publicCatalog && !input.addressPolicy?.allowFakeIpProxy && !!addresses?.length && addresses.every((a) => isFakeIpProxyAddress(a.address) || metadataAddressAllowed(base, a.address, publicCatalog)) ? '元数据域名解析到本机代理的 fake-ip 网段（198.18.x），可在设置里允许' : '元数据域名解析到受限地址'), '', 4);
-            // 把已校验的这一个地址直接交给连接，不能再次解析产生重绑定。
-            const chosen = addresses[0]!; callback(null, options.all ? addresses : chosen.address, chosen.family);
-          });
-        },
+        lookup: pinnedLookup,
       }, (res) => {
         response = res;
         void (async () => {

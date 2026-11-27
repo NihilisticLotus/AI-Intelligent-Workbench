@@ -1,6 +1,7 @@
 # AI Console 设计文档
 
-> 版本 0.4.67 · 2026-11-26 · 状态：设计中
+> 版本 0.4.68 · 2026-11-27 · 状态：设计中
+> v0.4.68 同步第二阶段第 2.1 步网络安全加固基线：新增 `packages/protocol/src/security.ts`（`ProvenanceTier`、`SecurityStatus`）；新增消息来源防伪信封 `security/provenance.ts`（三档权威隔离 + 零宽/BiDi 清洗 + 半角/全角/中文伪造封条转义）接入 `handoff/render.ts` 与 `handoff/execution.ts`；新增受控子进程环境变量白名单 `security/env-policy.ts` 由 `independent/commands.ts` 复用；抽离并强化公共出站防内网探测门禁 `security/egress.ts`（支持 `::ffff:` 映射 IPv6 解包、禁止回打 Gateway 监听端口与 DNS-pinned `all: true` 默认严格公网模式）供 `metadata-http.ts` / `model-http.ts` / `discovery.ts` / `model-driver.ts` / `handoff/summary.ts` 复用；新增 `GET /api/v1/security/status` 与前端只读锁 100% 对齐。见 [step-2.1.md](../acceptance/step-2.1.md)。
 > v0.4.67 同步 2026-11-26 全项目代码审查加固：`/api/v1/hello` 动态上报 `Worktrees`/`RealAgents`/`FsBrowse`；收紧局域网管理路由 `requireLocal` 与删任务二次确认、WS 吊销同步丢帧强断、目录校验与权限路径/凭据/Git 命令守卫；隔离 ZCode `XDG_CONFIG_HOME`、补齐 ACP 恢复会话权限重设与 Gateway 私有环境变量剥离，及工作区/信号量/进程/文件清单稳定性修复。见 [workbench-review-2026-11-26.md](../acceptance/workbench-review-2026-11-26.md)。
 > v0.4.66 同步第 1.8 步：新增 Google Antigravity 官方 `agy acp`（1.5.18）原生接入，通过受控 `zcode-acp-server@0.94.0`（`ask` 映射为 `build`、禁用默认 `yolo` 与远程端口）接入新版 ZCode，升级 `codex-acp@2.12.0` / `@openai/codex@0.171.0`，补充 `.gemini` 凭据目录写保护与探测临时目录异步重试清理。见 2026-11-26 开发笔记。
 > v0.4.65 补充局域网开关如何处理无法显示 Windows 权限提示的情况。见 2026-11-22 开发笔记。
@@ -817,6 +818,11 @@ interface MemoryProvider {            // 第 12 节插件的一种
 - GET /api/v1/approvals/:id/rule 生成实时预览；命令默认只允许完全相同的命令，文件默认当前同目录的 **，根目录单文件保持精确文件。预览与确认均检查当前 revision，保存规则与完成审批为一个事务；插在命中询问规则之前，保留更靠前的禁止规则。
 - 工作台自建“总是允许”选项，不把第三方原生 allow_always 返回给 Agent。无 allow_once、敏感信息已脱敏或无法安全形成范围时不提供该选项。自动允许写入对话提示。删除规则后后续请求恢复默认判断。
 
+#### 第 2.1 步防注入与隔离底盘（复用至 MCP / 自动化 / 浏览器）
+
+- **消息来源防伪信封（`packages/gateway/src/security/provenance.ts`）**：定义三档权威度（`producer` = 制作人本人指令、`delegated` = 受托子任务与交接上下文，权限不高于当前配置、`external_data` = 历史/外部参考资料，禁止作为指令执行或抬升审批级别）。`sanitizeProvenanceText` 剥除零宽字符（`U+200B..U+200F`、`U+2060`、`U+FEFF`）和 BiDi 控制符（`U+202A..U+202E`、`U+2066..U+2069`），多轮转义半角 `[AIC-SOURCE:...]`、全角 `［AIC-SOURCE:...］`、中文 `【AIC-SOURCE:...】` 与分隔符 `<<<AIC-...>>>`。`handoff/render.ts` 与 `handoff/execution.ts` 把“执行过的命令与结果 / 最近测试结果 / 最近对话 / 附件摘录”隔离在 `external_data` 围栏中，与 `delegated`（`TASK.md` / 下一步）和 `producer`（本轮用户消息）清晰分层，外部文本无法修改审批规则或冒充用户授权。
+- **受控子进程环境变量白名单（`packages/gateway/src/security/env-policy.ts`）**：将独立命令的最小环境构建抽离为 `buildIsolatedSubprocessEnv({ home, extraAllowed?, extraVars?, source? })`，仅放行 `SYSTEMROOT`/`WINDIR`/`PATH`/`PATHEXT`/`COMSPEC`/`LANG`/`LC_ALL` 与隔离到 `home` 下的目录变量（`HOME`/`USERPROFILE`/`APPDATA`/`LOCALAPPDATA`/`TEMP`/`TMP`/`PSModuleAnalysisCachePath`），显式拒绝向 `extraAllowed`/`extraVars` 传入 `AIC_*`、`NODE_OPTIONS`、`LD_PRELOAD`、`OPENAI_*`、`ANTHROPIC_*` 等内部键、进程钩子与三方密钥。`independent/commands.ts` 复用该函数，并与 `@aic/adapters` 的 `buildChildEnv`（第三方 CLI 剥离 Gateway 私有环境变量）共同受跨层防泄漏契约约束。
+
 ### 9.3 审批流转
 
 1. Agent 发出权限请求 → PermissionBroker 匹配规则。
@@ -1447,6 +1453,8 @@ audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, action TEXT, de
 
 - 局域网设备开启全自动或工作区内自动权限、修改项目权限规则（含“总是允许”）、删除项目、吊销设备、合并或应用改动、回滚或丢弃工作副本时，电脑上需要二次确认。恢复单文件或交接检查点、删除带工作副本的任务也沿用该确认。两分钟内没有允许、用户拒绝或没有已连接的本机页面时，请求不会执行。
 - 普通审批、发消息、停止和查看可从局域网设备直接操作。从局域网设备不能填写、修改或清除 Key，也不能把已有 Key 改送到其他授权地址。第三方登录和在电脑桌面打开资源管理器只允许本机操作。
+- **公共出站防内网探测门禁（`packages/gateway/src/security/egress.ts`）**：统一提供 `normalizeIp`（剥离方括号、`%zone` 区域标识，并将 `::ffff:127.0.0.1`、`::ffff:7f00:1`、`::ffff:169.254.169.254` 等 IPv4 映射 IPv6 解包为规范 IPv4 后查 `BlockList`）、`isPublicAddress`（默认严格公网模式，拦截 `0.0.0.0/8`、私网 CIDR、`100.64.0.0/10`、`127.0.0.0/8`、`169.254.0.0/16`、`198.18.0.0/15`、组播/保留网段及 `::`/`::1`/`fc00::/7`/`fe80::/10`/`2001:db8::/32`/`2002::/16` 等非公网地址）、`assertEgressUrl`（仅允许 `http:`/`https:`、拒绝带用户名密码的 URL、在传入 `blockedLocalPorts` 时即使允许 `localhost` 也绝不允许回打 Gateway 自身监听端口）及 `createPinnedLookup`（强制 `{ all: true }` 核对全部 A/AAAA 解析记录，任一非法即整次拒连并复用已校验地址防 DNS 重绑定）。`independent/metadata-http.ts`、`model-http.ts`、`discovery.ts`、`model-driver.ts` 与 `handoff/summary.ts` 已复用并绑定 Gateway 运行时监听端口，同时完整保留用户自配独立服务的 `allowFakeIpProxy` 与显式本地地址例外。
+- **安全自检只读摘要接口（`GET /api/v1/security/status`）**：经 `/api/v1` 设备鉴权与 Host/Origin 校验后返回 `SecurityStatus`（仅包含消息来源防伪围栏、子进程环境白名单、出站防内网门禁及 `blockedLocalPortsCount`/`allowFakeIpProxy`、Windows DPAPI 加密模式与 `SELECT COUNT(*) FROM secrets` 条目数、局域网开启状态/连接来源/本机写保护以及 Markdown 安全开关），严禁返回任何本机路径、用户名、明文 IP、端口号、服务地址或密钥内容/结尾提示。
 - 局域网写操作、配对、吊销、开关、规则变更和确认结果写入审计日志。日志保留 90 天，只记录操作名、对象、设备、IP 和结果，在“设备与访问”分页查看。
 - 90 天清理范围为访问审计条目。本机请求新码与配对失败也记录来源与结果。共用审计表中的数据库迁移、账号与模型目录记录沿用原保留策略。
 

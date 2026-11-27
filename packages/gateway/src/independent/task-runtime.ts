@@ -13,6 +13,7 @@ import type { ProcessRegistry } from '../processes';
 import type { AgentConnection, SessionHost } from '../agents/registry';
 import { Errors, newId, now } from '../util';
 import { IndependentCatalog } from './catalog';
+import type { PortListInput } from '../security/egress';
 import { IndependentConversationStore } from './conversation';
 import { IndependentRequestLedger } from './request-ledger';
 import { IndependentToolJournal } from './tool-journal';
@@ -47,7 +48,7 @@ export class IndependentTaskRuntime {
   private details = new Map<string, IndependentApprovalDetail>();
   constructor(private db: Db, private catalog: IndependentCatalog, private events: EventStore,
     private attachments: AttachmentService, private dataDir: string, private processes: ProcessRegistry,
-    private orphanCleanup: Promise<unknown>) {
+    private orphanCleanup: Promise<unknown>, private blockedLocalPorts: PortListInput = []) {
     this.store = new IndependentConversationStore(db); this.ledger = new IndependentRequestLedger(db);
     this.journal = new IndependentToolJournal(db);
   }
@@ -232,7 +233,7 @@ export class IndependentTaskRuntime {
         if (delta.type === 'text_delta' && delta.text) streamedText = true;
         host.update({ kind: delta.type === 'text_delta' ? 'message' : 'thought', messageId, text: delta.text });
       },
-    });
+    }, undefined, this.blockedLocalPorts);
     const engine = new IndependentTurnEngine(this.store, {
       checkBinding: (binding) => driver.checkBinding(binding), waitForIdle: (binding) => driver.waitForIdle(binding),
       complete: (input, signal) => { messageId = newId('m'); streamedText = false; return driver.complete(input, signal); },

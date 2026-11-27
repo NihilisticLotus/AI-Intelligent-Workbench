@@ -25,12 +25,13 @@ export function ProjectSettingsPage({projectId}:{projectId:string}) {
     <h1>{project.name} · 项目设置</h1>
     {error?<div role="alert" className="workspace-conflict"><p>{error}</p><p>未保存的规则仍保留在表格中。需要最新规则时，请先核对再点击“重新载入规则”。</p></div>:null}
     <section className="set-sec" aria-labelledby="project-basic"><h2 id="project-basic">基本信息</h2>
-      <label className="field">名称<input value={name} maxLength={100} onChange={e=>setName(e.target.value)} disabled={busy}/></label>
+      {remote ? <p className="muted-note">请到运行 AI Console 的电脑上操作（项目基本信息仅限本机修改）。</p> : null}
+      <label className="field">名称<input value={name} maxLength={100} onChange={e=>setName(e.target.value)} disabled={busy||remote}/></label>
       <label className="field">项目路径<input value={project.path} readOnly/></label><p>{project.isGit?'git 项目':'非 git 项目'} · 路径只读</p>
-      <label className="field">默认 Agent<select value={agent} disabled={busy} onChange={e=>setAgent(e.target.value as AgentKind)}><option value="">不指定</option>{agents.map(a=><option key={a.kind} value={a.kind}>{a.displayName}</option>)}</select></label>
-      <label className="field">忽略目录与文件<textarea value={ignore} rows={4} disabled={busy} placeholder={'每行一条，例如 Cache/**'} onChange={e=>setIgnore(e.target.value)}/><span className="d-note">与内置忽略项合并，只影响新任务的准备。</span></label>
-      <label className="field">带入工作副本的文件<textarea value={carry} rows={4} disabled={busy} placeholder={'每行一条，例如 config/local.json'} onChange={e=>setCarry(e.target.value)}/><span className="d-note">git 项目复制匹配的未跟踪文件，超过 100 MB 会先确认；非 git 项目按忽略规则复制。</span></label>
-      <button className="btn primary" disabled={busy||!name.trim()} onClick={()=>void saveBasic()}>保存基本信息</button>
+      <label className="field">默认 Agent<select value={agent} disabled={busy||remote} onChange={e=>setAgent(e.target.value as AgentKind)}><option value="">不指定</option>{agents.map(a=><option key={a.kind} value={a.kind}>{a.displayName}</option>)}</select></label>
+      <label className="field">忽略目录与文件<textarea value={ignore} rows={4} disabled={busy||remote} placeholder={'每行一条，例如 Cache/**'} onChange={e=>setIgnore(e.target.value)}/><span className="d-note">与内置忽略项合并，只影响新任务的准备。</span></label>
+      <label className="field">带入工作副本的文件<textarea value={carry} rows={4} disabled={busy||remote} placeholder={'每行一条，例如 config/local.json'} onChange={e=>setCarry(e.target.value)}/><span className="d-note">git 项目复制匹配的未跟踪文件，超过 100 MB 会先确认；非 git 项目按忽略规则复制。</span></label>
+      <button className="btn primary" disabled={busy||remote||!name.trim()} onClick={()=>void saveBasic()}>保存基本信息</button>
     </section>
     <section className="set-sec" aria-labelledby="project-rules"><h2 id="project-rules">权限规则</h2>
       <h3>始终禁止</h3><p className="d-note">这些保护不能被项目规则覆盖。规则检查不能替代系统沙箱。</p><ul>{rules?.alwaysDenied.map(text=><li key={text}>{text}</li>)}</ul>

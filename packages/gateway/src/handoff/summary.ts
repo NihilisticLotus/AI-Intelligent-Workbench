@@ -11,6 +11,9 @@ export function summaryRequests(s: Services, taskId: string, selection: Independ
   const binding = source.bound(taskId);
   const driver = new IndependentApiDriver(source, {
     timeoutMs, accounting: s.tasks.handoffs!.summaryLedger.accounting(taskId),
+  }, undefined, () => {
+    const port = s.port();
+    return port > 0 ? [port] : [];
   });
   async function request(instruction: string, text: string, schema: object) {
     const reply = await driver.complete({

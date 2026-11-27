@@ -6,13 +6,14 @@ import {
 import type { Db } from '../db';
 import { AppError, Errors, newId } from '../util';
 import type { IndependentCatalog } from './catalog';
+import type { PortListInput } from '../security/egress';
 import { MetadataHttpError, readMetadataJson } from './metadata-http';
 import { MODEL_CATALOG_URL, MetadataParseError, parseEndpointPage, supplementCatalog } from './metadata-parser';
 import { supplementOfficial } from './official-metadata';
 
 export class IndependentDiscovery {
   private running = new Map<string,AbortController>(); private closed = false;
-  constructor(private db: Db, private catalog: IndependentCatalog, private read = readMetadataJson) {}
+  constructor(private db: Db, private catalog: IndependentCatalog, private read = readMetadataJson, private blockedLocalPorts: PortListInput = []) {}
   close() { this.closed = true; for (const controller of this.running.values()) controller.abort(); }
   state(serviceId: string): IndependentDiscoveryState {
     const service = this.catalog.getService(serviceId);
@@ -55,7 +56,7 @@ export class IndependentDiscovery {
           diagnostics.stage='prepare'; diagnostics.httpStatus=null;
           this.check(serviceId,body.expectedConfigRevision); if(controller.signal.aborted) throw new MetadataHttpError('元数据读取已取消或超时');
           diagnostics.stage='service_request'; diagnostics.serviceRequests++; requestCount++;
-          const result = await this.read({url:new URL(url),base,publicCatalog:false,headers,signal:controller.signal,addressPolicy:this.catalog.getNetwork()});
+          const result = await this.read({url:new URL(url),base,publicCatalog:false,headers,signal:controller.signal,addressPolicy:this.catalog.getNetwork(),blockedLocalPorts:this.blockedLocalPorts});
           // 元数据客户端只在 HTTP 200 且有限 JSON 读取成功时返回。
           diagnostics.httpStatus=200; diagnostics.stage='service_parse';
           const page = parseEndpointPage(service,result.json,url.href,result.digest); pageCount++; diagnostics.parsedPages=pageCount; skipped += page.skipped; notices.push(...page.notices);
@@ -77,7 +78,7 @@ export class IndependentDiscovery {
         if (controller.signal.aborted) throw new MetadataHttpError('元数据读取已取消或超时');
         try {
           diagnostics.stage='catalog_request'; diagnostics.httpStatus=null; diagnostics.publicCatalogRequests++; requestCount++;
-          const result = await this.read({base:new URL('https://models.dev'),url:new URL(MODEL_CATALOG_URL),publicCatalog:true,signal:controller.signal});
+          const result = await this.read({base:new URL('https://models.dev'),url:new URL(MODEL_CATALOG_URL),publicCatalog:true,signal:controller.signal,blockedLocalPorts:this.blockedLocalPorts});
           notices.push(...supplementCatalog(service,items,result.json,result.digest));
         } catch { notices.push('公共目录读取失败或结构不兼容，仅保留本次已识别资料；没有降级套用旧目录'); }
       }

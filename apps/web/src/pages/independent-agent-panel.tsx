@@ -12,13 +12,19 @@ import { IndependentDiscoveryDialog } from './independent-discovery-dialog';
 
 const protocolLabels = { chat_completions: 'Chat Completions', responses: 'Responses', anthropic_messages: 'Anthropic Messages' };
 
-export function IndependentAgentPanel() {
+export type IndependentPanelSnapshot = {
+  services: IndependentService[];
+  models: Record<string, IndependentModel[]>;
+  selection: IndependentDefault['selection'];
+};
+
+export function IndependentAgentPanel({ initialSnapshot }: { initialSnapshot?: IndependentPanelSnapshot | null }) {
   const available = useApp((s) => !!s.hello?.features[FeatureKey.IndependentCatalog]);
   const discovery = useApp((s) => !!s.hello?.features[FeatureKey.IndependentDiscovery]);
   const version = useApp((s) => s.independentCatalogVersion);
   const conn = useApp((s) => s.conn);
   const remote = useRemoteAccess();
-  const [snapshot, setSnapshot] = useState<{ services: IndependentService[]; models: Record<string, IndependentModel[]>; selection: IndependentDefault['selection'] } | null>(null);
+  const [snapshot, setSnapshot] = useState<IndependentPanelSnapshot | null>(initialSnapshot ?? null);
   const [error, setError] = useState<ReturnType<typeof asApiError> | null>(null);
   const [loading, setLoading] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -50,12 +56,12 @@ export function IndependentAgentPanel() {
     <span className="tag">支持独立任务 · 待真实补验</span></div>
     <p className="muted">可管理配置、获取模型与能力、手动修订和设置默认值。新建任务中选择“AI Console 独立 Agent”，填写模型、上下文与请求预算后派发。“刷新已保存目录”只读取工作台资料，在线获取需进入服务后明确操作。</p>
     {!available ? <p role="status">当前 Gateway 未提供独立模型目录，请更新服务后刷新页面。</p> : <>
-      {remote ? <p className="muted-note">请到运行 AI Console 的电脑上添加 API 服务或填写 Key。</p> : null}
-      <div className="independent-actions">{!remote ? <button className="btn primary" onClick={() => serviceDialog()}>添加 API 服务</button> : null}
+      {remote ? <p className="muted-note">请到运行 AI Console 的电脑上操作（添加、删除、设默认模型或填写 Key 与授权地址仅限本机）。</p> : null}
+      <div className="independent-actions"><button className="btn primary" disabled={remote} title={remote ? '请到运行 AI Console 的电脑上操作' : undefined} onClick={() => { if (!remote) serviceDialog(); }}>添加 API 服务</button>
         <button className="btn" disabled={loading} onClick={() => void refresh()}>{loading ? '正在读取…' : '刷新已保存目录'}</button></div>
       {error ? <ErrorNotice error={error} /> : null}
       <p role="status">默认模型：{selectedService && selectedModel ? `${selectedService.name} / ${selectedModel.name}${!selectedService.enabled || !selectedModel.enabled ? '（已停用）' : ''}` : snapshot?.selection ? '目录尚未读取完整' : '尚未设置'}
-        {snapshot?.selection ? <button className="btn ghost" disabled={busy} onClick={() => void run(() => api.putIndependentDefault({ selection: null }))}>清空默认值</button> : null}</p>
+        {snapshot?.selection ? <button className="btn ghost" disabled={busy || remote} title={remote ? '请到运行 AI Console 的电脑上操作' : undefined} onClick={() => { if (!remote) void run(() => api.putIndependentDefault({ selection: null })); }}>清空默认值</button> : null}</p>
       {!snapshot && loading ? <p role="status">正在读取服务与模型…</p> : snapshot && !snapshot.services.length ? <div className="cards-empty">还没有 API 服务。添加后可以在服务下继续添加模型。</div> : null}
       {snapshot?.services.map((service) => <details className="independent-service" key={service.id}>
         <summary><strong>{service.name}</strong><span>{protocolLabels[service.protocol]} · {snapshot.models[service.id]?.length ?? 0} 个模型 · {service.enabled ? '已启用' : '已停用'}</span></summary>
@@ -66,9 +72,10 @@ export function IndependentAgentPanel() {
             <button className="btn" onClick={() => modelDialog(service)}>添加模型</button>
             {discovery ? <button className="btn" disabled={!service.enabled} onClick={() => openDialog((close) => <IndependentDiscoveryDialog initialService={service} close={close} saved={refresh} />)}>获取模型与能力</button> : null}
             <button className="btn" disabled={busy} onClick={() => void run(() => api.patchIndependentService(service.id, { expectedRevision: service.revision, enabled: !service.enabled }))}>{service.enabled ? '停用服务' : '启用服务'}</button>
-            {!remote || !service.hasSecret ? <button className="btn danger" disabled={busy} onClick={async () => {
+            <button className="btn danger" disabled={busy || remote} title={remote ? '请到运行 AI Console 的电脑上操作' : undefined} onClick={async () => {
+              if (remote) return;
               if (await confirmDialog({ title: `删除“${service.name}”？`, body: <p>会删除本服务的模型和工作台保存的密钥。若有任务绑定，服务端会拒绝删除。不会选择其他默认模型。</p>, ok: '删除服务', danger: true })) void run(() => api.deleteIndependentService(service.id));
-            }}>删除服务</button> : null}</div>
+            }}>删除服务</button></div>
           {!snapshot.models[service.id]?.length ? <p className="muted">还没有模型。请使用服务提供的原始模型 ID 手动添加；不会从名字猜测能力。</p> : null}
           {snapshot.models[service.id]?.map((model) => <article className="independent-model" key={model.id} aria-label={`模型 ${model.name}`}>
             <div className="independent-heading"><div><h3>{model.name}</h3><code>{model.remoteModelId}</code></div><span>{model.enabled ? '已启用' : '已停用'}{snapshot.selection?.modelId === model.id ? ' · 默认模型' : ''}</span></div>
@@ -78,7 +85,7 @@ export function IndependentAgentPanel() {
             })}</dl>
             <div className="independent-actions"><button className="btn" onClick={() => openDialog((close) => <CapabilitiesDialog service={service} initial={model} close={close} saved={refresh} />)}>能力与来源</button>
               <button className="btn" onClick={() => modelDialog(service, model)}>编辑模型</button>
-              <button className="btn" disabled={busy || !service.enabled || !model.enabled || snapshot.selection?.modelId === model.id} onClick={() => void run(() => api.putIndependentDefault({ selection: { serviceId: service.id, modelId: model.id } }))}>设为默认</button>
+              <button className="btn" disabled={busy || remote || !service.enabled || !model.enabled || snapshot.selection?.modelId === model.id} title={remote ? '请到运行 AI Console 的电脑上操作' : undefined} onClick={() => { if (!remote) void run(() => api.putIndependentDefault({ selection: { serviceId: service.id, modelId: model.id } })); }}>设为默认</button>
               <button className="btn" disabled={busy} onClick={() => void run(() => api.patchIndependentModel(service.id, model.id, { expectedRevision: model.revision, enabled: !model.enabled }))}>{model.enabled ? '停用模型' : '启用模型'}</button>
               <button className="btn danger" disabled={busy} onClick={async () => {
                 if (await confirmDialog({ title: `删除模型“${model.name}”？`, body: <p>仅删除当前服务下的此模型和能力记录。若它是默认模型，会清空默认值；有任务绑定时不能删除。</p>, ok: '删除模型', danger: true })) void run(() => api.deleteIndependentModel(service.id, model.id));
@@ -149,20 +156,18 @@ function ServiceDialog({ initial, close, saved }: { initial?: IndependentService
   const reload = service ? async () => { const fresh = await api.independentService(service.id); setService(fresh); setDraft(serviceDraft(fresh)); setKey(''); setClearKey(false); setFieldErrors({}); } : undefined;
   return <WriteDialog title={service ? '编辑 API 服务' : '添加 API 服务'} close={close} write={write} submit={submit} reload={reload}>
     <p>此配置归工作台独立 Agent 管理。保存不会发起连接或模型请求。</p>
-    {remote ? <p>请到运行 AI Console 的电脑上填写或修改 Key 与授权地址。</p> : null}
+    {remote ? <p className="muted-note">请到运行 AI Console 的电脑上操作（填写或修改 Key 与授权地址、接口协议、鉴权方式仅限本机）。</p> : null}
     <div className="form-row"><label htmlFor="is-name">服务名称</label><input className="input" id="is-name" required maxLength={100} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} onBlur={(e) => validateField('name', e.target.value)} aria-invalid={!!fieldErrors.name} aria-describedby="is-name-error" /></div>
     <p id="is-name-error" className="form-problem">{fieldErrors.name}</p>
     <div className="form-row"><label htmlFor="is-protocol">接口协议</label><select className="select" id="is-protocol" disabled={remote} value={draft.protocol} onChange={(e) => setDraft({ ...draft, protocol: e.target.value as typeof draft.protocol })}>{Object.entries(protocolLabels).map(([id, label]) => <option key={id} value={id}>{label}</option>)}</select></div>
-    <div className="form-row"><label htmlFor="is-url">API 基础地址</label><input className="input mono" id="is-url" type="url" required maxLength={2000} placeholder="https://api.example.com/v1" readOnly={remote} value={draft.baseUrl} onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })} onBlur={(e) => validateField('baseUrl', e.target.value)} aria-invalid={!!fieldErrors.baseUrl} aria-describedby="is-url-note is-url-error" /></div>
+    <div className="form-row"><label htmlFor="is-url">API 基础地址</label><input className="input mono" id="is-url" type="url" required maxLength={2000} placeholder="https://api.example.com/v1" readOnly={remote} disabled={remote} value={draft.baseUrl} onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })} onBlur={(e) => validateField('baseUrl', e.target.value)} aria-invalid={!!fieldErrors.baseUrl} aria-describedby="is-url-note is-url-error" /></div>
     <p id="is-url-error" className="form-problem">{fieldErrors.baseUrl}</p>
     <p className="form-note" id="is-url-note">按服务提供方说明填写完整基础地址，工作台不会自动猜测路径。</p>
     <div className="form-row"><label htmlFor="is-auth">鉴权方式</label><select className="select" id="is-auth" disabled={remote} value={draft.authentication} onChange={(e) => setDraft({ ...draft, authentication: e.target.value as typeof draft.authentication })}><option value="api_key">API 密钥</option><option value="none">无需认证（明确选择）</option></select></div>
-    {!remote ? <>
-    <div className="form-row"><label htmlFor="is-key">{service ? '新密钥（可选）' : '密钥（可稍后填写）'}</label><input className="input mono" id="is-key" type="password" autoComplete="new-password" maxLength={8192} spellCheck={false} value={key} placeholder={service?.hasSecret ? `留空保留原密钥（结尾 …${service.secretHint ?? ''}）` : '尚未保存密钥'} onChange={(e) => setKey(e.target.value)} onBlur={(e) => validateField('apiKey', e.target.value)} aria-invalid={!!fieldErrors.apiKey} aria-describedby="is-key-note is-key-error" /></div>
+    <div className="form-row"><label htmlFor="is-key">{service ? '新密钥（可选）' : '密钥（可稍后填写）'}</label><input className="input mono" id="is-key" type="password" autoComplete="new-password" maxLength={8192} spellCheck={false} disabled={remote} readOnly={remote} value={remote ? '' : key} placeholder={remote ? '请到运行 AI Console 的电脑上操作（仅限本机填写 Key）' : service?.hasSecret ? `留空保留原密钥（结尾 …${service.secretHint ?? ''}）` : '尚未保存密钥'} onChange={(e) => setKey(e.target.value)} onBlur={(e) => validateField('apiKey', e.target.value)} aria-invalid={!!fieldErrors.apiKey} aria-describedby="is-key-note is-key-error" /></div>
     <p id="is-key-error" className="form-problem">{fieldErrors.apiKey}</p>
     <p className="form-note" id="is-key-note">密钥加密保存在工作台，保存后只显示结尾提示。改为无认证会删除已保存的旧密钥，需勾选下方确认清除。</p>
-    {service?.hasSecret ? <label className="independent-check"><input type="checkbox" checked={clearKey} onChange={(e) => setClearKey(e.target.checked)} />清除工作台保存的旧密钥</label> : null}
-    </> : null}
+    {!remote && service?.hasSecret ? <label className="independent-check"><input type="checkbox" checked={clearKey} onChange={(e) => setClearKey(e.target.checked)} />清除工作台保存的旧密钥</label> : null}
     <details><summary>高级信息（能力识别范围）</summary><p className="form-note">按服务实际情况填写，可留空。修改地址、凭据、协议或这些信息后，旧能力证据会保留供查阅，但不再适用于新配置。</p>
       {(['apiVersion', 'providerId', 'plan'] as const).map((field, i) => <div className="form-row" key={field}><label htmlFor={`is-${field}`}>{['API 版本', '服务商标识', '套餐'][i]}</label><input className="input" id={`is-${field}`} maxLength={100} value={draft[field]} onChange={(e) => setDraft({ ...draft, [field]: e.target.value })} /></div>)}
     </details>

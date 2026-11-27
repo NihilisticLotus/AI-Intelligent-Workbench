@@ -6,6 +6,7 @@ import { IndependentModelRequest, IndependentModelAttachment, IndependentGenerat
   type IndependentModelDriver, type IndependentModelDriverConfig, type IndependentModelBinding, type IndependentCapabilityField } from '@aic/protocol';
 import { StreamRedactor } from '@aic/adapters';
 import { sniffAttachment } from '../attachments';
+import type { PortListInput } from '../security/egress';
 import { IndependentCatalog } from './catalog';
 import { ModelTransportError, modelBody, postModel } from './model-http';
 import { modelWire } from './model-wire';
@@ -15,7 +16,7 @@ import { contextCounter, contextCountReply, contextInput, contextReport } from '
 export class IndependentApiDriver implements IndependentModelDriver {
   private active = new Map<string, Promise<unknown>>();
   private config: IndependentModelDriverConfig;
-  constructor(private catalog: Pick<IndependentCatalog, 'bound' | 'credentials' | 'getNetwork'>, config: IndependentModelDriverConfig = {}, private resolver?: typeof lookup) {
+  constructor(private catalog: Pick<IndependentCatalog, 'bound' | 'credentials' | 'getNetwork'>, config: IndependentModelDriverConfig = {}, private resolver?: typeof lookup, private blockedLocalPorts: PortListInput = []) {
     this.config = { ...config, tools: config.tools ? structuredClone(config.tools.map((t) => IndependentModelToolDefinition.parse(t))) : undefined,
       generation: config.generation ? IndependentGenerationOptions.parse(config.generation) : undefined,
       context: config.context ? IndependentContextPolicy.parse(config.context) : undefined };
@@ -122,7 +123,7 @@ export class IndependentApiDriver implements IndependentModelDriver {
             counted = await recorded('counter', countBody, async () => {
               let count: number | undefined;
               await postModel({ base: new URL(service.baseUrl), endpoint, headers, body: countBody, signal, timeoutMs: remaining(),
-                onEvent: () => { throw new ModelTransportError('protocol'); }, onJson: (value) => { count = contextCountReply(service.protocol, value); }, lookup: this.resolver, addressPolicy: this.catalog.getNetwork() });
+                onEvent: () => { throw new ModelTransportError('protocol'); }, onJson: (value) => { count = contextCountReply(service.protocol, value); }, lookup: this.resolver, addressPolicy: this.catalog.getNetwork(), blockedLocalPorts: this.blockedLocalPorts });
               check(); if (count === undefined) throw new ModelTransportError('protocol');
               return { value: count, settlement: { outcome: 'succeeded', failure: null, usage: null, countedInputTokens: count } };
             });
@@ -135,7 +136,7 @@ export class IndependentApiDriver implements IndependentModelDriver {
       }
       const reply = await recorded('model', body, async () => {
         await postModel({ base: new URL(service.baseUrl), endpoint: wire.endpoint, headers, body, signal,
-          timeoutMs: remaining(), onEvent: wire.event, onJson: wire.json, lookup: this.resolver, addressPolicy: this.catalog.getNetwork() });
+          timeoutMs: remaining(), onEvent: wire.event, onJson: wire.json, lookup: this.resolver, addressPolicy: this.catalog.getNetwork(), blockedLocalPorts: this.blockedLocalPorts });
         check(); const reply = wire.result();
         if (reply.toolCalls.some((call) => !request.tools!.some((definition) => definition.name === call.name))) throw new ModelTransportError('protocol');
         // 若不可信上游回显服务 Key，不让其进入工具参数、持久会话或界面；不能静默篡改签名续传。

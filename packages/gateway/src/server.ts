@@ -234,8 +234,9 @@ async function startGateway(opts: GatewayOptions, dataDir: string, lock: Instanc
     try { db.run('INSERT INTO audit_log (device_id, action, detail, ts) VALUES (?, ?, ?, ?)', deviceId, action, detail, Date.now()); } catch { /* 忽略 */ }
   };
   const secrets = new SecretService(db, opts.secretStore ?? defaultSecretStore(db));
+  const blockedLocalPorts = () => (port > 0 ? [port] : []);
   const independent = new IndependentCatalog(db, secrets, events);
-  const independentDiscovery = new IndependentDiscovery(db, independent, opts.metadataReader);
+  const independentDiscovery = new IndependentDiscovery(db, independent, opts.metadataReader, blockedLocalPorts);
   rollback.push(() => independentDiscovery.close());
   const agentSvc = new AgentService(db, events, agents, { dataDir, log, audit });
   const profiles = new ProfileService(db, secrets, {
@@ -277,7 +278,7 @@ async function startGateway(opts: GatewayOptions, dataDir: string, lock: Instanc
   // 上次遗留的 Agent 进程（核对启动时间后结束进程树）；不在启动时预先拉起 Agent
   const orphanCleanup = processes.cleanupOrphans();
   void orphanCleanup.catch(() => log('遗留进程清理失败，独立 Agent 暂停执行与恢复'));
-  const independentRuntime = new IndependentTaskRuntime(db, independent, events, attachments, dataDir, processes, orphanCleanup);
+  const independentRuntime = new IndependentTaskRuntime(db, independent, events, attachments, dataDir, processes, orphanCleanup, blockedLocalPorts);
   independentRuntime.recoverOnStartup();
   tasks.independentRuntime = independentRuntime;
   const projects = new ProjectService(db);

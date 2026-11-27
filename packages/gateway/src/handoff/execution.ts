@@ -4,6 +4,7 @@ import { HandoffRecord, HandoffSettings, type PermissionLevel, type HandoffTarge
 import type { Services } from '../services';
 import { Errors, newId } from '../util';
 import { estimateTokens } from './budget';
+import { sanitizeProvenanceText, wrapProvenance } from '../security/provenance';
 import { previewHandoff } from './preview';
 import { outgoingRedactor } from './history';
 import { environmentValues,isEnvSource } from './redact';
@@ -143,7 +144,7 @@ export class HandoffExecution {
       if(db.get("SELECT 1 FROM events WHERE task_id=? AND seq>? AND replay=0 AND type IN ('message.user','tool.end','plan.update','task.memory_updated','session.handoff','approval.resolved') LIMIT 1",taskId,record.document.meta.toSeq??0)) throw Errors.invalidState('任务历史已变化，请重新生成交接');
       if(options.markdown!==undefined && record.markdown!==options.markdown) {
         const {clean}=await outgoingRedactor(this.s,taskId,undefined,environment);
-        const markdown=await clean(options.markdown);
+        const markdown=sanitizeProvenanceText(await clean(options.markdown));
         checkForcedWindow(options, estimateTokens(markdown), record.quality.window);
         db.run('UPDATE handoffs SET content_md=?,edited_by_user=1 WHERE task_id=? AND id=?',markdown,taskId,id);
       }
@@ -184,10 +185,13 @@ export class HandoffExecution {
 
   async input(taskId:string,record:HandoffRecord,summary:string,text:string,attachments:{texts:string[];values:string[];files:PromptAttachment[]},permission:PermissionLevel,action:'redo'|'return'='return') {
     const {clean}=await outgoingRedactor(this.s,taskId,undefined,attachments.values);
-    const user=await clean(text), body=await clean(summary), markdown=await clean(record.markdown);
+    const cleanUser=await clean(text), cleanBody=await clean(summary), markdown=sanitizeProvenanceText(await clean(record.markdown));
+    const user=cleanUser?wrapProvenance('producer','本轮用户消息',cleanUser):'';
+    const body=cleanBody?wrapProvenance('delegated','任务说明 TASK.md',cleanBody):'';
+    const attachmentTexts=attachments.texts.map(item=>item?wrapProvenance('external_data','附件文本摘录',item):item).filter(Boolean);
     const instruction='请先用几句话复述目标、下一步和准备先读的文件，再继续本轮用户的任务。';
-    const hasUserMessage=Boolean(user || attachments.texts.length || attachments.files.length);
-    const parts=hasUserMessage ? ['## 本轮用户消息',user,...attachments.texts,instruction] : [action==='redo'?'工作台操作：用完整转写重新交接。请复述当前目标和下一步，等用户发送下一条消息。':'工作台操作：切回原 Agent。请复述交接信息，等用户发送下一条消息。'];
+    const hasUserMessage=Boolean(cleanUser || attachments.texts.length || attachments.files.length);
+    const parts=hasUserMessage ? ['## 本轮用户消息',user,...attachmentTexts,instruction] : [action==='redo'?'工作台操作：用完整转写重新交接。请复述当前目标和下一步，等用户发送下一条消息。':'工作台操作：切回原 Agent。请复述交接信息，等用户发送下一条消息。'];
     if (permission!=='readonly' && hasUserMessage) {
       // 不点名具体工具：各家工具名不同，历史中的工具属于上一会话（ISSUE-0133 的通用化）。
       parts.push('若本轮用户要求编辑文件，请在当前工作副本使用你自己的文件编辑工具，按现有权限申请编辑；历史里的工具名属于上一会话，不一定可用。若只需新建文件且交接中已有所需内容，可直接新增。用户禁止命令也适用于读取文件。');

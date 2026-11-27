@@ -7,6 +7,7 @@ import { FeatureKey } from '@aic/protocol';
 import { HandoffSettingsSection } from './handoff-settings';
 import { WorkspaceSettingsSection } from './workspace-settings';
 import { DeviceAccessSection, NotificationSoundSetting } from './device-access-section';
+import { SecurityStatusSection } from './security-status-section';
 
 export function SettingsPage() {
   const theme = usePref('theme');
@@ -40,6 +41,7 @@ export function SettingsPage() {
           </section>
 
           <DeviceAccessSection />
+          <SecurityStatusSection />
 
           <NetworkSettingsSection />
           <WorkspaceSettingsSection />

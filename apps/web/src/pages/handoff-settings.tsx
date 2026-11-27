@@ -1,11 +1,12 @@
 import { useEffect, useState } from 'react';
 import type { HandoffSettings, HandoffSummaryUsage } from '@aic/protocol';
-import { api } from '../state/app';
+import { api, useRemoteAccess } from '../state/app';
 import { toast } from '../state/ui';
 import { asApiError } from '../components/ui';
 
-export function HandoffSettingsSection() {
-  const [settings,setSettings]=useState<HandoffSettings|null>(null),[usage,setUsage]=useState<HandoffSummaryUsage|null>(null);
+export function HandoffSettingsSection({ initialSettings }: { initialSettings?: HandoffSettings | null }) {
+  const remote = useRemoteAccess();
+  const [settings,setSettings]=useState<HandoffSettings|null>(initialSettings??null),[usage,setUsage]=useState<HandoffSummaryUsage|null>(null);
   const [models,setModels]=useState<Array<{id:string;name:string;service:string}>>([]);
   const [count,setCount]=useState(''),[money,setMoney]=useState(false),[currency,setCurrency]=useState('CNY');
   const [total,setTotal]=useState(''),[perCall,setPerCall]=useState('');
@@ -35,7 +36,8 @@ export function HandoffSettingsSection() {
     } catch(e){setError(asApiError(e).message);} finally{setBusy(false);}
   }
   return <section className="set-sec" aria-labelledby="s-handoff"><h3 id="s-handoff">交接</h3>
-    {settings?<form onSubmit={e=>{e.preventDefault();void save();}}><fieldset disabled={busy}>
+    {remote?<p className="muted-note">请到运行 AI Console 的电脑上操作（修改交接设置仅限本机）。</p>:null}
+    {settings?<form onSubmit={e=>{e.preventDefault();if(!remote)void save();}}><fieldset disabled={busy||remote}>
       <div className="set-row"><label><input type="checkbox" checked={settings.confirmBeforeSend} onChange={e=>setSettings({...settings,confirmBeforeSend:e.target.checked})}/> 交接前让我确认</label></div>
       <div className="set-row"><label className="lbl" htmlFor="summary-model">交接摘要模型</label><select className="select" id="summary-model" value={settings.summaryModel?.modelId??''}
         onChange={e=>{const model=models.find(m=>m.id===e.target.value);setSettings({...settings,summaryModel:model?{serviceId:model.service,modelId:model.id}:null});}}>

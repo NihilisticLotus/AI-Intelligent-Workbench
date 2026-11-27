@@ -33,6 +33,7 @@ type MyLogins = Partial<Record<AgentKind, { loginId: string; methodId: string; p
 
 export function AgentsPage() {
   const allAgents = useApp((s) => s.agents);
+  const remote = useRemoteAccess();
   const toggleOn = useApp((s) => !!s.hello?.features[FeatureKey.AgentToggle]);
   // 上方卡片只放已启用的；关闭的列在下面“其他 Agent”（design.md 6.7）
   const agents = useMemo(() => allAgents.filter((a) => a.kind !== 'independent' && isEnabled(a)), [allAgents]);
@@ -149,6 +150,7 @@ export function AgentsPage() {
             {lastChecked ? `上次检测：${clock(lastChecked)}。` : ''}
             第三方 Agent 沿用软件自身的 API、登录与模型设置。{toggleOn ? '只有打开的 Agent 会检测、出现在新建任务和切换器里。' : ''}
           </p>
+          {remote ? <p className="muted-note">请到运行 AI Console 的电脑上操作（启停 Agent、修改默认值、登录与连接测试仅限本机）。</p> : null}
           <IndependentAgentPanel />
           {toggleOn ? <h2 className="sec-h">已启用 <span className="muted">{agents.length} 个</span></h2> : null}
           {!allAgents.length ? <div className="empty"><h3>还没有检测到 Agent</h3><p>点右上角的“重新检测”。</p></div>
@@ -164,7 +166,7 @@ export function AgentsPage() {
                 }}
                 onTest={() => { select(a.kind, true); void runTest(a); }}
                 onRedetect={redetect}
-                toggle={toggleOn ? <EnableSwitch a={a} busy={toggling === a.kind} onChange={(v) => void toggle(a, v)} /> : null} />
+                toggle={toggleOn ? <EnableSwitch a={a} busy={toggling === a.kind} remote={remote} onChange={(v) => void toggle(a, v)} /> : null} />
             ))}
           </div>
           {toggleOn && offAgents.length ? (
@@ -177,7 +179,7 @@ export function AgentsPage() {
                     <span className="name">{a.displayName}</span>
                     <span className="sub">{[a.engineLocation, a.version].filter(Boolean).join(' · ') || '打开后检测'}</span>
                     <span className="lbl">{toggling === a.kind ? '正在打开…' : '已关闭'}</span>
-                    <EnableSwitch a={a} busy={toggling === a.kind} onChange={(v) => void toggle(a, v)} />
+                    <EnableSwitch a={a} busy={toggling === a.kind} remote={remote} onChange={(v) => void toggle(a, v)} />
                   </li>
                 ))}
               </ul>
@@ -197,12 +199,12 @@ export function AgentsPage() {
 }
 
 /** 启用开关：role="switch"，aria-label 写清楚点了会怎样 */
-function EnableSwitch({ a, busy, onChange }: { a: AgentInfo; busy: boolean; onChange: (on: boolean) => void }) {
+function EnableSwitch({ a, busy, remote = false, onChange }: { a: AgentInfo; busy: boolean; remote?: boolean; onChange: (on: boolean) => void }) {
   const on = isEnabled(a);
   return (
-    <button type="button" className="switch" role="switch" aria-checked={on} aria-busy={busy} disabled={busy}
-      aria-label={`${on ? '关闭' : '打开'} ${a.displayName}`} title={on ? '已启用，点击关闭' : '已关闭，点击打开'}
-      onClick={(e) => { e.stopPropagation(); onChange(!on); }} />
+    <button type="button" className="switch" role="switch" aria-checked={on} aria-busy={busy} disabled={busy || remote}
+      aria-label={`${on ? '关闭' : '打开'} ${a.displayName}`} title={remote ? '请到运行 AI Console 的电脑上操作' : (on ? '已启用，点击关闭' : '已关闭，点击打开')}
+      onClick={(e) => { e.stopPropagation(); if (!remote) onChange(!on); }} />
   );
 }
 
@@ -251,7 +253,7 @@ function AgentCard({ a, current, busy, test, onSelect, onLogin, onTest, onRedete
         <div className="acts">
           {!remote && a.status === 'needs_login' && !a.usesNativeConfig ? <button type="button" className="btn sm attn" onClick={stop(onLogin)}>登录</button> : null}
           {a.status !== 'not_installed' ? (
-            <button type="button" className="btn sm" onClick={stop(onTest)} aria-busy={test?.running} disabled={test?.running}>
+            <button type="button" className="btn sm" onClick={stop(() => { if (!remote) onTest(); })} aria-busy={test?.running} disabled={test?.running || remote} title={remote ? '请到运行 AI Console 的电脑上操作' : undefined}>
               {test?.running ? '正在测试…' : '测试连接'}</button>
           ) : null}
           <button type="button" className="btn sm ghost" onClick={stop(onRedetect)} disabled={busy}>重新检测</button>
@@ -587,12 +589,12 @@ function ProfileSection({ a, focusProfileId, onLogin, onTest, test }: {
             {!remote && p.kind === 'subscription' && p.loggedIn === false && methods.length ? (
               <button type="button" className="btn sm attn" onClick={(e) => loginProfile(p, e.currentTarget)}>登录</button>
             ) : null}
-            <button type="button" className="btn sm" aria-busy={testing} disabled={!!test?.running} onClick={() => onTest({ profileId: p.id })}>{testing ? '测试中…' : '测试'}</button>
+            <button type="button" className="btn sm" aria-busy={testing} disabled={!!test?.running || remote} title={remote ? '请到运行 AI Console 的电脑上操作' : undefined} onClick={() => { if (!remote) onTest({ profileId: p.id }); }}>{testing ? '测试中…' : '测试'}</button>
             <button type="button" className="btn ghost icon sm" aria-label={`${p.name} 的更多操作`} aria-haspopup="menu" onClick={(e) => more(p, e.currentTarget)}><Icon name="more" /></button>
           </div>
         );
       })}
-      {remote ? <p className="muted-note">请到运行 AI Console 的电脑上添加账号或填写 Key。</p> : <><h3>添加账号</h3>
+      {remote ? <p className="muted-note">请到运行 AI Console 的电脑上操作（添加账号或填写 Key 仅限本机）。</p> : <><h3>添加账号</h3>
       <div className="method">
         <button type="button" disabled={!methods.length} title={methods.length ? undefined : '这个 Agent 没有可以在界面里完成的订阅登录'} onClick={() => openForm('subscription')}>
           <b>订阅登录</b><span>第二个订阅账号，在浏览器中授权</span></button>
@@ -607,10 +609,12 @@ function ProfileSection({ a, focusProfileId, onLogin, onTest, test }: {
 // 默认设置：默认模型、默认思考强度、并发上限、引擎（仅 Claude）、引擎位置、工作区设置
 // ---------------------------------------------------------------------
 function SettingsSection({ a }: { a: AgentInfo }) {
+  const remote = useRemoteAccess();
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<ApiError | null>(null);
   const real = isRealAgent(a.kind);
   const save = async (body: Parameters<typeof patchAgent>[1], text: string) => {
+    if (remote) return;
     setSaving(true);
     setErr(null);
     try { await patchAgent(a.kind, body); toast(text); } catch (e) { setErr(asApiError(e)); } finally { setSaving(false); }
@@ -623,12 +627,13 @@ function SettingsSection({ a }: { a: AgentInfo }) {
   return (
     <>
       <h3>{a.usesNativeConfig ? '工作台任务默认值' : '默认设置'}</h3>
+      {remote ? <p className="muted-note">请到运行 AI Console 的电脑上操作（修改默认模型与配置仅限本机）。</p> : null}
       {a.usesNativeConfig ? <p className="muted-note">以下选项只用于工作台的新任务，不修改软件自身的默认设置。</p> : null}
       {err ? <ErrorNotice error={err} ctx={{ kind: a.kind }} onDismiss={() => setErr(null)} /> : null}
       {real ? (
         <div className="field"><label htmlFor={'dm-' + a.kind}>默认模型</label>
           <span>
-            <select id={'dm-' + a.kind} className="select" value={staleModel ?? def.model} disabled={saving || !a.models.length}
+            <select id={'dm-' + a.kind} className="select" value={staleModel ?? def.model} disabled={saving || remote || !a.models.length}
               onChange={(e) => void save({ defaultModel: e.target.value || null }, e.target.value ? `新任务默认用 ${a.models.find((m) => m.id === e.target.value)?.name ?? e.target.value}` : '新任务默认用 Agent 自己的默认模型')}>
               <option value="">Agent 自己的默认模型</option>
               {staleModel ? <option value={staleModel}>{staleModel}（现在不可用）</option> : null}
@@ -642,7 +647,7 @@ function SettingsSection({ a }: { a: AgentInfo }) {
       )}
       {real && a.efforts?.length ? (
         <div className="field"><label htmlFor={'de-' + a.kind}>默认思考强度</label>
-          <select id={'de-' + a.kind} className="select" value={def.effort} disabled={saving}
+          <select id={'de-' + a.kind} className="select" value={def.effort} disabled={saving || remote}
             onChange={(e) => void save({ defaultEffort: e.target.value || null }, e.target.value ? `新任务默认思考强度：${effortLabel(e.target.value)}` : '新任务默认用 Agent 自己的思考强度')}>
             <option value="">Agent 默认</option>
             {a.efforts.map((x) => <option key={x} value={x}>{effortLabel(x)}</option>)}
@@ -653,14 +658,14 @@ function SettingsSection({ a }: { a: AgentInfo }) {
       {ws ? <div className="field"><span className="lbl">工作区设置</span><span className={ws.warn ? 'note unverified' : undefined}>{ws.text}</span></div> : null}
       {real && a.concurrencyLimit !== undefined ? (
         <div className="field"><label htmlFor={'cc-' + a.kind}>并发上限</label>
-          <select id={'cc-' + a.kind} className="select" value={a.concurrencyLimit} disabled={saving}
+          <select id={'cc-' + a.kind} className="select" value={a.concurrencyLimit} disabled={saving || remote}
             onChange={(e) => void save({ concurrencyLimit: Number(e.target.value) }, `并发上限改为 ${e.target.value}`)}>
             {[1, 2, 3, 4].map((n) => <option key={n} value={n}>{n} 个会话</option>)}
           </select></div>
       ) : null}
       {a.kind === 'claude' && a.engineSource ? (
         <div className="field"><label htmlFor="eng-claude">引擎</label>
-          <select id="eng-claude" className="select" value={a.engineSource === 'local' ? 'local' : 'bundled'} disabled={saving}
+          <select id="eng-claude" className="select" value={a.engineSource === 'local' ? 'local' : 'bundled'} disabled={saving || remote}
             onChange={(e) => void save({ engine: e.target.value as 'bundled' | 'local' }, e.target.value === 'local' ? '改为使用本机的 Claude Code' : '改为使用适配器自带的引擎')}>
             <option value="bundled">适配器自带（已和适配器一起测过，推荐）</option>
             <option value="local">本机安装的 Claude Code</option>
@@ -679,17 +684,19 @@ function SettingsSection({ a }: { a: AgentInfo }) {
 // 测试连接：找到引擎 → 握手 → 新建会话 → 读模型列表 → 关闭；可选发一条测试消息
 // ---------------------------------------------------------------------
 function TestSection({ a, test, onTest }: { a: AgentInfo; test: TestState | null; onTest: (o: { profileId?: string; sendMessage?: boolean }) => void }) {
+  const remote = useRemoteAccess();
   const profileName = useApp((s) => (test?.profileId ? s.profiles[a.kind]?.find((p) => p.id === test.profileId)?.name : null));
   const running = !!test?.running;
   return (
     <>
       <h3>测试连接<span className="grow" />
-        <button type="button" className="btn sm" disabled={running || a.status === 'not_installed'} aria-busy={running && !test?.sendMessage}
-          onClick={() => onTest({})}><Icon name="refresh" />{test?.result || test?.error ? '再测一次' : '测试连接'}</button>
+        <button type="button" className="btn sm" disabled={running || remote || a.status === 'not_installed'} title={remote ? '请到运行 AI Console 的电脑上操作' : undefined} aria-busy={running && !test?.sendMessage}
+          onClick={() => { if (!remote) onTest({}); }}><Icon name="refresh" />{test?.result || test?.error ? '再测一次' : '测试连接'}</button>
       </h3>
+      {remote ? <p className="muted-note">请到运行 AI Console 的电脑上操作（连接测试仅限本机发起）。</p> : null}
       <p className="muted-note">只做握手和新建会话，不发消息，不花钱。</p>
-      <button type="button" className="btn sm ghost" disabled={running || a.status !== 'ready'} aria-busy={running && test?.sendMessage}
-        onClick={() => onTest({ sendMessage: true })}>发送测试消息（会产生少量费用）</button>
+      <button type="button" className="btn sm ghost" disabled={running || remote || a.status !== 'ready'} title={remote ? '请到运行 AI Console 的电脑上操作' : undefined} aria-busy={running && test?.sendMessage}
+        onClick={() => { if (!remote) onTest({ sendMessage: true }); }}>发送测试消息（会产生少量费用）</button>
       {running ? <pre className="testlog mono" role="status">正在测试{profileName ? `“${profileName}”` : ''}…</pre> : null}
       {test?.error ? <ErrorNotice error={test.error} /> : null}
       {test?.result && !running ? (

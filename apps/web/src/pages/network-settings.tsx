@@ -1,17 +1,19 @@
 // 设置页“网络”一节：本机代理 fake-ip 网段的显式开关（ISSUE-0053）。默认关闭，只影响工作台自己的独立 Agent。
 import { useEffect, useState } from 'react';
 import type { ApiError, IndependentNetworkSettings } from '@aic/protocol';
-import { api } from '../state/app';
+import { api, useRemoteAccess } from '../state/app';
 import { ErrorNotice, asApiError } from '../components/ui';
 import { toast } from '../state/ui';
 
 export function NetworkSettingsSection() {
+  const remote = useRemoteAccess();
   const [value, setValue] = useState<IndependentNetworkSettings | null>(null);
   const [err, setErr] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   const load = () => { setErr(null); api.independentNetwork().then(setValue, (e) => setErr(asApiError(e))); };
   useEffect(load, []);
   const toggle = async (on: boolean) => {
+    if (remote) return;
     setBusy(true); setErr(null);
     try {
       const next = await api.putIndependentNetwork({ allowFakeIpProxy: on });
@@ -22,9 +24,10 @@ export function NetworkSettingsSection() {
   return (
     <section className="set-sec" aria-labelledby="s-net">
       <h3 id="s-net">网络</h3>
+      {remote ? <p className="muted-note">请到运行 AI Console 的电脑上操作（修改网络代理例外设置仅限本机）。</p> : null}
       {err ? <ErrorNotice error={err} onRetry={load} /> : null}
       <label className="check-row">
-        <input type="checkbox" checked={value?.allowFakeIpProxy ?? false} disabled={!value || busy}
+        <input type="checkbox" checked={value?.allowFakeIpProxy ?? false} disabled={!value || busy || remote}
           onChange={(e) => void toggle(e.target.checked)} />
         <span>允许本机代理的 fake-ip 网段（198.18.x）
           <small>{[

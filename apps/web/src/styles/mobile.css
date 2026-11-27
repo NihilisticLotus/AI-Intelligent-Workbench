@@ -77,7 +77,8 @@
   .board-card-title, .agents-page, .set-sec, .project-settings { overflow-wrap: anywhere; }
   .board-card-title { max-width: 100%; }
   .permission-table-wrap { max-width: 100%; overscroll-behavior-x: contain; }
-  .independent-fieldset, .independent-service-body, .profile-row, .page { min-width: 0; }
+  .independent-fieldset, .independent-service-body, .profile-row, .page, .security-list, .security-item { min-width: 0; }
+  .security-list { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 767px), (max-width: 1279px) and (pointer: coarse) {

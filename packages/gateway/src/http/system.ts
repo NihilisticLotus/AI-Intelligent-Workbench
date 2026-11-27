@@ -2,7 +2,8 @@
 import { Hono } from 'hono';
 import {
   WorkspaceRetention, FeatureKey, PairingCompleteBody, PROTOCOL_VERSION, HandoffSettings,
-  LanPairingDecision, LanPairingRequestId, type Hello, type PairingCompleteResult, type RevokeLanResult,
+  LanPairingDecision, LanPairingRequestId, PROVENANCE_TIERS, SecurityStatus,
+  type Hello, type PairingCompleteResult, type RevokeLanResult,
 } from '@aic/protocol';
 import { TOKEN_IDLE_TTL_MS } from '../auth';
 import type { Services } from '../services';
@@ -18,6 +19,38 @@ export function systemRoutes(s: Services) {
   r.put('/settings/handoff',async c=>{requireLocal(c,'请在这台电脑上修改交接设置');return c.json(s.tasks.handoffs!.settings(await readBody(c,HandoffSettings)));});
   r.get('/settings/workspaces',c=>c.json(s.workspaces.retention()));
   r.put('/settings/workspaces',async c=>{requireLocal(c,'请在这台电脑上修改工作副本保留设置');return c.json(s.workspaces.setRetention(await readBody(c,WorkspaceRetention)));});
+  r.get('/security/status', (c) => {
+    const row = s.db.get<{ count: number }>('SELECT COUNT(*) AS count FROM secrets');
+    const dpapiActive = s.secrets.store.scheme === 'dpapi-user-v1' && s.secrets.store.available;
+    const status = SecurityStatus.parse({
+      provenanceFence: {
+        active: true,
+        tiers: [...PROVENANCE_TIERS],
+      },
+      subprocessEnvIsolation: {
+        active: true,
+      },
+      egressGuard: {
+        active: true,
+        allowFakeIpProxy: s.independent.getNetwork().allowFakeIpProxy,
+        blockedLocalPortsCount: s.port() > 0 ? 1 : 0,
+      },
+      secretStorage: {
+        mode: dpapiActive ? 'dpapi' : 'unavailable',
+        encryptedCount: Number(row?.count ?? 0),
+      },
+      lanBoundary: {
+        lanEnabled: s.lan.activeAddress() !== null,
+        currentConnection: c.get('lanConnection') ? 'lan' : 'local',
+        localOnlyWriteGuard: true,
+      },
+      markdownSafety: {
+        blockRemoteImages: true,
+        blockNonHttpLinks: true,
+      },
+    });
+    return c.json(status);
+  });
 
   r.get('/hello', (c) => {
     const d = c.get('device');

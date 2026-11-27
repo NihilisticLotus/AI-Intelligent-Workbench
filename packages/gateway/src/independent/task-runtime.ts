@@ -32,6 +32,7 @@ import { independentModelTools } from './tool-definitions';
 import { usableCapability } from './capabilities';
 import { independentTurnUsage } from '../usage';
 import type { McpHub } from '../mcp/hub';
+import type { SkillService } from '../skills/service';
 const STOP_TEXT = {
   completed: '本回合已完成，等待你验收。', cancelled: '本回合已停止，实际工具与连接已收尾。',
   interrupted: '本回合已中断，请核对记录后继续。', timed_out: '已达到回合时间上限。',
@@ -48,6 +49,7 @@ export class IndependentTaskRuntime {
   readonly ledger: IndependentRequestLedger;
   readonly journal: IndependentToolJournal;
   mcp: McpHub | null = null;
+  skills: SkillService | null = null;
   private details = new Map<string, IndependentApprovalDetail>();
   constructor(private db: Db, private catalog: IndependentCatalog, private events: EventStore,
     private attachments: AttachmentService, private dataDir: string, private processes: ProcessRegistry,
@@ -260,7 +262,7 @@ export class IndependentTaskRuntime {
             const args = call.arguments && typeof call.arguments === 'object' && !Array.isArray(call.arguments)
               ? (call.arguments as Record<string, unknown>)
               : {};
-            if (mcpEntry.mode !== 'global_search' && mcpEntry.mode !== 'global_describe' && mcpEntry.mode !== 'read_output') {
+            if (mcpEntry.mode !== 'global_search' && mcpEntry.mode !== 'global_describe' && mcpEntry.mode !== 'read_output' && mcpEntry.mode !== 'skill_list' && mcpEntry.mode !== 'skill_read') {
               if (permission === 'readonly') {
                 rejected = true;
                 return { role: 'tool', callId: call.id, name: call.name, outcome: 'rejected', text: '只读权限不允许执行外部 MCP 工具调用' };
@@ -365,7 +367,7 @@ export class IndependentTaskRuntime {
         const tail = this.store.entries(sessionId).at(-1);
         const turn = this.store.create(this.catalog.bound(taskId), sessionId, { role: 'user', text,
           attachments: attachments.map((a) => ({ attachmentId: a.attachmentId! })) }, options.limits,
-        `你是 AI Console 独立编码 Agent。用中文与用户沟通。遵守项目规则，先读后改；修改与命令必须经用户审批。不要读取第三方 Agent 的凭据，不要输出密钥。工具返回范围、用量和错误必须如实说明。可用 Node 可执行文件：${process.execPath}\n项目规则：\n${rules.files.map((f) => f.path + '\n' + f.text).join('\n')}`,
+        `你是 AI Console 独立编码 Agent。用中文与用户沟通。遵守项目规则，先读后改；修改与命令必须经用户审批。不要读取第三方 Agent 的凭据，不要输出密钥。工具返回范围、用量和错误必须如实说明。可用 Node 可执行文件：${process.execPath}${this.skills?.l1PromptSummaryFor(taskId, 'independent') ?? ''}\n项目规则：\n${rules.files.map((f) => f.path + '\n' + f.text).join('\n')}`,
         previous && tail ? { previousBinding: this.store.get(String(previous.id)).binding, tailHash: tail.hash } : undefined);
         try {
           const firstRequest = this.ledger.snapshot(taskId).attemptedRequests;

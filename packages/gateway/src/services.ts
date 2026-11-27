@@ -22,6 +22,7 @@ import type { AccessAudit } from './lan/audit';
 import type { AccessConfirmation } from './lan/confirmation';
 import type { MonitorService } from './monitor';
 import type { McpHub } from './mcp/hub';
+import type { SkillService } from './skills/service';
 
 export interface Services {
   db: Db;
@@ -48,6 +49,7 @@ export interface Services {
   tasks: TaskService;
   monitor: MonitorService;
   mcp: McpHub;
+  skills: SkillService;
   workspaces: WorkspaceManager;
   /** 实际监听的端口 */
   port(): number;

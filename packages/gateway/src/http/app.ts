@@ -18,6 +18,7 @@ import { agentRoutes } from './agents';
 import { independentRoutes } from './independent';
 import { monitorRoutes } from './monitor';
 import { mcpRoutes } from './mcp';
+import { skillRoutes } from './skills';
 import { staticHandler } from './static';
 import { historyRoutes } from './history';
 import { errorLogText } from '../error-log';
@@ -137,6 +138,7 @@ export function createApp(s: Services, opts: { webDist: string }) {
   app.route(API_BASE, independentRoutes(s));
   app.route(API_BASE, monitorRoutes(s));
   app.route(API_BASE, mcpRoutes(s));
+  app.route(API_BASE, skillRoutes(s));
 
   // 没有匹配的 API：统一 404 ApiError；其他路径交给静态网页
   app.all(`${API_BASE}/*`, (c) => fail(c, Errors.notFound('没有这个接口')));

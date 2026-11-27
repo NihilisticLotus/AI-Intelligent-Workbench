@@ -26,6 +26,7 @@ import {
   validateMcpCommandAndArgs, validateMcpEnvKey, validateMcpHeaderKey, validateMcpUrl,
 } from './parser';
 import { MCP_MAX_STDOUT_LINE_BYTES, MCP_STDIO_IDLE_TTL_MS, StdioMcpPool } from './pool';
+import type { SkillService } from '../skills/service';
 
 /** 单服务工具数超过该阈值时，在卡片上展示「已自动折叠」并触发渐进式发现。 */
 export const MCP_FOLD_THRESHOLD = 40;
@@ -38,6 +39,8 @@ export const MCP_TOOL_SEARCH = 'aic_mcp__search_tools';
 export const MCP_TOOL_DESCRIBE = 'aic_mcp__describe_tool';
 export const MCP_TOOL_CALL = 'aic_mcp__call_tool';
 export const MCP_TOOL_READ_OUTPUT = 'aic_mcp__read_output';
+export const MCP_TOOL_SKILLS_LIST = 'aic_skills__list';
+export const MCP_TOOL_SKILLS_READ = 'aic_skills__read';
 
 type McpRow = {
   id: string;
@@ -80,7 +83,7 @@ export interface McpHubOptions {
 
 export type ExposedMcpDispatchEntry =
   | { serverId: string; mode: 'direct'; toolName: string }
-  | { mode: 'global_search' | 'global_describe' | 'global_call' | 'read_output' };
+  | { mode: 'global_search' | 'global_describe' | 'global_call' | 'read_output' | 'skill_list' | 'skill_read' };
 
 const tokenDigest = (token: string) => createHash('sha256').update(token).digest('hex');
 
@@ -110,6 +113,8 @@ export class McpHub {
   private httpSessions = new HttpMcpSessionStore();
   /** 任务级受控内存溢出分页回查存储（零磁盘路径） */
   private overflow = new McpOverflowStore();
+  /** 第 2.4 步：工作台统一技能库（供独立 Agent 与 ACP 桥接按需渐进式读取） */
+  skills: SkillService | null = null;
 
   constructor(
     private db: Db,
@@ -614,21 +619,22 @@ export class McpHub {
     globalFolded: boolean;
   } {
     const active = this.activeRowsWithTools(taskId, agent);
+    const activeSkills = this.skills?.activeSkillsFor(taskId, agent) ?? [];
     const definitions: IndependentModelToolDefinition[] = [];
     const dispatch = new Map<string, ExposedMcpDispatchEntry>();
 
-    if (!active.length) {
+    if (!active.length && !activeSkills.length) {
       return { definitions, dispatch, globalFolded: false };
     }
 
     const totalTools = active.reduce((sum, item) => sum + item.tools.length, 0);
     const totalSchemaBytes = active.reduce((sum, item) => sum + item.row.tools_json.length, 0);
     const anySingleFolded = active.some((item) => item.tools.length > MCP_FOLD_THRESHOLD);
-    const globalFolded = anySingleFolded
+    const globalFolded = active.length > 0 && (anySingleFolded
       || totalTools > MCP_GLOBAL_FOLD_TOOL_THRESHOLD
-      || totalSchemaBytes > MCP_GLOBAL_FOLD_SCHEMA_BYTES;
+      || totalSchemaBytes > MCP_GLOBAL_FOLD_SCHEMA_BYTES);
 
-    if (globalFolded) {
+    if (active.length > 0 && globalFolded) {
       const serverListDesc = active.map((a) => `${a.row.name}(${a.tools.length})`).join('、');
       definitions.push(
         {
@@ -675,7 +681,7 @@ export class McpHub {
       dispatch.set(MCP_TOOL_SEARCH, { mode: 'global_search' });
       dispatch.set(MCP_TOOL_DESCRIBE, { mode: 'global_describe' });
       dispatch.set(MCP_TOOL_CALL, { mode: 'global_call' });
-    } else {
+    } else if (active.length > 0) {
       for (const { row, tools } of active) {
         const prefix = `mcp_${serverSlug(row.name, row.id)}__`;
         for (const t of tools) {
@@ -694,10 +700,42 @@ export class McpHub {
       }
     }
 
+    if (activeSkills.length > 0) {
+      definitions.push(
+        {
+          name: MCP_TOOL_SKILLS_LIST,
+          description: `列出当前任务已启用的工作台技能包目录（共 ${activeSkills.length} 个技能，支持按关键词筛选）。`,
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: '可选关键词，按技能名称或用途说明筛选' },
+            },
+            required: [],
+            additionalProperties: false,
+          },
+        },
+        {
+          name: MCP_TOOL_SKILLS_READ,
+          description: '按需读取某个已启用工作台技能包的完整 SKILL.md 说明或附属参考文档（不暴露本机路径）。',
+          parameters: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: '技能名称或 slug（可先用 aic_skills__list 查询）' },
+              file: { type: 'string', description: '可选，读取包内附属文件相对路径（默认 SKILL.md）' },
+            },
+            required: ['name'],
+            additionalProperties: false,
+          },
+        },
+      );
+      dispatch.set(MCP_TOOL_SKILLS_LIST, { mode: 'skill_list' });
+      dispatch.set(MCP_TOOL_SKILLS_READ, { mode: 'skill_read' });
+    }
+
     // 统一附带只读溢出分页回查工具（单次上限 8,000 字符、严格按 taskId 隔离、零磁盘路径）
     definitions.push({
       name: MCP_TOOL_READ_OUTPUT,
-      description: '分页读取因超过 8,000 字符而被截断的 MCP 输出内容（需提供截断提示中的 outputId，单次最多读取 8,000 字符）。',
+      description: '分页读取因超过 8,000 字符而被截断的 MCP 或技能输出内容（需提供截断提示中的 outputId，单次最多读取 8,000 字符）。',
       parameters: {
         type: 'object',
         properties: {
@@ -758,6 +796,26 @@ export class McpHub {
     const { dispatch } = this.exposedToolsFor(taskId, agent);
     const entry = dispatch.get(exposedName);
     if (!entry) throw Errors.notFound(`当前任务未启用这个 MCP 工具：${exposedName}`);
+
+    if (entry.mode === 'skill_list') {
+      const q = typeof rawArgs.query === 'string' ? rawArgs.query : '';
+      const res = this.skills
+        ? this.skills.executeSkillList(taskId, agent, q)
+        : { text: wrapProvenance('external_data', '工作台技能目录', '技能库未启用。'), isError: false };
+      return { text: res.text, isError: res.isError, serverName: 'aic-skills', toolName: 'list' };
+    }
+
+    if (entry.mode === 'skill_read') {
+      const name = typeof rawArgs.name === 'string' ? rawArgs.name : '';
+      const file = typeof rawArgs.file === 'string' ? rawArgs.file : undefined;
+      if (!this.skills) {
+        return { text: wrapProvenance('external_data', '工作台技能读取', '技能库未启用。'), isError: true, serverName: 'aic-skills', toolName: 'read' };
+      }
+      const res = this.skills.executeSkillRead(taskId, agent, name, file, (redactedText) =>
+        this.overflow.put({ taskId, serverName: `技能:${name}`, toolName: file || 'SKILL.md', content: redactedText }).id,
+      );
+      return { text: res.text, isError: res.isError, serverName: res.skillName, toolName: 'read', overflowId: res.overflowId };
+    }
 
     if (entry.mode === 'read_output') {
       const outputId = typeof rawArgs.outputId === 'string' ? rawArgs.outputId.trim() : '';

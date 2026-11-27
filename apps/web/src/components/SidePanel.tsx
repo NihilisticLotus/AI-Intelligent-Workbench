@@ -2,7 +2,7 @@ import { ChangesPanel } from './ChangesPanel';
 import type { WorkspaceChanges } from '@aic/protocol';
 // 右侧详细面板：六节、设备折叠偏好与定位请求；拖宽行为保持不变。
 import { useEffect, useRef, useState, type ReactNode } from 'react';
-import type { EventOf, IndependentTaskState, Task, TaskFile, TaskMcpConnections, TaskUsage } from '@aic/protocol';
+import type { EventOf, IndependentTaskState, Task, TaskFile, TaskMcpConnections, TaskSkillsState, TaskUsage } from '@aic/protocol';
 import { setPref, usePref, type SideTab } from '../state/prefs';
 import { api, useApp } from '../state/app';
 import { Icon } from './Icon';
@@ -83,16 +83,24 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
   const [independent, setIndependent] = useState<IndependentTaskState | null>(null);
   const [taskMcp, setTaskMcp] = useState<TaskMcpConnections | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
+  const [taskSkills, setTaskSkills] = useState<TaskSkillsState | null>(null);
+  const [skillsError, setSkillsError] = useState<string | null>(null);
   const [mcpBusy, setMcpBusy] = useState(false);
   const activeTaskIdRef = useRef(task.id);
   const mountedRef = useRef(true);
   useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
-  useEffect(() => { activeTaskIdRef.current = task.id; setTaskMcp(null); setMcpError(null); setMcpBusy(false); }, [task.id]);
+  useEffect(() => {
+    activeTaskIdRef.current = task.id;
+    setTaskMcp(null); setMcpError(null);
+    setTaskSkills(null); setSkillsError(null);
+    setMcpBusy(false);
+  }, [task.id]);
   const [usageError, setUsageError] = useState<string | null>(null), [fileError, setFileError] = useState<string | null>(null), [independentError, setIndependentError] = useState<string | null>(null);
   useEffect(() => { let live = true; void api.taskUsage(task.id).then((v) => { if (live) { setUsage(v); setUsageError(null); } }).catch((e) => { if (live) setUsageError(asApiError(e).message); }); return () => { live = false; }; }, [task.id, usageRevision, conn]);
   useEffect(() => { if (isolated) return; let live = true; void api.taskFiles(task.id).then((v) => { if (live) { setFiles(v); setFileError(null); } }).catch((e) => { if (live) setFileError(asApiError(e).message); }); return () => { live = false; }; }, [task.id, fileRevision, independentRevision, conn, isolated]);
   useEffect(() => { if (task.agent !== 'independent') return; let live = true; void api.independentTask(task.id).then((v) => { if (live) { setIndependent(v); setIndependentError(null); } }).catch((e) => { if (live) setIndependentError(asApiError(e).message); }); return () => { live = false; }; }, [task.id, task.agent, task.status, independentRevision, conn]);
   useEffect(() => { let live = true; void api.taskMcp(task.id).then((v) => { if (live) { setTaskMcp(v); setMcpError(null); } }).catch((e) => { if (live) setMcpError(asApiError(e).message); }); return () => { live = false; }; }, [task.id, task.agent, conn]);
+  useEffect(() => { let live = true; void api.taskSkills(task.id).then((v) => { if (live) { setTaskSkills(v); setSkillsError(null); } }).catch((e) => { if (live) setSkillsError(asApiError(e).message); }); return () => { live = false; }; }, [task.id, task.agent, conn]);
   const toggleTaskMcp = async (serverId: string, nextActive: boolean) => {
     if (!taskMcp || mcpBusy) return;
     const reqTaskId = task.id;
@@ -111,8 +119,31 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
       if (mountedRef.current && activeTaskIdRef.current === reqTaskId) setMcpBusy(false);
     }
   };
+  const toggleTaskSkill = async (skillId: string, nextActive: boolean) => {
+    if (!taskSkills || mcpBusy) return;
+    const reqTaskId = task.id;
+    const currentDisabled = taskSkills.skills.filter((s) => s.disabledForTask).map((s) => s.id);
+    const nextDisabled = nextActive ? currentDisabled.filter((id) => id !== skillId) : [...new Set([...currentDisabled, skillId])];
+    setMcpBusy(true);
+    try {
+      const updated = await api.putTaskSkills(reqTaskId, { disabledSkillIds: nextDisabled });
+      if (!mountedRef.current || activeTaskIdRef.current !== reqTaskId) return;
+      setTaskSkills(updated);
+      setSkillsError(null);
+    } catch (e) {
+      if (!mountedRef.current || activeTaskIdRef.current !== reqTaskId) return;
+      setSkillsError(asApiError(e).message);
+    } finally {
+      if (mountedRef.current && activeTaskIdRef.current === reqTaskId) setMcpBusy(false);
+    }
+  };
   const activeMcpCount = (taskMcp?.servers ?? []).filter((s) => s.activeForTask).length;
-  const connectionSummary = activeMcpCount > 0 ? `已连接 ${activeMcpCount} 个 MCP` : historyAvailable ? '已注入历史查询' : '未连接 MCP';
+  const activeSkillCount = (taskSkills?.skills ?? []).filter((s) => s.activeForTask).length;
+  const connParts = [
+    activeMcpCount > 0 ? `${activeMcpCount} MCP` : '',
+    activeSkillCount > 0 ? `${activeSkillCount} 技能` : '',
+  ].filter(Boolean);
+  const connectionSummary = connParts.length > 0 ? `已连接 ${connParts.join(' · ')}` : historyAvailable ? '已注入历史查询' : '未连接 MCP';
   const focus = useStore(detailFocus, (s) => s);
   useEffect(() => { if (!focus || tab !== 'plan') return; const el = document.getElementById('detail-' + focus.section); if (el) { el.scrollIntoView({ block: 'nearest' }); el.focus({ preventScroll: true }); detailFocus.set(() => null); } }, [focus, tab]);
   const value = contextValue(config.usage, independent?.context);
@@ -121,7 +152,7 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
     { key: 'plan', title: '计划', summary: plan ? `${plan.data.items.filter((x) => x.status === 'completed').length} / ${plan.data.items.length}` : '未报告', body: <PlanDetails plan={plan} /> },
     { key: 'context', title: '上下文', summary: contextSummary(value, agentName, modelName), body: <><ContextDetails value={value} agent={agentName} model={modelName} config={config} /><TaskMemoryDetails key={task.id} id={task.id}/>{independentError ? <p className="d-note" role="alert">{independentError}</p> : null}</> },
     { key: 'usage', title: '会话 token 用量', summary: usage ? `${formatTokens(usage.total.totalTokens)} · ${usage.turns} 轮` : usageError ? '读取失败' : '正在读取', body: <UsageDetails usage={usage} independent={independent} config={config} error={usageError} /> },
-    { key: 'connection', title: '连接', summary: connectionSummary, body: <ConnectionDetails agent={agent} historyAvailable={historyAvailable} mcp={taskMcp} mcpError={mcpError} onToggleServer={(id, next) => void toggleTaskMcp(id, next)} busy={mcpBusy} /> },
+    { key: 'connection', title: '连接', summary: connectionSummary, body: <ConnectionDetails agent={agent} historyAvailable={historyAvailable} mcp={taskMcp} mcpError={mcpError} onToggleServer={(id, next) => void toggleTaskMcp(id, next)} skills={taskSkills} skillsError={skillsError} onToggleSkill={(id, next) => void toggleTaskSkill(id, next)} busy={mcpBusy} /> },
     { key: 'output', title: '输出', summary: isolated ? changes ? `${changes.files.length} 个文件` : changesError ? '读取失败' : '正在读取' : files ? `${files.length} 个文件` : fileError ? '读取失败' : '正在读取', body: <OutputDetails taskId={task.id} files={files} error={isolated ? changesError : fileError} changes={isolated ? changes : undefined} isolated={isolated} /> },
   ];
   const tabs: Array<[SideTab, string]> = [['plan', '详细'], ['diff', '改动']];

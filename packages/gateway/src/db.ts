@@ -353,6 +353,32 @@ const MIGRATIONS: string[] = [
      disabled INTEGER NOT NULL DEFAULT 1,
      PRIMARY KEY (task_id, server_id)
    );`,
+  // v30（2.4 步）：能力中心技能库表与按任务临时停用覆盖表（受控副本存于 <dataDir>/skills/<id>/，不改第三方目录）。
+  `CREATE TABLE IF NOT EXISTS skills (
+     id TEXT PRIMARY KEY,
+     slug TEXT NOT NULL UNIQUE,
+     name TEXT NOT NULL,
+     description TEXT NOT NULL DEFAULT '',
+     version TEXT NOT NULL DEFAULT '',
+     content_hash TEXT NOT NULL,
+     source_kind TEXT NOT NULL DEFAULT 'manual',
+     source_label TEXT NOT NULL DEFAULT '手动新建',
+     agents_json TEXT NOT NULL DEFAULT '[]',
+     enabled INTEGER NOT NULL DEFAULT 1,
+     has_scripts INTEGER NOT NULL DEFAULT 0,
+     script_files_json TEXT NOT NULL DEFAULT '[]',
+     risks_approved INTEGER NOT NULL DEFAULT 1,
+     scan_json TEXT NOT NULL,
+     files_json TEXT NOT NULL DEFAULT '[]',
+     created_at INTEGER NOT NULL,
+     updated_at INTEGER NOT NULL
+   );
+   CREATE TABLE IF NOT EXISTS task_skill_overrides (
+     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+     skill_id TEXT NOT NULL REFERENCES skills(id) ON DELETE CASCADE,
+     disabled INTEGER NOT NULL DEFAULT 1,
+     PRIMARY KEY (task_id, skill_id)
+   );`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

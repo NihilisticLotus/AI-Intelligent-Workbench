@@ -1,8 +1,8 @@
-// 能力中心（第 2.3 步）：MCP 工具管家、智能粘贴解析、连接测试与结果限流网关管理界面。
+// 能力中心（第 2.3 / 2.4 步）：MCP 工具管家、技能库（Skills）、静态安全扫描与本机只读导入管理界面。
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   AgentKind, ApiError, CreateMcpServerBody, McpConcurrency, McpParsedCandidate, McpParseResult,
-  McpServerSummary, McpTestResult, McpTransport, PatchMcpServerBody,
+  McpServerSummary, McpTestResult, McpTransport, PatchMcpServerBody, SkillSummary,
 } from '@aic/protocol';
 import { toApiError } from '../api/http';
 import { Icon } from '../components/Icon';
@@ -10,6 +10,7 @@ import { confirmDialog, ErrorNotice } from '../components/ui';
 import { agentFallback, clock } from '../lib/format';
 import { api, useApp, useRemoteAccess } from '../state/app';
 import { toast, toastError } from '../state/ui';
+import { SkillsPanel } from './skills-panel';
 
 interface KvRow {
   key: string;
@@ -115,14 +116,26 @@ function formatLabel(fmt: McpParseResult['format']): string {
   return '单行启动命令';
 }
 
-export function CapabilitiesPage({ initialServers }: { initialServers?: McpServerSummary[] | null }) {
+export function CapabilitiesPage({
+  initialServers,
+  initialSkills,
+  initialTab,
+}: {
+  initialServers?: McpServerSummary[] | null;
+  initialSkills?: SkillSummary[] | null;
+  initialTab?: 'mcp' | 'skills';
+}) {
   const remote = useRemoteAccess();
   const knownAgents = useApp((s) => s.agents);
-  const [tab, setTab] = useState<'mcp' | 'skills'>('mcp');
+  const [tab, setTab] = useState<'mcp' | 'skills'>(initialTab ?? 'mcp');
   const [servers, setServers] = useState<McpServerSummary[]>(initialServers ?? []);
+  const [skills, setSkills] = useState<SkillSummary[]>(initialSkills ?? []);
   const [loading, setLoading] = useState(initialServers === undefined);
+  const [skillsLoading, setSkillsLoading] = useState(initialSkills === undefined);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
+  const [skillsError, setSkillsError] = useState<ApiError | null>(null);
+  const [skillCreateToken, setSkillCreateToken] = useState(0);
 
   const [editing, setEditing] = useState<McpFormState | null>(null);
   const [pasteText, setPasteText] = useState('');
@@ -137,6 +150,25 @@ export function CapabilitiesPage({ initialServers }: { initialServers?: McpServe
 
   const mountedRef = useRef(true);
   const reqIdRef = useRef(0);
+  const skillReqIdRef = useRef(0);
+
+  const loadSkills = useCallback(async (soft = false) => {
+    const id = ++skillReqIdRef.current;
+    if (!soft) setSkillsLoading(true);
+    setSkillsError(null);
+    try {
+      const items = await api.skills();
+      if (!mountedRef.current || id !== skillReqIdRef.current) return;
+      setSkills(items);
+    } catch (e) {
+      if (!mountedRef.current || id !== skillReqIdRef.current) return;
+      setSkillsError(toApiError(e));
+    } finally {
+      if (mountedRef.current && id === skillReqIdRef.current) {
+        setSkillsLoading(false);
+      }
+    }
+  }, []);
 
   const load = useCallback(async (soft = false) => {
     const id = ++reqIdRef.current;
@@ -161,8 +193,9 @@ export function CapabilitiesPage({ initialServers }: { initialServers?: McpServe
   useEffect(() => {
     mountedRef.current = true;
     if (initialServers === undefined) void load(false);
+    if (initialSkills === undefined) void loadSkills(false);
     return () => { mountedRef.current = false; };
-  }, [initialServers, load]);
+  }, [initialServers, initialSkills, load, loadSkills]);
 
   const agentDisplayName = (kind: AgentKind) =>
     knownAgents.find((a) => a.kind === kind)?.displayName ?? agentFallback[kind]?.name ?? kind;
@@ -357,12 +390,23 @@ export function CapabilitiesPage({ initialServers }: { initialServers?: McpServe
       <header className="main-head">
         <h1>能力</h1>
         <div className="cap-head-acts">
-          <button type="button" className="btn" disabled={loading || refreshing} onClick={() => void load(true)}>
+          <button
+            type="button"
+            className="btn"
+            disabled={loading || skillsLoading || refreshing}
+            onClick={() => { void load(true); void loadSkills(true); }}
+          >
             <Icon name="refresh" />{refreshing ? '刷新中…' : '刷新'}
           </button>
-          <button type="button" className="btn primary" disabled={remote || saving} onClick={openCreate}>
-            <Icon name="plus" />添加 MCP
-          </button>
+          {tab === 'mcp' ? (
+            <button type="button" className="btn primary" disabled={remote || saving} onClick={openCreate}>
+              <Icon name="plus" />添加 MCP
+            </button>
+          ) : (
+            <button type="button" className="btn primary" disabled={remote || saving} onClick={() => setSkillCreateToken((n) => n + 1)}>
+              <Icon name="plus" />新建技能
+            </button>
+          )}
         </div>
       </header>
       <div className="content-scroll">
@@ -376,27 +420,27 @@ export function CapabilitiesPage({ initialServers }: { initialServers?: McpServe
               <Icon name="plug" />工具连接（MCP）<span className="cap-count">{servers.length}</span>
             </button>
             <button type="button" role="tab" aria-selected={tab === 'skills'} onClick={() => setTab('skills')}>
-              <Icon name="layers" />技能包（Skills）
+              <Icon name="layers" />技能包（Skills）<span className="cap-count">{skills.length}</span>
             </button>
           </div>
 
           {remote ? (
             <p className="monitor-remote-note" role="status">
-              请到运行 AI Console 的电脑上操作（管理与测试 MCP 工具连接仅限本机）。
+              请到运行 AI Console 的电脑上操作（管理与导入 MCP 工具连接和技能包仅限本机）。
             </p>
           ) : null}
 
-          {error ? <ErrorNotice error={error} onRetry={() => void load(true)} /> : null}
-
           {tab === 'skills' ? (
-            <section className="set-sec cap-section" aria-label="技能包">
-              <div className="cap-empty">
-                <h3>技能包（Skills）将在第 2.4 步开放</h3>
-                <p>第 2.4 步将上线工作台技能库管理、静态安全扫描与本机公开技能目录一键导入（绝不读取任何第三方登录凭据）。</p>
-              </div>
-            </section>
+            <SkillsPanel
+              skills={skills}
+              loading={skillsLoading}
+              error={skillsError}
+              onReload={loadSkills}
+              openCreateToken={skillCreateToken}
+            />
           ) : (
             <>
+              {error ? <ErrorNotice error={error} onRetry={() => void load(true)} /> : null}
               {/* 智能粘贴与添加/编辑表单 */}
               {editing ? (
                 <section className="set-sec cap-section" aria-label={editing.id ? '编辑 MCP 服务' : '添加 MCP 服务'}>

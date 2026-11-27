@@ -32,6 +32,7 @@ import type { readMetadataJson } from './independent/metadata-http';
 import { TaskService } from './tasks';
 import { MonitorService } from './monitor';
 import { McpHub } from './mcp/hub';
+import { SkillService } from './skills/service';
 import { HistoryAccess } from './handoff/history-access';
 import { HandoffExecution } from './handoff/execution';
 import { Git } from './git';
@@ -109,6 +110,8 @@ export interface GatewayOptions {
   secretStore?: SecretStore;
   /** 离线测试注入元数据响应；正式启动不从环境加载替代客户端。 */
   metadataReader?: typeof readMetadataJson;
+  /** 离线测试注入本机技能扫描主目录（绝不碰真实用户目录）。 */
+  skillsHomeDir?: string;
   /** 会话空闲多久后关闭 Agent 进程，默认 30 分钟 */
   idleTimeoutMs?: number;
   noResponseNoticeMs?: number;
@@ -289,7 +292,10 @@ async function startGateway(opts: GatewayOptions, dataDir: string, lock: Instanc
     allowFakeIpProxy: () => independent.getNetwork().allowFakeIpProxy,
   });
   rollback.push(() => mcp.close());
+  const skills = new SkillService(db, dataDir, { homeDir: opts.skillsHomeDir });
+  mcp.skills = skills;
   independentRuntime.mcp = mcp;
+  independentRuntime.skills = skills;
   tasks.mcp = mcp;
   const monitor = new MonitorService(db, {
     events,
@@ -324,7 +330,7 @@ async function startGateway(opts: GatewayOptions, dataDir: string, lock: Instanc
   const accessConfirmation = new AccessConfirmation(db, auth, events, lanPairing, accessAudit, log, opts.accessConfirmationTtlMs);
 
   const services: Services = {
-    db, attachments, independent, independentDiscovery, independentRuntime, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks, monitor, mcp, workspaces,
+    db, attachments, independent, independentDiscovery, independentRuntime, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks, monitor, mcp, skills, workspaces,
     history, port: () => port, lan, lanPairing, accessAudit, accessConfirmation,
     machine: { id: machineId, name: hostname(), os: process.platform === 'win32' ? 'windows' : process.platform },
     version: VERSION,

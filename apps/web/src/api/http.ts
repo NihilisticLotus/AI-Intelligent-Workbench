@@ -23,6 +23,9 @@ import {
   SecurityStatus, UsageCapEvaluation, type PutLanBody, type UpsertUsageCapBody,
   McpParseResult, McpServerSummary, McpTestResult, TaskMcpConnections,
   type CreateMcpServerBody, type PatchMcpServerBody, type PutTaskMcpOverridesBody,
+  ImportLocalSkillsResult, SkillDetail, SkillLocalScanResult, SkillScanReport, SkillSummary, TaskSkillsState,
+  type CreateSkillBody, type ImportLocalSkillsBody, type PatchSkillBody, type PutTaskSkillOverridesBody,
+  type ScanLocalSkillsBody, type ScanSkillContentBody,
 } from '@aic/protocol';
 
 /** 客户端自己产生的错误码（网络断开、超时等），不在服务端协议里 */
@@ -248,6 +251,16 @@ export class HttpClient {
   testMcpServer(id: string) { return this.request('POST', `/mcp/servers/${encodeURIComponent(id)}/test`, { body: {}, parse: McpTestResult }); }
   taskMcp(taskId: string) { return this.request('GET', `/tasks/${encodeURIComponent(taskId)}/mcp`, { parse: TaskMcpConnections }); }
   putTaskMcp(taskId: string, body: PutTaskMcpOverridesBody) { return this.request('PUT', `/tasks/${encodeURIComponent(taskId)}/mcp`, { body, parse: TaskMcpConnections }); }
+  skills() { return this.request('GET', '/skills', { parse: listOf(SkillSummary) }).then((r) => r.items); }
+  skill(id: string) { return this.request('GET', `/skills/${encodeURIComponent(id)}`, { parse: SkillDetail }); }
+  scanSkillContent(body: ScanSkillContentBody) { return this.request('POST', '/skills/scan-content', { body, parse: SkillScanReport }); }
+  createSkill(body: CreateSkillBody) { return this.request('POST', '/skills', { body, parse: SkillDetail }); }
+  patchSkill(id: string, body: PatchSkillBody) { return this.request('PATCH', `/skills/${encodeURIComponent(id)}`, { body, parse: SkillDetail }); }
+  deleteSkill(id: string) { return this.request('DELETE', `/skills/${encodeURIComponent(id)}`, { parse: OkResult }); }
+  scanLocalSkills(body: ScanLocalSkillsBody) { return this.request('POST', '/skills/scan-local', { body, parse: SkillLocalScanResult }); }
+  importLocalSkills(body: ImportLocalSkillsBody) { return this.request('POST', '/skills/import-local', { body, parse: ImportLocalSkillsResult }); }
+  taskSkills(taskId: string) { return this.request('GET', `/tasks/${encodeURIComponent(taskId)}/skills`, { parse: TaskSkillsState }); }
+  putTaskSkills(taskId: string, body: PutTaskSkillOverridesBody) { return this.request('PUT', `/tasks/${encodeURIComponent(taskId)}/skills`, { body, parse: TaskSkillsState }); }
   pairingStart() { return this.request('POST', '/pairing/start', { body: {}, parse: PairingStartResult }); }
   /** kind / tokenDelivery 由 Platform 决定：浏览器要 Cookie + 设备密钥，桌面和手机要 Bearer 令牌 */
   pairingComplete(code: string, deviceName: string, kind: DeviceKind, tokenDelivery: 'cookie' | 'bearer') {

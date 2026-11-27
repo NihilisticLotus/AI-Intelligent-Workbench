@@ -10,6 +10,7 @@ export * from './permissions';
 export * from './security';
 export * from './monitor';
 export * from './mcp';
+export * from './skills';
 import { AlwaysAllowConfirmation } from './permissions';
 import { TaskSource } from './monitor';
 

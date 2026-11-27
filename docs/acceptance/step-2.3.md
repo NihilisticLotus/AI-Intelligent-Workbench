@@ -67,3 +67,31 @@
 ## 备注
 
 - 预览完成后已立即终止临时守护进程并清理 `%TEMP%\aic-preview-*` 目录，未改动 `.aic-data` 或任何外部工具凭据目录。
+
+---
+
+## 第 2.3-R 步审查修复与架构加固补充验收（2026-11-27）
+
+基于 `887c033` 完成全量对抗式代码审查与行业方案调研（对照 Anthropic `ToolSearch` / Claude Code、MetaMCP、Docker MCP Gateway、IBM ContextForge），采纳方案 A 落地 7 项审查缺陷修复与 4 项架构升级（零新增 npm 依赖、零真实付费调用 $0）：
+
+1. **常驻 Stdio 单实例进程池 + Windows 无 Shell 解析（[pool.ts](../../packages/gateway/src/mcp/pool.ts)）**：
+   - 每个启用中的 Stdio MCP 常驻单实例复用于多任务/多轮调用（有状态工具保持上下文、免反复冷启动）；空闲 10 分钟自动回收，45 秒看门狗超时或 `stdout` 单行超 2 MB OOM 防护时同步移出池并 `killTree` 强杀，崩溃后自动拉起自愈；改配置/停用/删除/Gateway 退出（[server.ts](../../packages/gateway/src/server.ts)）立刻回收。
+   - Windows 下通过 `resolveStdioSpawn` / `resolveNpmCmdShim` 将 `npx`/`npm` 及标准 npm `.cmd` 垫片解析为 `node.exe` 直启（严禁 `shell: true`），拒绝非 Node `.cmd`/`.bat` 与 `wsl`/`mshta`/`wscript`/`cscript`。
+2. **全局渐进式工具发现（[hub.ts](../../packages/gateway/src/mcp/hub.ts)）**：
+   - 跨当前任务所有已启用 MCP 总工具数 > 25 或总 Schema > 24 KB 或单服务 > 40 时，自动收敛为全局统一 3 元工具（`aic_mcp__search_tools` / `aic_mcp__describe_tool` / `aic_mcp__call_tool`），支持跨服务检索与同名工具消歧。
+3. **头尾摘要截断 + 任务级沙盒溢出分页回查（[overflow.ts](../../packages/gateway/src/mcp/overflow.ts) + [client.ts](../../packages/gateway/src/mcp/client.ts)）**：
+   - 超过 8,000 字符按 UTF-16 代理对安全切分保留前 70% + 后 30%（避免丢掉末尾报错与劈断表情），完整脱敏正文暂存到受控内存缓存（不透明短 ID `out_xxxxxxxxxxxx`、零本机路径、任务级严格隔离、TTL/删任务清除），提供只读工具 `aic_mcp__read_output` 按页回查（单次上限 8,000 字符且必套 `external_data` 围栏）。
+4. **Streamable HTTP 完整兼容、游标分页与并发/容错修复**：
+   - [client.ts](../../packages/gateway/src/mcp/client.ts) 补齐 `event: message` SSE 解析、`notifications/initialized`、`Mcp-Session-Id` 会话复用与 404 自动重握手，`tools/list` 支持 `nextCursor` 分页（协议上限提升至 500 工具）。
+   - [task-runtime.ts](../../packages/gateway/src/independent/task-runtime.ts) 捕获 MCP 运行时故障转为结构化工具错误交回模型（不再误触发 `recovery_required=1` 锁死任务）；[hub.ts](../../packages/gateway/src/mcp/hub.ts) 修复 `patch()` 改端点未清旧 `tools_json`、`test()` 并发停用覆写状态与 `authenticateBridge` 活动会话核验；[tasks.ts](../../packages/gateway/src/tasks.ts) 补齐启动失败吊销 `mcpBridge`；[SidePanel.tsx](../../apps/web/src/components/SidePanel.tsx) 补齐切换任务与卸载守卫。
+
+### 补充验证结果
+
+- **自动测试**：
+  - `npm run typecheck`：4/4 工作区通过；
+  - `npm test`：**1,295 通过 / 5 跳过 / 0 失败**（`@aic/gateway` 60 文件 892 通过，其中 [mcp.test.ts](../../packages/gateway/test/mcp.test.ts) 扩充至 9 项全通过）；
+  - `npm run build`：457 模块产出构建产物。
+- **隔离预览浏览器实操（`http://127.0.0.1:17904`，`%TEMP%\aic-preview-23r`，0 控制台/页面/网络报错）**：
+  - 验证能力中心新版介绍文案、智能粘贴 `claude mcp add pool-demo ... --paged` 与 DPAPI 加密零明文泄露；
+  - 验证「测试连接」229 ms 通过并显示「3 个工具（分页 2 页：echo / counter / hang）」与「已加入常驻共享池」步骤日志；
+  - 验证任务右侧「详细 → 连接」挂载展示与按任务临时暂停/恢复开关稳定联动；验收后已终止预览进程并清理临时目录。

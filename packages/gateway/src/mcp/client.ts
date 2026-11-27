@@ -1,26 +1,26 @@
-// MCP Stdio 与 HTTP JSON-RPC 2.0 客户端：
-// - stdio：强制 shell:false、windowsHide:true、2.1 环境变量白名单隔离、ProcessRegistry 登记、45 秒看门狗强杀整棵进程树；
-// - http：接入 2.1 统一出站门禁（禁止内网探测与回打本机 Gateway 端口）、禁止重定向、有界响应；
-// - 工具返回：密钥脱敏 + 8,000 字符截断摘要 + 2.1 external_data 防注入围栏。
-import { spawn } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+// MCP Stdio 与 Streamable HTTP JSON-RPC 2.0 客户端（第 2.3-R 步升级）：
+// - stdio：复用 StdioMcpPool 常驻单实例进程池（含 Windows npx/npm 安全解析、空闲回收、2 MB 单行上限与 45 秒看门狗）；
+// - http：接入 2.1 统一出站门禁、完整兼容 Streamable HTTP SSE（event: message + data:）、notifications/initialized 与 Mcp-Session-Id 复用；
+// - tools/list：自动处理 nextCursor 游标分页（带最大页数与工具数上限防死循环）；
+// - 工具返回：密钥脱敏 + UTF-16 安全头尾摘要截断（配套沙盒溢出分页回查提示）+ 2.1 external_data 防注入围栏。
+import { createHash } from 'node:crypto';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { tmpdir } from 'node:os';
-import path from 'node:path';
-import { createInterface } from 'node:readline';
-import { killTree, redactExact } from '@aic/adapters';
+import { redactExact } from '@aic/adapters';
 import { McpToolInfo, type McpTestStep } from '@aic/protocol';
 import type { ProcessRegistry } from '../processes';
-import { buildIsolatedSubprocessEnv } from '../security/env-policy';
 import { assertEgressUrl, createPinnedLookup, type EgressPolicyOptions } from '../security/egress';
 import { wrapProvenance } from '../security/provenance';
 import { Errors } from '../util';
+import { safeSliceHead, safeSliceTail } from './overflow';
+import { MCP_PROTOCOL_VERSION, StdioMcpPool } from './pool';
 
 export const MCP_DEFAULT_TIMEOUT_MS = 45_000;
 export const MCP_MAX_RESULT_CHARS = 8_000;
-export const MCP_MAX_HTTP_BYTES = 512 * 1024;
-const MCP_PROTOCOL_VERSION = '2025-06-18';
+export const MCP_MAX_HTTP_BYTES = 1024 * 1024;
+export const MCP_MAX_TOOLS_PER_SERVER = 500;
+export const MCP_MAX_LIST_PAGES = 10;
+const HTTP_SESSION_TTL_MS = 10 * 60_000;
 
 export interface McpRuntimeConfig {
   id: string;
@@ -35,6 +35,10 @@ export interface McpRuntimeConfig {
 
 export interface McpClientOptions {
   processes?: ProcessRegistry;
+  stdioPool?: StdioMcpPool;
+  httpSessions?: HttpMcpSessionStore;
+  /** 本次探测结束后是否保留常驻进程（例如已停用服务测试完立即回收） */
+  keepWarm?: boolean;
   timeoutMs?: number;
   signal?: AbortSignal;
   egress?: EgressPolicyOptions;
@@ -46,24 +50,102 @@ interface JsonRpcResponse {
   error?: { code?: number; message?: string };
 }
 
-function normalizeTools(raw: unknown): McpToolInfo[] {
-  const list = Array.isArray((raw as { tools?: unknown })?.tools) ? (raw as { tools: unknown[] }).tools : [];
+interface HttpSessionEntry {
+  fingerprint: string;
+  sessionId: string | null;
+  lastUsedAt: number;
+}
+
+/** HTTP Streamable MCP 会话缓存：复用 Mcp-Session-Id 避免每次 tools/call 重复握手。 */
+export class HttpMcpSessionStore {
+  private sessions = new Map<string, HttpSessionEntry>();
+
+  private fingerprint(cfg: McpRuntimeConfig): string {
+    const sortedHeaders = Object.entries(cfg.headers).sort(([a], [b]) => a.localeCompare(b));
+    return createHash('sha256').update(JSON.stringify({ url: cfg.url, headers: sortedHeaders })).digest('hex');
+  }
+
+  get(cfg: McpRuntimeConfig): { sessionId: string | null } | null {
+    const entry = this.sessions.get(cfg.id);
+    if (!entry) return null;
+    if (Date.now() - entry.lastUsedAt > HTTP_SESSION_TTL_MS || entry.fingerprint !== this.fingerprint(cfg)) {
+      this.sessions.delete(cfg.id);
+      return null;
+    }
+    entry.lastUsedAt = Date.now();
+    return { sessionId: entry.sessionId };
+  }
+
+  set(cfg: McpRuntimeConfig, sessionId: string | null): void {
+    this.sessions.set(cfg.id, {
+      fingerprint: this.fingerprint(cfg),
+      sessionId,
+      lastUsedAt: Date.now(),
+    });
+  }
+
+  evict(serverId: string): void {
+    this.sessions.delete(serverId);
+  }
+
+  clearAll(): void {
+    this.sessions.clear();
+  }
+}
+
+function normalizeToolsBatch(raw: unknown): { tools: McpToolInfo[]; nextCursor: string | null } {
+  const rec = raw && typeof raw === 'object' ? (raw as { tools?: unknown; nextCursor?: unknown }) : {};
+  const list = Array.isArray(rec.tools) ? rec.tools : [];
   const out: McpToolInfo[] = [];
-  for (const item of list.slice(0, 200)) {
+  for (const item of list) {
     if (!item || typeof item !== 'object') continue;
-    const rec = item as Record<string, unknown>;
-    if (typeof rec.name !== 'string' || !rec.name.trim()) continue;
-    const description = typeof rec.description === 'string' ? rec.description.slice(0, 1000) : '';
-    const rawSchema = rec.inputSchema && typeof rec.inputSchema === 'object' && !Array.isArray(rec.inputSchema)
-      ? (rec.inputSchema as Record<string, unknown>)
+    const obj = item as Record<string, unknown>;
+    if (typeof obj.name !== 'string' || !obj.name.trim()) continue;
+    const description = typeof obj.description === 'string' ? obj.description.slice(0, 1000) : '';
+    const rawSchema = obj.inputSchema && typeof obj.inputSchema === 'object' && !Array.isArray(obj.inputSchema)
+      ? (obj.inputSchema as Record<string, unknown>)
       : { type: 'object', properties: {} };
     out.push(McpToolInfo.parse({
-      name: rec.name.trim().slice(0, 128),
+      name: obj.name.trim().slice(0, 128),
       description,
       inputSchema: rawSchema,
     }));
   }
-  return out;
+  const nextCursor = typeof rec.nextCursor === 'string' && rec.nextCursor.trim() ? rec.nextCursor.trim() : null;
+  return { tools: out, nextCursor };
+}
+
+/** 自动翻页拉取 tools/list（兼容 nextCursor，带最大页数与总数上限防死循环）。 */
+async function listAllTools(
+  fetchPage: (cursor?: string) => Promise<unknown>,
+): Promise<{ tools: McpToolInfo[]; pages: number; capped: boolean }> {
+  const seenNames = new Set<string>();
+  const seenCursors = new Set<string>();
+  const all: McpToolInfo[] = [];
+  let cursor: string | undefined;
+  let pages = 0;
+  let capped = false;
+
+  while (pages < MCP_MAX_LIST_PAGES) {
+    pages++;
+    const raw = await fetchPage(cursor);
+    const batch = normalizeToolsBatch(raw);
+    for (const tool of batch.tools) {
+      if (seenNames.has(tool.name)) continue;
+      seenNames.add(tool.name);
+      all.push(tool);
+      if (all.length >= MCP_MAX_TOOLS_PER_SERVER) {
+        capped = true;
+        return { tools: all, pages, capped };
+      }
+    }
+    if (!batch.nextCursor || seenCursors.has(batch.nextCursor)) break;
+    seenCursors.add(batch.nextCursor);
+    cursor = batch.nextCursor;
+  }
+
+  if (cursor && pages >= MCP_MAX_LIST_PAGES) capped = true;
+  return { tools: all, pages, capped };
 }
 
 function extractCallText(rawResult: unknown): { text: string; isError: boolean } {
@@ -96,10 +178,11 @@ function extractCallText(rawResult: unknown): { text: string; isError: boolean }
 }
 
 /**
- * 统一封装 MCP 工具返回：
- * 1) 剥除本次注入的明文密钥；
- * 2) 超出 8,000 字符自动截断并附带结构化摘要说明；
- * 3) 包裹 2.1 的 external_data 防伪信封（information only），防范间接提示词注入。
+ * 统一封装 MCP 工具返回（第 2.3-R 步升级）：
+ * 1) 先剥除本次注入的明文密钥，再决定是否存入溢出缓存；
+ * 2) 超出 8,000 字符采用 UTF-16 安全「头尾摘要」截断（默认保留前 70% + 后 30%），避免丢掉关键末尾报错；
+ * 3) 若提供了 overflowId，附上分页回查工具提示（aic_mcp__read_output，零本机路径）；
+ * 4) 包裹 2.1 的 external_data 防伪信封（information only），防范间接提示词注入。
  */
 export function formatMcpToolResult(
   serverName: string,
@@ -107,134 +190,94 @@ export function formatMcpToolResult(
   rawResult: unknown,
   secrets: readonly string[],
   maxChars = MCP_MAX_RESULT_CHARS,
-): { text: string; isError: boolean; truncated: boolean; originalChars: number } {
+  onOverflow?: (redactedText: string) => string | null,
+): { text: string; isError: boolean; truncated: boolean; originalChars: number; overflowId: string | null } {
   const { text: extracted, isError } = extractCallText(rawResult);
   const redacted = secrets.length ? redactExact(extracted, secrets) : extracted;
   const originalChars = redacted.length;
   const truncated = originalChars > maxChars;
-  const body = truncated
-    ? `【MCP 返回已自动限流截断：原始长度 ${originalChars} 字符，已保留前 ${maxChars} 字符；如需其余内容请缩小查询范围。】\n${redacted.slice(0, maxChars)}\n……（以下省略 ${originalChars - maxChars} 字符）`
-    : redacted || '（工具返回为空）';
+  let overflowId: string | null = null;
+  let body: string;
+
+  if (truncated) {
+    overflowId = onOverflow ? onOverflow(redacted) : null;
+    const readHint = overflowId
+      ? `如需查看中间省略内容，请调用 aic_mcp__read_output（outputId="${overflowId}"，指定 offset 与 limit，单次最多读取 8,000 字符）。`
+      : '如需其余内容请缩小查询范围。';
+
+    if (maxChars >= 200) {
+      const headBudget = Math.floor(maxChars * 0.7);
+      const tailBudget = maxChars - headBudget;
+      const head = safeSliceHead(redacted, headBudget);
+      const tail = safeSliceTail(redacted, tailBudget);
+      const omitted = Math.max(0, originalChars - head.length - tail.length);
+      body = `【MCP 返回已自动限流截断：原始长度 ${originalChars} 字符，已保留头部 ${head.length} 字符与尾部 ${tail.length} 字符（中间省略 ${omitted} 字符）；${readHint}】\n${head}\n\n……（中间省略 ${omitted} 字符，起始偏移 offset=${head.length}）……\n\n${tail}`;
+    } else {
+      const head = safeSliceHead(redacted, maxChars);
+      body = `【MCP 返回已自动限流截断：原始长度 ${originalChars} 字符，已保留前 ${head.length} 字符；${readHint}】\n${head}\n……（以下省略 ${originalChars - head.length} 字符）`;
+    }
+  } else {
+    body = redacted || '（工具返回为空）';
+  }
+
   const fenced = wrapProvenance('external_data', `MCP 工具 ${serverName} / ${toolName}`, body);
-  return { text: fenced, isError, truncated, originalChars };
+  return { text: fenced, isError, truncated, originalChars, overflowId };
 }
 
-/** 在受控子进程（无黑框、环境变量白名单、看门狗强杀）中执行一次 stdio MCP 会话并立即清理进程树。 */
-async function withStdioMcp<T>(
-  cfg: McpRuntimeConfig,
-  opts: McpClientOptions,
-  run: (rpc: (method: string, params?: Record<string, unknown>) => Promise<unknown>, notify: (method: string, params?: Record<string, unknown>) => void) => Promise<T>,
-): Promise<T> {
-  if (!cfg.command) throw Errors.badRequest('MCP 服务缺少启动命令');
-  const timeoutMs = opts.timeoutMs ?? MCP_DEFAULT_TIMEOUT_MS;
-  const home = mkdtempSync(path.join(tmpdir(), 'aic-mcp-'));
-  const env = buildIsolatedSubprocessEnv({ home, extraVars: cfg.env });
+/**
+ * 解析 MCP Streamable HTTP 返回体：
+ * 同时兼容 application/json 与 text/event-stream（含 event: message / 注释行 / 多事件流）。
+ */
+export function parseHttpMcpBody(
+  rawText: string,
+  contentType: string,
+  expectedId?: number,
+): JsonRpcResponse {
+  const trimmed = rawText.trim();
+  if (!trimmed) return { result: {} };
 
-  const child = spawn(cfg.command, cfg.args, {
-    cwd: home,
-    env,
-    shell: false,
-    windowsHide: true,
-    stdio: ['pipe', 'pipe', 'pipe'],
-  });
-  const pid = child.pid;
-  const startedAt = Date.now();
-  if (pid) {
-    opts.processes?.started({ pid, agent: 'independent', sessionId: `mcp:${cfg.id}`, startedAt });
+  const looksLikeSse = /\btext\/event-stream\b/i.test(contentType)
+    || /^(?:event:|data:|:)/m.test(trimmed);
+
+  if (!looksLikeSse) {
+    try {
+      return JSON.parse(trimmed) as JsonRpcResponse;
+    } catch {
+      throw new Error('MCP HTTP 服务返回的内容不是有效的 JSON-RPC 响应');
+    }
   }
 
-  let nextId = 1;
-  const pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
-  let settledExit = false;
-  let stderrTail = '';
-  const secrets = Object.values(cfg.env).filter(Boolean);
-
-  const rejectAll = (err: Error) => {
-    for (const entry of pending.values()) {
-      clearTimeout(entry.timer);
-      entry.reject(err);
+  const events = trimmed.split(/\r?\n\r?\n/);
+  const parsedList: JsonRpcResponse[] = [];
+  for (const block of events) {
+    const dataLines = block
+      .split(/\r?\n/)
+      .filter((line) => line.startsWith('data:'))
+      .map((line) => line.slice(5).trimStart());
+    if (!dataLines.length) continue;
+    const payload = dataLines.join('\n').trim();
+    if (!payload || payload === '[DONE]') continue;
+    try {
+      const obj = JSON.parse(payload) as JsonRpcResponse;
+      if (obj && typeof obj === 'object') parsedList.push(obj);
+    } catch {
+      // 忽略 SSE 心跳或非 JSON 注释块
     }
-    pending.clear();
-  };
-
-  child.stderr?.on('data', (chunk: Buffer) => {
-    stderrTail = (stderrTail + chunk.toString('utf8')).slice(-800);
-  });
-  child.stdin?.on('error', () => { /* 子进程提前退出时的 EPIPE 由 exit/close 处理 */ });
-
-  const rl = createInterface({ input: child.stdout!, crlfDelay: Infinity });
-  rl.on('line', (line) => {
-    if (!line.trim()) return;
-    let msg: JsonRpcResponse;
-    try { msg = JSON.parse(line) as JsonRpcResponse; } catch { return; }
-    if (typeof msg.id !== 'number') return;
-    const entry = pending.get(msg.id);
-    if (!entry) return;
-    pending.delete(msg.id);
-    clearTimeout(entry.timer);
-    if (msg.error) {
-      const m = msg.error.message ? redactExact(msg.error.message, secrets) : `MCP 错误 (${msg.error.code ?? -1})`;
-      entry.reject(new Error(m));
-    } else {
-      entry.resolve(msg.result);
-    }
-  });
-
-  const onExit = (code: number | null, sig: string | null) => {
-    if (settledExit) return;
-    settledExit = true;
-    const hint = stderrTail.trim() ? `：${redactExact(stderrTail.trim(), secrets).slice(0, 200)}` : '';
-    rejectAll(new Error(`MCP 进程提前退出（code=${code ?? 'null'}, signal=${sig ?? 'null'}）${hint}`));
-  };
-  child.once('error', (err) => {
-    if (settledExit) return;
-    settledExit = true;
-    rejectAll(new Error(`无法启动 MCP 命令（${cfg.command}）：${err.message}`));
-  });
-  child.once('exit', onExit);
-
-  const onAbort = () => {
-    rejectAll(new Error('MCP 调用已取消'));
-    if (pid) void killTree(pid);
-  };
-  if (opts.signal?.aborted) {
-    onAbort();
-  } else {
-    opts.signal?.addEventListener('abort', onAbort, { once: true });
   }
 
-  const notify = (method: string, params?: Record<string, unknown>) => {
-    if (!child.stdin || child.stdin.destroyed) return;
-    child.stdin.write(JSON.stringify({ jsonrpc: '2.0', method, ...(params ? { params } : {}) }) + '\n');
-  };
+  if (!parsedList.length) {
+    throw new Error('MCP HTTP SSE 响应中未找到有效的 JSON-RPC 消息');
+  }
+  if (expectedId !== undefined) {
+    const matched = parsedList.find((m) => m.id === expectedId);
+    if (matched) return matched;
+  }
+  return parsedList.at(-1)!;
+}
 
-  const rpc = (method: string, params?: Record<string, unknown>): Promise<unknown> => {
-    if (settledExit) return Promise.reject(new Error('MCP 进程已退出'));
-    if (opts.signal?.aborted) return Promise.reject(new Error('MCP 调用已取消'));
-    const id = nextId++;
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        pending.delete(id);
-        reject(new Error(`MCP 响应超过 ${Math.round(timeoutMs / 1000)} 秒未返回，已自动中止并回收进程`));
-        if (pid) void killTree(pid);
-      }, timeoutMs);
-      timer.unref?.();
-      pending.set(id, { resolve, reject, timer });
-      child.stdin?.write(JSON.stringify({ jsonrpc: '2.0', id, method, ...(params ? { params } : {}) }) + '\n');
-    });
-  };
-
-  try {
-    return await run(rpc, notify);
-  } finally {
-    opts.signal?.removeEventListener('abort', onAbort);
-    rl.close();
-    rejectAll(new Error('MCP 会话已结束'));
-    if (pid) {
-      await killTree(pid);
-      opts.processes?.exited(pid);
-    }
-    try { rmSync(home, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 }); } catch { /* 忽略临时目录占用 */ }
+class HttpStatusError extends Error {
+  constructor(public statusCode: number, message: string) {
+    super(message);
   }
 }
 
@@ -244,13 +287,13 @@ async function postHttpMcp(
   opts: McpClientOptions,
   payload: Record<string, unknown>,
   sessionHeader?: string | null,
-): Promise<{ json: JsonRpcResponse; sessionId: string | null }> {
+  isNotification = false,
+): Promise<{ json: JsonRpcResponse; sessionId: string | null; statusCode: number }> {
   if (!cfg.url) throw Errors.badRequest('MCP 服务缺少远程地址');
   const timeoutMs = opts.timeoutMs ?? MCP_DEFAULT_TIMEOUT_MS;
   const parsed = new URL(cfg.url);
   const hostNoBrackets = parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase();
   const isLoopbackExplicit = hostNoBrackets === '127.0.0.1' || hostNoBrackets === '::1';
-  // 允许用户显式配置本机 HTTP MCP（但通过 blockedLocalPorts 严格禁止回打 Gateway 自身端口，且禁止云元数据与内网探测）
   const policy: EgressPolicyOptions = {
     allowLocalhost: hostNoBrackets === 'localhost',
     allowExplicitPrivateIp: isLoopbackExplicit,
@@ -291,20 +334,25 @@ async function postHttpMcp(
       });
       res.on('error', reject);
       res.on('end', () => {
-        const rawText = Buffer.concat(chunks).toString('utf8').trim();
-        if (!res.statusCode || res.statusCode >= 400) {
-          return reject(new Error(`MCP HTTP 服务返回错误状态（HTTP ${res.statusCode ?? 0}）`));
+        const statusCode = res.statusCode ?? 0;
+        const rawText = Buffer.concat(chunks).toString('utf8');
+        const nextSession = typeof res.headers['mcp-session-id'] === 'string'
+          ? res.headers['mcp-session-id']
+          : sessionHeader ?? null;
+        if (isNotification) {
+          // notifications/initialized 返回 200 / 202 / 204 均视为成功；部分简化服务未实现通知端点返回 400/404/405 也不阻断
+          return resolve({ json: { result: {} }, sessionId: nextSession, statusCode });
         }
-        const nextSession = typeof res.headers['mcp-session-id'] === 'string' ? res.headers['mcp-session-id'] : sessionHeader ?? null;
-        // 兼容 Streamable HTTP 返回 JSON 或 SSE data: 行
-        const jsonText = rawText.startsWith('data:')
-          ? rawText.split(/\r?\n/).filter((l) => l.startsWith('data:')).map((l) => l.slice(5).trim()).filter(Boolean).at(-1) ?? ''
-          : rawText;
-        if (!jsonText) return resolve({ json: { result: {} }, sessionId: nextSession });
+        if (!statusCode || statusCode >= 400) {
+          return reject(new HttpStatusError(statusCode, `MCP HTTP 服务返回错误状态（HTTP ${statusCode}）`));
+        }
+        const ct = typeof res.headers['content-type'] === 'string' ? res.headers['content-type'] : '';
         try {
-          resolve({ json: JSON.parse(jsonText) as JsonRpcResponse, sessionId: nextSession });
-        } catch {
-          reject(new Error('MCP HTTP 服务返回的内容不是有效的 JSON-RPC 响应'));
+          const expectedId = typeof payload.id === 'number' ? payload.id : undefined;
+          const json = parseHttpMcpBody(rawText, ct, expectedId);
+          resolve({ json, sessionId: nextSession, statusCode });
+        } catch (err) {
+          reject(err instanceof Error ? err : new Error(String(err)));
         }
       });
     });
@@ -325,32 +373,7 @@ async function postHttpMcp(
   });
 }
 
-/** 测试 MCP 连接：执行 initialize + tools/list，返回分步中文日志与工具清单。 */
-export async function probeMcpServer(
-  cfg: McpRuntimeConfig,
-  opts: McpClientOptions = {},
-): Promise<{ steps: McpTestStep[]; tools: McpToolInfo[] }> {
-  const steps: McpTestStep[] = [];
-  if (cfg.transport === 'stdio') {
-    const tools = await withStdioMcp(cfg, opts, async (rpc, notify) => {
-      steps.push({ step: '启动服务', ok: true, detail: `已按白名单隔离环境无黑框启动：${cfg.command}` });
-      await rpc('initialize', {
-        protocolVersion: MCP_PROTOCOL_VERSION,
-        capabilities: {},
-        clientInfo: { name: 'ai-console', version: '0.1.0' },
-      });
-      notify('notifications/initialized');
-      steps.push({ step: '协议握手', ok: true, detail: 'MCP initialize 握手成功' });
-      const listed = await rpc('tools/list', {});
-      const parsed = normalizeTools(listed);
-      steps.push({ step: '读取工具清单', ok: true, detail: `发现 ${parsed.length} 个工具${parsed.length > 40 ? '（超过 40 个，调用时将自动折叠为 3 步搜索/查看/执行）' : ''}` });
-      return parsed;
-    });
-    return { steps, tools };
-  }
-
-  // HTTP 传输
-  steps.push({ step: '地址检查', ok: true, detail: `通过安全出站检查：${cfg.url}` });
+async function initializeHttpMcp(cfg: McpRuntimeConfig, opts: McpClientOptions): Promise<string | null> {
   const initRes = await postHttpMcp(cfg, opts, {
     jsonrpc: '2.0',
     id: 1,
@@ -358,52 +381,122 @@ export async function probeMcpServer(
     params: { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: 'ai-console', version: '0.1.0' } },
   });
   if (initRes.json.error) throw new Error(initRes.json.error.message || 'MCP HTTP 握手失败');
-  steps.push({ step: '协议握手', ok: true, detail: 'MCP HTTP initialize 握手成功' });
+  // 遵循 MCP Streamable HTTP 规范发送 notifications/initialized
+  await postHttpMcp(cfg, opts, { jsonrpc: '2.0', method: 'notifications/initialized' }, initRes.sessionId, true).catch(() => {});
+  opts.httpSessions?.set(cfg, initRes.sessionId);
+  return initRes.sessionId;
+}
 
-  const listRes = await postHttpMcp(cfg, opts, {
-    jsonrpc: '2.0',
-    id: 2,
-    method: 'tools/list',
-    params: {},
-  }, initRes.sessionId);
-  if (listRes.json.error) throw new Error(listRes.json.error.message || '读取工具列表失败');
-  const tools = normalizeTools(listRes.json.result);
-  steps.push({ step: '读取工具清单', ok: true, detail: `发现 ${tools.length} 个工具${tools.length > 40 ? '（超过 40 个，调用时将自动折叠为 3 步搜索/查看/执行）' : ''}` });
+/** 测试 MCP 连接：执行 initialize + notifications/initialized + 分页 tools/list，返回分步中文日志与工具清单。 */
+export async function probeMcpServer(
+  cfg: McpRuntimeConfig,
+  opts: McpClientOptions = {},
+): Promise<{ steps: McpTestStep[]; tools: McpToolInfo[] }> {
+  const steps: McpTestStep[] = [];
+  const timeoutMs = opts.timeoutMs ?? MCP_DEFAULT_TIMEOUT_MS;
+
+  if (cfg.transport === 'stdio') {
+    if (!cfg.command) throw Errors.badRequest('MCP 服务缺少启动命令');
+    const ownPool = !opts.stdioPool;
+    const pool = opts.stdioPool ?? new StdioMcpPool({ processes: opts.processes });
+    const spec = { id: cfg.id, name: cfg.name, command: cfg.command, args: cfg.args, env: cfg.env };
+    try {
+      // 测试连接时若已有旧常驻实例，先温和回收再重新握手以验证最新配置
+      await pool.evict(cfg.id);
+      steps.push({ step: '启动服务', ok: true, detail: `已按白名单隔离环境无黑框启动：${cfg.command}` });
+      const { tools, pages, capped } = await listAllTools((cursor) =>
+        pool.rpc(spec, 'tools/list', cursor ? { cursor } : {}, { timeoutMs, signal: opts.signal }),
+      );
+      steps.push({ step: '协议握手', ok: true, detail: 'MCP initialize 与 initialized 握手成功（已加入常驻共享池）' });
+      const extra = [
+        pages > 1 ? `分页 ${pages} 页` : '',
+        capped ? `达到单服务上限 ${MCP_MAX_TOOLS_PER_SERVER}` : '',
+        tools.length > 40 ? '超过 40 个，调用时将自动折叠为渐进式搜索' : '',
+      ].filter(Boolean).join('，');
+      steps.push({ step: '读取工具清单', ok: true, detail: `发现 ${tools.length} 个工具${extra ? `（${extra}）` : ''}` });
+      return { steps, tools };
+    } finally {
+      if (ownPool || opts.keepWarm === false) {
+        await pool.evict(cfg.id);
+      }
+    }
+  }
+
+  // HTTP 传输
+  steps.push({ step: '地址检查', ok: true, detail: `通过安全出站检查：${cfg.url}` });
+  const sessionId = await initializeHttpMcp(cfg, opts);
+  steps.push({ step: '协议握手', ok: true, detail: sessionId ? 'MCP HTTP 握手成功并建立会话复用' : 'MCP HTTP initialize 握手成功' });
+
+  let reqSeq = 2;
+  const { tools, pages, capped } = await listAllTools(async (cursor) => {
+    const listRes = await postHttpMcp(cfg, opts, {
+      jsonrpc: '2.0',
+      id: reqSeq++,
+      method: 'tools/list',
+      params: cursor ? { cursor } : {},
+    }, sessionId);
+    if (listRes.json.error) throw new Error(listRes.json.error.message || '读取工具列表失败');
+    return listRes.json.result;
+  });
+  const extra = [
+    pages > 1 ? `分页 ${pages} 页` : '',
+    capped ? `达到单服务上限 ${MCP_MAX_TOOLS_PER_SERVER}` : '',
+    tools.length > 40 ? '超过 40 个，调用时将自动折叠为渐进式搜索' : '',
+  ].filter(Boolean).join('，');
+  steps.push({ step: '读取工具清单', ok: true, detail: `发现 ${tools.length} 个工具${extra ? `（${extra}）` : ''}` });
+  if (opts.keepWarm === false) opts.httpSessions?.evict(cfg.id);
   return { steps, tools };
 }
 
-/** 调用一次 MCP 工具，返回原始 JSON-RPC result。 */
+/** 调用一次 MCP 工具（优先复用常驻 Stdio 进程池或 HTTP 会话），返回原始 JSON-RPC result。 */
 export async function invokeMcpTool(
   cfg: McpRuntimeConfig,
   toolName: string,
   args: Record<string, unknown>,
   opts: McpClientOptions = {},
 ): Promise<unknown> {
+  const timeoutMs = opts.timeoutMs ?? MCP_DEFAULT_TIMEOUT_MS;
+
   if (cfg.transport === 'stdio') {
-    return withStdioMcp(cfg, opts, async (rpc, notify) => {
-      await rpc('initialize', {
-        protocolVersion: MCP_PROTOCOL_VERSION,
-        capabilities: {},
-        clientInfo: { name: 'ai-console', version: '0.1.0' },
-      });
-      notify('notifications/initialized');
-      return rpc('tools/call', { name: toolName, arguments: args });
-    });
+    if (!cfg.command) throw Errors.badRequest('MCP 服务缺少启动命令');
+    const ownPool = !opts.stdioPool;
+    const pool = opts.stdioPool ?? new StdioMcpPool({ processes: opts.processes });
+    const spec = { id: cfg.id, name: cfg.name, command: cfg.command, args: cfg.args, env: cfg.env };
+    try {
+      return await pool.rpc(spec, 'tools/call', { name: toolName, arguments: args }, { timeoutMs, signal: opts.signal });
+    } finally {
+      if (ownPool) await pool.evict(cfg.id);
+    }
   }
 
-  const initRes = await postHttpMcp(cfg, opts, {
-    jsonrpc: '2.0',
-    id: 1,
-    method: 'initialize',
-    params: { protocolVersion: MCP_PROTOCOL_VERSION, capabilities: {}, clientInfo: { name: 'ai-console', version: '0.1.0' } },
-  });
-  if (initRes.json.error) throw new Error(initRes.json.error.message || 'MCP HTTP 握手失败');
-  const callRes = await postHttpMcp(cfg, opts, {
-    jsonrpc: '2.0',
-    id: 2,
-    method: 'tools/call',
-    params: { name: toolName, arguments: args },
-  }, initRes.sessionId);
-  if (callRes.json.error) throw new Error(callRes.json.error.message || 'MCP 工具调用失败');
-  return callRes.json.result;
+  // HTTP：优先复用已握手的 Mcp-Session-Id，若服务端返回 404 或会话失效则自动重握手一次
+  const cached = opts.httpSessions?.get(cfg);
+  let sessionId = cached ? cached.sessionId : await initializeHttpMcp(cfg, opts);
+
+  const callOnce = async (sid: string | null) => {
+    const callRes = await postHttpMcp(cfg, opts, {
+      jsonrpc: '2.0',
+      id: 2,
+      method: 'tools/call',
+      params: { name: toolName, arguments: args },
+    }, sid);
+    if (callRes.sessionId && callRes.sessionId !== sid) {
+      opts.httpSessions?.set(cfg, callRes.sessionId);
+    }
+    if (callRes.json.error) throw new Error(callRes.json.error.message || 'MCP 工具调用失败');
+    return callRes.json.result;
+  };
+
+  try {
+    return await callOnce(sessionId);
+  } catch (err) {
+    // 只有使用了缓存会话且服务端提示 404/会话失效时，自动重握手重试一次
+    const isSessionExpired = err instanceof HttpStatusError && (err.statusCode === 404 || err.statusCode === 400);
+    if (cached && isSessionExpired && !opts.signal?.aborted) {
+      opts.httpSessions?.evict(cfg.id);
+      sessionId = await initializeHttpMcp(cfg, opts);
+      return await callOnce(sessionId);
+    }
+    throw err;
+  }
 }

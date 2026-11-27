@@ -368,7 +368,7 @@ export function CapabilitiesPage({ initialServers }: { initialServers?: McpServe
       <div className="content-scroll">
         <div className={'page cap-page' + (refreshing ? ' refetch' : '')}>
           <p className="cap-intro">
-            把各 Agent 常用的工具连接（MCP）和技能包收拢到工作台统一管理：密钥只存本机加密库，每次调用自动限流（8,000 字截断）并套上防注入围栏。
+            把各 Agent 常用的工具连接（MCP）和技能包收拢到工作台统一管理：密钥只存本机加密库，进程按需常驻共享并自动回收，工具过多时自动切换渐进式搜索，返回超 8,000 字保留头尾摘要、支持分页回查并套上防注入围栏。
           </p>
 
           <div className="tabs cap-tabs" role="tablist" aria-label="能力分类">

@@ -1,8 +1,12 @@
-// 离线测试用假 MCP Stdio 服务器：支持常规回显、超长输出、防注入测试、>40 工具折叠与超时挂起测试。
+// 离线测试用假 MCP Stdio 服务器（第 2.3-R 步扩展）：
+// 支持常规回显、有状态计数器（验证进程池复用）、故意崩溃（验证崩溃自愈）、分页工具列表、超长单行（验证 OOM 防护）、>40 工具折叠与超时挂起测试。
 import { createInterface } from 'node:readline';
 
 const manyArg = process.argv.find((a) => a.startsWith('--many='));
 const manyCount = manyArg ? Number(manyArg.slice('--many='.length)) : 0;
+const delayListArg = process.argv.find((a) => a.startsWith('--delay-list='));
+const delayListMs = delayListArg ? Number(delayListArg.slice('--delay-list='.length)) : 0;
+const paged = process.argv.includes('--paged');
 
 function buildTools() {
   if (manyCount > 0) {
@@ -23,8 +27,15 @@ function buildTools() {
           repeat: { type: 'integer' },
           checkEnv: { type: 'boolean' },
           delayMs: { type: 'integer' },
+          hugeLineBytes: { type: 'integer' },
+          crash: { type: 'boolean' },
         },
       },
+    },
+    {
+      name: 'counter',
+      description: '有状态自增计数器（用于验证常驻进程复用与进程号不变）',
+      inputSchema: { type: 'object', properties: {} },
     },
     {
       name: 'hang',
@@ -35,6 +46,8 @@ function buildTools() {
 }
 
 const tools = buildTools();
+let count = 0;
+
 function send(id, payload) {
   process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, ...payload }) + '\n');
 }
@@ -51,22 +64,42 @@ for await (const line of rl) {
       result: {
         protocolVersion: params?.protocolVersion ?? '2025-06-18',
         capabilities: { tools: {} },
-        serverInfo: { name: 'fake-mcp', version: '1.0.0' },
+        serverInfo: { name: 'fake-mcp', version: '1.1.0' },
       },
     });
   } else if (method === 'tools/list') {
-    send(id, { result: { tools } });
+    if (delayListMs > 0) await new Promise((r) => setTimeout(r, delayListMs));
+    if (paged) {
+      const cursor = params?.cursor;
+      const mid = Math.ceil(tools.length / 2);
+      if (!cursor) {
+        send(id, { result: { tools: tools.slice(0, mid), nextCursor: 'p2' } });
+      } else {
+        send(id, { result: { tools: tools.slice(mid) } });
+      }
+    } else {
+      send(id, { result: { tools } });
+    }
   } else if (method === 'tools/call') {
     const name = params?.name;
     const args = params?.arguments ?? {};
     if (name === 'hang') {
-      // 故意不回复，等待看门狗强杀
       continue;
     }
     if (args.delayMs && Number(args.delayMs) > 0) {
       await new Promise((r) => setTimeout(r, Number(args.delayMs)));
     }
-    if (name === 'echo') {
+    if (name === 'counter') {
+      count += 1;
+      send(id, { result: { content: [{ type: 'text', text: JSON.stringify({ count, pid: process.pid }) }] } });
+    } else if (name === 'echo') {
+      if (args.crash) {
+        process.exit(2);
+      }
+      if (args.hugeLineBytes && Number(args.hugeLineBytes) > 0) {
+        process.stdout.write('X'.repeat(Number(args.hugeLineBytes)) + '\n');
+        continue;
+      }
       if (args.checkEnv) {
         const info = {
           hasDemoSecret: process.env.DEMO_SECRET === 'fixture-mcp-secret-9x8y',

@@ -1,7 +1,8 @@
-// 能力中心 MCP 工具管家与结果限流网关（第 2.3 步）：
+// 能力中心 MCP 工具管家与结果限流网关（第 2.3-R 步升级）：
 // - 统一托管 MCP 服务配置，敏感环境变量/请求头走 Windows DPAPI secrets 表加密存储；
-// - 一键测试连接与工具清单缓存，超过 40 个工具自动折叠为 search_tools / describe_tool / call_tool 三步；
-// - 为独立 Agent 与第三方 ACP 会话提供统一工具挂载、独占锁并发控制、8,000 字限流截断与防注入信封。
+// - 常驻 Stdio 单实例进程池 + 空闲自动回收 + 崩溃自愈，以及 HTTP Streamable 会话复用；
+// - 全局渐进式工具发现（跨服务总工具 > 25、总 Schema > 24 KB 或单服务 > 40 时自动收敛为全局 3 元工具）；
+// - 头尾摘要截断 + 任务级受控内存溢出分页回查（aic_mcp__read_output，零本机路径暴露）+ 2.1 防注入围栏。
 import { createHash, randomBytes } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { McpServerSpec } from '@aic/adapters';
@@ -17,14 +18,26 @@ import type { PortListInput } from '../security/egress';
 import { wrapProvenance } from '../security/provenance';
 import { Errors, newId, now } from '../util';
 import {
-  formatMcpToolResult, invokeMcpTool, MCP_DEFAULT_TIMEOUT_MS, MCP_MAX_RESULT_CHARS, probeMcpServer,
+  formatMcpToolResult, HttpMcpSessionStore, invokeMcpTool, MCP_DEFAULT_TIMEOUT_MS, MCP_MAX_RESULT_CHARS, probeMcpServer,
   type McpRuntimeConfig,
 } from './client';
+import { MCP_OVERFLOW_MAX_READ_CHARS, McpOverflowStore } from './overflow';
 import {
   validateMcpCommandAndArgs, validateMcpEnvKey, validateMcpHeaderKey, validateMcpUrl,
 } from './parser';
+import { MCP_MAX_STDOUT_LINE_BYTES, MCP_STDIO_IDLE_TTL_MS, StdioMcpPool } from './pool';
 
+/** 单服务工具数超过该阈值时，在卡片上展示「已自动折叠」并触发渐进式发现。 */
 export const MCP_FOLD_THRESHOLD = 40;
+/** 跨全部已启用服务总工具数超过该阈值时，自动切换全局渐进式工具搜索，防止多服务叠爆上下文。 */
+export const MCP_GLOBAL_FOLD_TOOL_THRESHOLD = 25;
+/** 跨全部已启用服务工具 Schema 总字节数超过该阈值时，同样触发全局渐进式工具搜索。 */
+export const MCP_GLOBAL_FOLD_SCHEMA_BYTES = 24_000;
+
+export const MCP_TOOL_SEARCH = 'aic_mcp__search_tools';
+export const MCP_TOOL_DESCRIBE = 'aic_mcp__describe_tool';
+export const MCP_TOOL_CALL = 'aic_mcp__call_tool';
+export const MCP_TOOL_READ_OUTPUT = 'aic_mcp__read_output';
 
 type McpRow = {
   id: string;
@@ -61,7 +74,13 @@ export interface McpHubOptions {
   allowFakeIpProxy?: () => boolean;
   timeoutMs?: number;
   maxResultChars?: number;
+  idleTtlMs?: number;
+  maxStdoutLineBytes?: number;
 }
+
+export type ExposedMcpDispatchEntry =
+  | { serverId: string; mode: 'direct'; toolName: string }
+  | { mode: 'global_search' | 'global_describe' | 'global_call' | 'read_output' };
 
 const tokenDigest = (token: string) => createHash('sha256').update(token).digest('hex');
 
@@ -76,11 +95,21 @@ function safeJson<T>(text: string | null, fallback: T): T {
   try { return JSON.parse(text) as T; } catch { return fallback; }
 }
 
+function endpointSignature(row: Pick<McpRow, 'transport' | 'command' | 'args_json' | 'url'>): string {
+  return JSON.stringify([row.transport, row.command, row.args_json, row.url]);
+}
+
 export class McpHub {
   /** 独占模式（exclusive）服务器的串行队列锁，防止多个会话同时碰撞桌面软件 MCP */
   private exclusiveLocks = new Map<string, Promise<void>>();
   /** ACP 会话临时 MCP Hub 令牌表（内存中只保存 SHA-256 摘要，会话结束或任务删除立即吊销） */
   private bridgeGrants = new Map<string, McpBridgeGrant>();
+  /** 常驻 Stdio 单实例进程池（支持空闲自动回收与崩溃自愈） */
+  private stdioPool: StdioMcpPool;
+  /** HTTP Streamable MCP 会话复用缓存 */
+  private httpSessions = new HttpMcpSessionStore();
+  /** 任务级受控内存溢出分页回查存储（零磁盘路径） */
+  private overflow = new McpOverflowStore();
 
   constructor(
     private db: Db,
@@ -89,14 +118,41 @@ export class McpHub {
     private processes: ProcessRegistry,
     private opts: McpHubOptions,
   ) {
+    this.stdioPool = new StdioMcpPool({
+      processes,
+      idleTtlMs: opts.idleTtlMs ?? MCP_STDIO_IDLE_TTL_MS,
+      maxStdoutLineBytes: opts.maxStdoutLineBytes ?? MCP_MAX_STDOUT_LINE_BYTES,
+    });
     events.bus.on((ev) => {
       if (ev.type === 'session.ended' && ev.sessionId) this.revokeBridge(ev.sessionId);
       if (ev.type === 'task.deleted') {
         for (const [k, g] of this.bridgeGrants) {
           if (g.taskId === ev.data.id) this.bridgeGrants.delete(k);
         }
+        this.overflow.clearTask(ev.data.id);
       }
     });
+  }
+
+  /** 工作台关闭或测试收尾时回收全部常驻 Stdio 进程并清空缓存。 */
+  async close(): Promise<void> {
+    this.bridgeGrants.clear();
+    this.overflow.clearAll();
+    this.httpSessions.clearAll();
+    await this.stdioPool.closeAll();
+  }
+
+  activePoolCount(): number {
+    return this.stdioPool.activeCount();
+  }
+
+  hasPooledProcess(serverId: string): boolean {
+    return this.stdioPool.has(serverId);
+  }
+
+  private async evictRuntime(serverId: string): Promise<void> {
+    this.httpSessions.evict(serverId);
+    await this.stdioPool.evict(serverId);
   }
 
   private getRow(id: string): McpRow {
@@ -243,6 +299,7 @@ export class McpHub {
     const headerPrepared = await this.prepareSecrets(body.headerValues, validateMcpHeaderKey);
 
     const ts = now();
+    let shouldEvict = false;
     this.db.tx(() => {
       const fresh = this.getRow(id);
       if (nextName.toLowerCase() !== fresh.name.toLowerCase()) {
@@ -271,16 +328,24 @@ export class McpHub {
 
       const enabled = body.enabled !== undefined ? body.enabled : !!fresh.enabled;
       const endpointChanged = nextTransport !== fresh.transport
-        || nextCommand !== fresh.command
-        || nextUrl !== fresh.url
-        || JSON.stringify(nextArgs) !== fresh.args_json;
+        || (nextTransport === 'stdio' ? nextCommand : null) !== fresh.command
+        || (nextTransport === 'http' ? nextUrl : null) !== fresh.url
+        || JSON.stringify(nextTransport === 'stdio' ? nextArgs : []) !== fresh.args_json;
+      const credentialsChanged = envPrepared.length > 0
+        || headerPrepared.length > 0
+        || (body.removeEnvKeys?.length ?? 0) > 0
+        || (body.removeHeaderKeys?.length ?? 0) > 0;
+      shouldEvict = !enabled || endpointChanged || credentialsChanged;
+
       const nextStatus = !enabled ? 'disabled' : endpointChanged ? 'idle' : (fresh.status === 'disabled' ? 'idle' : fresh.status);
+      // 修改了启动命令/参数/地址后必须同步清空旧的工具清单缓存，避免模型拿旧工具去调新服务
+      const nextToolsJson = endpointChanged ? '[]' : fresh.tools_json;
 
       this.db.run(
         `UPDATE mcp_servers
          SET name = ?, description = ?, transport = ?, command = ?, args_json = ?, url = ?,
              env_refs_json = ?, header_refs_json = ?, concurrency = ?, agents_json = ?,
-             enabled = ?, status = ?, last_error = ?, updated_at = ?
+             enabled = ?, status = ?, last_error = ?, tools_json = ?, updated_at = ?
          WHERE id = ?`,
         nextName,
         body.description ?? fresh.description,
@@ -295,6 +360,7 @@ export class McpHub {
         enabled ? 1 : 0,
         nextStatus,
         endpointChanged ? null : fresh.last_error,
+        nextToolsJson,
         ts,
         id,
       );
@@ -302,10 +368,11 @@ export class McpHub {
       for (const secId of obsoleteSecrets) this.secrets.delete(secId);
     });
 
+    if (shouldEvict) await this.evictRuntime(id);
     return this.get(id);
   }
 
-  delete(id: string): void {
+  async delete(id: string): Promise<void> {
     this.db.tx(() => {
       const row = this.getRow(id);
       const envRefs = safeJson<Record<string, string>>(row.env_refs_json, {});
@@ -315,6 +382,7 @@ export class McpHub {
         this.secrets.delete(secId);
       }
     });
+    await this.evictRuntime(id);
   }
 
   private async resolveRuntimeConfig(row: McpRow): Promise<{ cfg: McpRuntimeConfig; secretValues: string[] }> {
@@ -356,7 +424,7 @@ export class McpHub {
     };
   }
 
-  private async withConcurrency<T>(row: McpRow, fn: () => Promise<T>): Promise<T> {
+  private async withConcurrency<T>(row: Pick<McpRow, 'id' | 'concurrency'>, fn: () => Promise<T>): Promise<T> {
     if (row.concurrency !== 'exclusive') return fn();
     const prev = this.exclusiveLocks.get(row.id) ?? Promise.resolve();
     let release!: () => void;
@@ -374,12 +442,20 @@ export class McpHub {
 
   async test(id: string, signal?: AbortSignal): Promise<McpTestResult> {
     const row = this.getRow(id);
+    const startSig = endpointSignature(row);
     const started = Date.now();
-    this.db.run("UPDATE mcp_servers SET status = 'starting', updated_at = ? WHERE id = ?", started, id);
+    this.db.run(
+      "UPDATE mcp_servers SET status = CASE WHEN enabled = 1 THEN 'starting' ELSE 'disabled' END, updated_at = ? WHERE id = ?",
+      started,
+      id,
+    );
     try {
       const { cfg } = await this.resolveRuntimeConfig(row);
       const { steps, tools } = await this.withConcurrency(row, () => probeMcpServer(cfg, {
         processes: this.processes,
+        stdioPool: this.stdioPool,
+        httpSessions: this.httpSessions,
+        keepWarm: !!row.enabled,
         timeoutMs: this.opts.timeoutMs ?? MCP_DEFAULT_TIMEOUT_MS,
         signal,
         egress: {
@@ -387,12 +463,34 @@ export class McpHub {
           allowFakeIpProxy: this.opts.allowFakeIpProxy?.() ?? false,
         },
       }));
+
+      // 探测耗时较长，写回前重新读取最新行，避免覆盖测试期间并发发生的停用、改配置或删除操作
+      const latest = this.db.get<McpRow>('SELECT * FROM mcp_servers WHERE id = ?', id);
+      if (!latest) {
+        await this.evictRuntime(id);
+        throw Errors.notFound('该 MCP 服务在测试过程中已被删除');
+      }
+      if (endpointSignature(latest) !== startSig) {
+        await this.evictRuntime(id);
+        const server = this.toSummary(latest);
+        return McpTestResult.parse({
+          server,
+          ok: true,
+          durationMs: Math.max(0, Date.now() - started),
+          steps: [...steps, { step: '状态核对', ok: true, detail: '测试期间配置已变更，未覆盖新配置状态，请重新测试' }],
+          tools: server.tools,
+          folded: server.toolsFolded,
+          error: null,
+        });
+      }
+
+      if (!latest.enabled) await this.evictRuntime(id);
       const finished = now();
       this.db.run(
         `UPDATE mcp_servers
-         SET status = ?, last_error = NULL, last_checked_at = ?, tools_json = ?, updated_at = ?
+         SET status = CASE WHEN enabled = 1 THEN 'ready' ELSE 'disabled' END,
+             last_error = NULL, last_checked_at = ?, tools_json = ?, updated_at = ?
          WHERE id = ?`,
-        row.enabled ? 'ready' : 'disabled',
         finished,
         JSON.stringify(tools),
         finished,
@@ -409,18 +507,25 @@ export class McpHub {
         error: null,
       });
     } catch (err) {
+      const latest = this.db.get<McpRow>('SELECT * FROM mcp_servers WHERE id = ?', id);
+      if (!latest) {
+        await this.evictRuntime(id);
+        throw Errors.notFound('该 MCP 服务在测试过程中已被删除');
+      }
       const message = (err instanceof Error ? err.message : String(err)).slice(0, 500);
-      const finished = now();
-      this.db.run(
-        `UPDATE mcp_servers
-         SET status = ?, last_error = ?, last_checked_at = ?, updated_at = ?
-         WHERE id = ?`,
-        row.enabled ? 'error' : 'disabled',
-        message,
-        finished,
-        finished,
-        id,
-      );
+      if (endpointSignature(latest) === startSig) {
+        const finished = now();
+        this.db.run(
+          `UPDATE mcp_servers
+           SET status = CASE WHEN enabled = 1 THEN 'error' ELSE 'disabled' END,
+               last_error = ?, last_checked_at = ?, updated_at = ?
+           WHERE id = ?`,
+          message,
+          finished,
+          finished,
+          id,
+        );
+      }
       const server = this.get(id);
       return McpTestResult.parse({
         server,
@@ -480,81 +585,99 @@ export class McpHub {
     return this.taskConnections(taskId, agent);
   }
 
-  private activeRowsFor(taskId: string, agent: AgentKind): McpRow[] {
+  private activeRowsWithTools(taskId: string, agent: AgentKind): Array<{ row: McpRow; tools: McpToolInfo[] }> {
     const disabledSet = new Set(
       this.db
         .all<{ server_id: string }>('SELECT server_id FROM task_mcp_overrides WHERE task_id = ? AND disabled = 1', taskId)
         .map((r) => r.server_id),
     );
-    return this.db
-      .all<McpRow>('SELECT * FROM mcp_servers WHERE enabled = 1 ORDER BY created_at ASC')
-      .filter((row) => {
-        if (disabledSet.has(row.id)) return false;
-        const agents = safeJson<AgentKind[]>(row.agents_json, []);
-        return agents.length === 0 || agents.includes(agent);
-      });
+    const out: Array<{ row: McpRow; tools: McpToolInfo[] }> = [];
+    for (const row of this.db.all<McpRow>('SELECT * FROM mcp_servers WHERE enabled = 1 ORDER BY created_at ASC')) {
+      if (disabledSet.has(row.id)) continue;
+      const agents = safeJson<AgentKind[]>(row.agents_json, []);
+      if (agents.length > 0 && !agents.includes(agent)) continue;
+      const tools = safeJson<McpToolInfo[]>(row.tools_json, []);
+      if (tools.length > 0) out.push({ row, tools });
+    }
+    return out;
   }
 
   /**
-   * 为独立 Agent 或 ACP Hub 生成当前任务可见的工具声明。
-   * 单服务工具数 > 40 时自动折叠为 search_tools / describe_tool / call_tool 三步，防止撑爆模型上下文。
+   * 为独立 Agent 或 ACP Hub 生成当前任务可见的工具声明（第 2.3-R 步全局渐进式发现）：
+   * - 当所有已启用 MCP 总工具数 ≤ 25 且 Schema 总量 ≤ 24 KB（且单服务 ≤ 40）时直出工具，零额外往返；
+   * - 超过任一阈值时自动收敛为全局统一的 3 个元工具（aic_mcp__search_tools / describe_tool / call_tool）；
+   * - 只要存在可用 MCP，同时提供只读分页回查工具 aic_mcp__read_output（用于读取被限流截断的中间内容）。
    */
   exposedToolsFor(taskId: string, agent: AgentKind): {
     definitions: IndependentModelToolDefinition[];
-    dispatch: Map<string, { serverId: string; mode: 'direct'; toolName: string } | { serverId: string; mode: 'search' | 'describe' | 'call' }>;
+    dispatch: Map<string, ExposedMcpDispatchEntry>;
+    globalFolded: boolean;
   } {
-    const rows = this.activeRowsFor(taskId, agent);
+    const active = this.activeRowsWithTools(taskId, agent);
     const definitions: IndependentModelToolDefinition[] = [];
-    const dispatch = new Map<string, { serverId: string; mode: 'direct'; toolName: string } | { serverId: string; mode: 'search' | 'describe' | 'call' }>();
+    const dispatch = new Map<string, ExposedMcpDispatchEntry>();
 
-    for (const row of rows) {
-      const tools = safeJson<McpToolInfo[]>(row.tools_json, []);
-      if (!tools.length) continue;
-      const prefix = `mcp_${serverSlug(row.name, row.id)}__`;
+    if (!active.length) {
+      return { definitions, dispatch, globalFolded: false };
+    }
 
-      if (tools.length > MCP_FOLD_THRESHOLD) {
-        const searchName = `${prefix}search_tools`;
-        const describeName = `${prefix}describe_tool`;
-        const callName = `${prefix}call_tool`;
-        definitions.push(
-          {
-            name: searchName,
-            description: `在 MCP 服务「${row.name}」（共 ${tools.length} 个工具，已折叠）中按关键词搜索工具名称与说明。`,
-            parameters: {
-              type: 'object',
-              properties: { query: { type: 'string', description: '搜索关键词（留空返回前 20 个工具）' } },
-              required: [],
-              additionalProperties: false,
+    const totalTools = active.reduce((sum, item) => sum + item.tools.length, 0);
+    const totalSchemaBytes = active.reduce((sum, item) => sum + item.row.tools_json.length, 0);
+    const anySingleFolded = active.some((item) => item.tools.length > MCP_FOLD_THRESHOLD);
+    const globalFolded = anySingleFolded
+      || totalTools > MCP_GLOBAL_FOLD_TOOL_THRESHOLD
+      || totalSchemaBytes > MCP_GLOBAL_FOLD_SCHEMA_BYTES;
+
+    if (globalFolded) {
+      const serverListDesc = active.map((a) => `${a.row.name}(${a.tools.length})`).join('、');
+      definitions.push(
+        {
+          name: MCP_TOOL_SEARCH,
+          description: `在当前任务已启用的全部 MCP 服务（共 ${active.length} 个服务、${totalTools} 个工具：${serverListDesc}）中按关键词或服务名渐进式搜索工具。`,
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: '搜索关键词（匹配工具名、说明或服务名；留空返回前 20 个工具）' },
+              server: { type: 'string', description: '可选，只搜索指定名称的 MCP 服务' },
             },
+            required: [],
+            additionalProperties: false,
           },
-          {
-            name: describeName,
-            description: `查看 MCP 服务「${row.name}」中指定工具的详细说明与参数结构。`,
-            parameters: {
-              type: 'object',
-              properties: { name: { type: 'string', description: '目标工具名称' } },
-              required: ['name'],
-              additionalProperties: false,
+        },
+        {
+          name: MCP_TOOL_DESCRIBE,
+          description: '查看指定 MCP 工具的完整说明与 JSON 参数结构；请先通过 aic_mcp__search_tools 确认工具名。',
+          parameters: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: '目标工具名称' },
+              server: { type: 'string', description: '可选，当多个 MCP 存在同名工具时用于指定服务名' },
             },
+            required: ['name'],
+            additionalProperties: false,
           },
-          {
-            name: callName,
-            description: `调用 MCP 服务「${row.name}」中的指定工具；请先用 search_tools / describe_tool 确认工具名与参数。`,
-            parameters: {
-              type: 'object',
-              properties: {
-                name: { type: 'string', description: '目标工具名称' },
-                arguments: { type: 'object', description: '工具参数对象' },
-              },
-              required: ['name'],
-              additionalProperties: false,
+        },
+        {
+          name: MCP_TOOL_CALL,
+          description: '调用指定 MCP 服务中的工具；请先用 aic_mcp__search_tools / aic_mcp__describe_tool 核对工具名与参数。',
+          parameters: {
+            type: 'object',
+            properties: {
+              name: { type: 'string', description: '目标工具名称' },
+              server: { type: 'string', description: '可选，目标 MCP 服务名称（多服务存在同名工具时必填）' },
+              arguments: { type: 'object', description: '工具参数对象' },
             },
+            required: ['name'],
+            additionalProperties: false,
           },
-        );
-        dispatch.set(searchName, { serverId: row.id, mode: 'search' });
-        dispatch.set(describeName, { serverId: row.id, mode: 'describe' });
-        dispatch.set(callName, { serverId: row.id, mode: 'call' });
-      } else {
+        },
+      );
+      dispatch.set(MCP_TOOL_SEARCH, { mode: 'global_search' });
+      dispatch.set(MCP_TOOL_DESCRIBE, { mode: 'global_describe' });
+      dispatch.set(MCP_TOOL_CALL, { mode: 'global_call' });
+    } else {
+      for (const { row, tools } of active) {
+        const prefix = `mcp_${serverSlug(row.name, row.id)}__`;
         for (const t of tools) {
           const safeTool = t.name.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 64);
           const exposedName = `${prefix}${safeTool}`;
@@ -571,76 +694,182 @@ export class McpHub {
       }
     }
 
-    return { definitions, dispatch };
+    // 统一附带只读溢出分页回查工具（单次上限 8,000 字符、严格按 taskId 隔离、零磁盘路径）
+    definitions.push({
+      name: MCP_TOOL_READ_OUTPUT,
+      description: '分页读取因超过 8,000 字符而被截断的 MCP 输出内容（需提供截断提示中的 outputId，单次最多读取 8,000 字符）。',
+      parameters: {
+        type: 'object',
+        properties: {
+          outputId: { type: 'string', description: '截断提示中给出的输出编号（如 out_a1b2c3d4e5f6）' },
+          offset: { type: 'integer', description: '起始字符偏移（从 0 开始，默认 0）' },
+          limit: { type: 'integer', description: `本次最多读取字符数（默认 ${MCP_OVERFLOW_MAX_READ_CHARS}，上限 ${MCP_OVERFLOW_MAX_READ_CHARS}）` },
+        },
+        required: ['outputId'],
+        additionalProperties: false,
+      },
+    });
+    dispatch.set(MCP_TOOL_READ_OUTPUT, { mode: 'read_output' });
+
+    return { definitions, dispatch, globalFolded };
   }
 
-  /** 执行某个暴露给模型的 MCP 工具（自动处理折叠三步、独占锁、8,000 字截断与防注入围栏）。 */
+  private resolveGlobalTool(
+    active: Array<{ row: McpRow; tools: McpToolInfo[] }>,
+    targetName: string,
+    serverFilter: string,
+  ):
+    | { ok: true; row: McpRow; tool: McpToolInfo }
+    | { ok: false; message: string } {
+    if (!targetName) return { ok: false, message: '缺少目标工具名称，请先调用 aic_mcp__search_tools 查询。' };
+    const filterLower = serverFilter.trim().toLowerCase();
+    const matches: Array<{ row: McpRow; tool: McpToolInfo }> = [];
+    for (const item of active) {
+      if (filterLower && item.row.name.toLowerCase() !== filterLower) continue;
+      const found = item.tools.find((t) => t.name === targetName);
+      if (found) matches.push({ row: item.row, tool: found });
+    }
+    if (matches.length === 0) {
+      return {
+        ok: false,
+        message: filterLower
+          ? `在服务「${serverFilter}」中未找到名为「${targetName}」的工具。`
+          : `在当前任务已启用的 MCP 服务中未找到名为「${targetName}」的工具，请先调用 aic_mcp__search_tools 查询。`,
+      };
+    }
+    if (matches.length > 1) {
+      const names = matches.map((m) => m.row.name).join('、');
+      return {
+        ok: false,
+        message: `多个 MCP 服务都包含名为「${targetName}」的工具（${names}），请在 server 参数中指明要调用哪一个服务。`,
+      };
+    }
+    return { ok: true, row: matches[0]!.row, tool: matches[0]!.tool };
+  }
+
+  /** 执行某个暴露给模型的 MCP 工具（自动处理全局渐进式搜索、分页回查、常驻池复用、独占锁、头尾截断与防注入围栏）。 */
   async executeExposedTool(
     taskId: string,
     agent: AgentKind,
     exposedName: string,
     rawArgs: Record<string, unknown>,
     signal?: AbortSignal,
-  ): Promise<{ text: string; isError: boolean; serverName: string; toolName: string }> {
+  ): Promise<{ text: string; isError: boolean; serverName: string; toolName: string; overflowId?: string | null }> {
     const { dispatch } = this.exposedToolsFor(taskId, agent);
     const entry = dispatch.get(exposedName);
     if (!entry) throw Errors.notFound(`当前任务未启用这个 MCP 工具：${exposedName}`);
-    const row = this.getRow(entry.serverId);
-    const tools = safeJson<McpToolInfo[]>(row.tools_json, []);
 
-    if (entry.mode === 'search') {
-      const q = typeof rawArgs.query === 'string' ? rawArgs.query.trim().toLowerCase() : '';
-      const matched = tools
-        .filter((t) => !q || t.name.toLowerCase().includes(q) || t.description.toLowerCase().includes(q))
-        .slice(0, 20)
-        .map((t) => `- ${t.name}：${t.description || '无说明'}`);
-      const body = matched.length
-        ? `共匹配 ${matched.length} 个工具（服务共 ${tools.length} 个）：\n${matched.join('\n')}`
-        : `未找到包含「${q}」的工具（服务共 ${tools.length} 个工具）。`;
+    if (entry.mode === 'read_output') {
+      const outputId = typeof rawArgs.outputId === 'string' ? rawArgs.outputId.trim() : '';
+      const offset = typeof rawArgs.offset === 'number' ? rawArgs.offset : 0;
+      const limit = typeof rawArgs.limit === 'number' ? rawArgs.limit : MCP_OVERFLOW_MAX_READ_CHARS;
+      if (!outputId) {
+        return {
+          text: wrapProvenance('external_data', 'MCP 溢出内容回查', '请提供截断提示中的 outputId（例如 out_xxxxxxxxxxxx）。'),
+          isError: true,
+          serverName: 'aic-mcp-hub',
+          toolName: 'read_output',
+        };
+      }
+      const chunk = this.overflow.read(taskId, outputId, offset, limit);
+      if (!chunk) {
+        return {
+          text: wrapProvenance('external_data', 'MCP 溢出内容回查', `未找到编号为「${outputId}」的溢出记录（可能已过期、被清理或不属于当前任务）。`),
+          isError: true,
+          serverName: 'aic-mcp-hub',
+          toolName: 'read_output',
+        };
+      }
+      const tailHint = chunk.nextOffset !== null
+        ? `后续还有内容，可继续传 offset=${chunk.nextOffset} 读取。`
+        : '已读到暂存内容末尾。';
+      const clipHint = chunk.clipped ? `（原始 ${chunk.originalChars} 字符，缓存上限保留前 ${chunk.storedChars} 字符）` : '';
+      const body = `【分页回查 ${chunk.id} · ${chunk.serverName} / ${chunk.toolName}：字符区间 ${chunk.offset}..${chunk.endOffset} / ${chunk.storedChars}${clipHint}。${tailHint}】\n${chunk.slice}`;
       return {
-        text: wrapProvenance('external_data', `MCP 工具目录 ${row.name}`, body),
+        text: wrapProvenance('external_data', `MCP 溢出分页 ${chunk.serverName} / ${chunk.toolName}`, body),
         isError: false,
-        serverName: row.name,
+        serverName: chunk.serverName,
+        toolName: 'read_output',
+      };
+    }
+
+    const active = this.activeRowsWithTools(taskId, agent);
+
+    if (entry.mode === 'global_search') {
+      const q = typeof rawArgs.query === 'string' ? rawArgs.query.trim().toLowerCase() : '';
+      const srvFilter = typeof rawArgs.server === 'string' ? rawArgs.server.trim().toLowerCase() : '';
+      const matched: string[] = [];
+      let totalMatched = 0;
+      let totalAll = 0;
+      for (const { row, tools } of active) {
+        if (srvFilter && !row.name.toLowerCase().includes(srvFilter)) continue;
+        totalAll += tools.length;
+        for (const t of tools) {
+          const hit = !q
+            || t.name.toLowerCase().includes(q)
+            || t.description.toLowerCase().includes(q)
+            || row.name.toLowerCase().includes(q);
+          if (!hit) continue;
+          totalMatched++;
+          if (matched.length < 20) {
+            matched.push(`- [${row.name}] ${t.name}：${t.description || '无说明'}`);
+          }
+        }
+      }
+      const body = matched.length
+        ? `共匹配 ${totalMatched} 个工具（显示前 ${matched.length} 个，检索范围共 ${totalAll} 个）：\n${matched.join('\n')}`
+        : `未找到匹配「${q || srvFilter}」的工具（当前范围共 ${totalAll} 个工具）。`;
+      return {
+        text: wrapProvenance('external_data', 'MCP 全局工具目录', body),
+        isError: false,
+        serverName: 'aic-mcp-hub',
         toolName: 'search_tools',
       };
     }
 
-    if (entry.mode === 'describe') {
+    if (entry.mode === 'global_describe') {
       const targetName = typeof rawArgs.name === 'string' ? rawArgs.name.trim() : '';
-      const found = tools.find((t) => t.name === targetName);
-      if (!found) {
+      const srvFilter = typeof rawArgs.server === 'string' ? rawArgs.server : '';
+      const resolved = this.resolveGlobalTool(active, targetName, srvFilter);
+      if (!resolved.ok) {
         return {
-          text: wrapProvenance('external_data', `MCP 工具目录 ${row.name}`, `找不到名为「${targetName}」的工具。`),
+          text: wrapProvenance('external_data', 'MCP 工具说明', resolved.message),
           isError: true,
-          serverName: row.name,
+          serverName: 'aic-mcp-hub',
           toolName: 'describe_tool',
         };
       }
-      const body = `工具名称：${found.name}\n说明：${found.description || '无'}\n参数结构：\n${JSON.stringify(found.inputSchema, null, 2)}`;
+      const body = `所属服务：${resolved.row.name}\n工具名称：${resolved.tool.name}\n说明：${resolved.tool.description || '无'}\n参数结构：\n${JSON.stringify(resolved.tool.inputSchema, null, 2)}`;
       return {
-        text: wrapProvenance('external_data', `MCP 工具说明 ${row.name} / ${found.name}`, body),
+        text: wrapProvenance('external_data', `MCP 工具说明 ${resolved.row.name} / ${resolved.tool.name}`, body),
         isError: false,
-        serverName: row.name,
+        serverName: resolved.row.name,
         toolName: 'describe_tool',
       };
     }
 
+    let row: McpRow;
     let targetTool: string;
     let callArgs: Record<string, unknown>;
-    if (entry.mode === 'call') {
-      targetTool = typeof rawArgs.name === 'string' ? rawArgs.name.trim() : '';
-      if (!targetTool || !tools.some((t) => t.name === targetTool)) {
+    if (entry.mode === 'global_call') {
+      const targetName = typeof rawArgs.name === 'string' ? rawArgs.name.trim() : '';
+      const srvFilter = typeof rawArgs.server === 'string' ? rawArgs.server : '';
+      const resolved = this.resolveGlobalTool(active, targetName, srvFilter);
+      if (!resolved.ok) {
         return {
-          text: wrapProvenance('external_data', `MCP 工具 ${row.name}`, `未找到名为「${targetTool}」的已登记工具，请先用 search_tools 查询。`),
+          text: wrapProvenance('external_data', 'MCP 工具调用', resolved.message),
           isError: true,
-          serverName: row.name,
-          toolName: targetTool || 'call_tool',
+          serverName: 'aic-mcp-hub',
+          toolName: targetName || 'call_tool',
         };
       }
+      row = resolved.row;
+      targetTool = resolved.tool.name;
       callArgs = rawArgs.arguments && typeof rawArgs.arguments === 'object' && !Array.isArray(rawArgs.arguments)
         ? (rawArgs.arguments as Record<string, unknown>)
         : {};
     } else if (entry.mode === 'direct') {
+      row = this.getRow(entry.serverId);
       targetTool = entry.toolName;
       callArgs = rawArgs;
     } else {
@@ -648,26 +877,60 @@ export class McpHub {
     }
 
     const { cfg, secretValues } = await this.resolveRuntimeConfig(row);
-    const rawResult = await this.withConcurrency(row, () => invokeMcpTool(cfg, targetTool, callArgs, {
-      processes: this.processes,
-      timeoutMs: this.opts.timeoutMs ?? MCP_DEFAULT_TIMEOUT_MS,
-      signal,
-      egress: {
-        blockedLocalPorts: this.opts.blockedLocalPorts,
-        allowFakeIpProxy: this.opts.allowFakeIpProxy?.() ?? false,
-      },
-    }));
+    let rawResult: unknown;
+    try {
+      rawResult = await this.withConcurrency(row, () => invokeMcpTool(cfg, targetTool, callArgs, {
+        processes: this.processes,
+        stdioPool: this.stdioPool,
+        httpSessions: this.httpSessions,
+        timeoutMs: this.opts.timeoutMs ?? MCP_DEFAULT_TIMEOUT_MS,
+        signal,
+        egress: {
+          blockedLocalPorts: this.opts.blockedLocalPorts,
+          allowFakeIpProxy: this.opts.allowFakeIpProxy?.() ?? false,
+        },
+      }));
+    } catch (err) {
+      const message = (err instanceof Error ? err.message : String(err)).slice(0, 500);
+      this.db.run(
+        `UPDATE mcp_servers
+         SET status = CASE WHEN enabled = 1 THEN 'error' ELSE 'disabled' END,
+             last_error = ?, updated_at = ?
+         WHERE id = ?`,
+        message,
+        now(),
+        row.id,
+      );
+      throw err;
+    }
+
     const ts = now();
     this.db.run(
-      'UPDATE mcp_servers SET last_called_at = ?, last_called_tool = ?, status = ?, last_error = NULL, updated_at = ? WHERE id = ?',
+      `UPDATE mcp_servers
+       SET last_called_at = ?, last_called_tool = ?,
+           status = CASE WHEN enabled = 1 THEN 'ready' ELSE 'disabled' END,
+           last_error = NULL, updated_at = ?
+       WHERE id = ?`,
       ts,
       targetTool,
-      row.enabled ? 'ready' : 'disabled',
       ts,
       row.id,
     );
-    const formatted = formatMcpToolResult(row.name, targetTool, rawResult, secretValues, this.opts.maxResultChars ?? MCP_MAX_RESULT_CHARS);
-    return { text: formatted.text, isError: formatted.isError, serverName: row.name, toolName: targetTool };
+    const formatted = formatMcpToolResult(
+      row.name,
+      targetTool,
+      rawResult,
+      secretValues,
+      this.opts.maxResultChars ?? MCP_MAX_RESULT_CHARS,
+      (redactedText) => this.overflow.put({ taskId, serverName: row.name, toolName: targetTool, content: redactedText }).id,
+    );
+    return {
+      text: formatted.text,
+      isError: formatted.isError,
+      serverName: row.name,
+      toolName: targetTool,
+      overflowId: formatted.overflowId,
+    };
   }
 
   // ---------- 第三方 ACP 会话统一 MCP Hub 桥接 ----------
@@ -700,6 +963,14 @@ export class McpHub {
     const match = /^Bearer ([A-Za-z0-9_-]{43})$/.exec(header ?? '');
     const grant = match && this.bridgeGrants.get(tokenDigest(match[1]!));
     if (!grant) throw Errors.unauthorized('MCP 桥接会话无效或已结束');
+    const taskExists = this.db.get('SELECT 1 FROM tasks WHERE id = ?', grant.taskId);
+    if (!taskExists) throw Errors.unauthorized('MCP 桥接所属任务已不存在');
+    // 会话启动瞬间（spawn 阶段）sessions 行尚未插入；若已落库则必须处于 active 状态
+    const sessionRow = this.db.get<{ status: string }>('SELECT status FROM sessions WHERE id = ? AND task_id = ?', grant.sessionId, grant.taskId);
+    if (sessionRow && sessionRow.status !== 'active') {
+      this.revokeBridge(grant.sessionId);
+      throw Errors.unauthorized('MCP 桥接会话已结束');
+    }
     return grant;
   }
 
@@ -719,6 +990,10 @@ export class McpHub {
       };
     }
     if (body.method === 'tools/call') {
+      const activeSession = this.db.get<{ status: string }>('SELECT status FROM sessions WHERE id = ? AND task_id = ?', grant.sessionId, grant.taskId);
+      if (!activeSession || activeSession.status !== 'active') {
+        throw Errors.unauthorized('MCP 桥接会话尚未就绪或已结束');
+      }
       if (typeof body.name !== 'string' || !body.name) throw Errors.badRequest('缺少工具名称');
       const args = body.arguments && typeof body.arguments === 'object' && !Array.isArray(body.arguments)
         ? (body.arguments as Record<string, unknown>)

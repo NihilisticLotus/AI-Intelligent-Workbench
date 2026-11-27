@@ -11,6 +11,7 @@ import type { EventStore } from '../events';
 import type { AttachmentService } from '../attachments';
 import type { ProcessRegistry } from '../processes';
 import type { AgentConnection, SessionHost } from '../agents/registry';
+import { wrapProvenance } from '../security/provenance';
 import { Errors, newId, now } from '../util';
 import { IndependentCatalog } from './catalog';
 import type { PortListInput } from '../security/egress';
@@ -259,7 +260,7 @@ export class IndependentTaskRuntime {
             const args = call.arguments && typeof call.arguments === 'object' && !Array.isArray(call.arguments)
               ? (call.arguments as Record<string, unknown>)
               : {};
-            if (mcpEntry.mode !== 'search' && mcpEntry.mode !== 'describe') {
+            if (mcpEntry.mode !== 'global_search' && mcpEntry.mode !== 'global_describe' && mcpEntry.mode !== 'read_output') {
               if (permission === 'readonly') {
                 rejected = true;
                 return { role: 'tool', callId: call.id, name: call.name, outcome: 'rejected', text: '只读权限不允许执行外部 MCP 工具调用' };
@@ -288,9 +289,23 @@ export class IndependentTaskRuntime {
                 }
               } finally { clock?.resume(); }
             }
-            const res = await this.mcp.executeExposedTool(taskId, 'independent', call.name, args, signal);
-            ok = !res.isError;
-            return { role: 'tool', callId: call.id, name: call.name, outcome: ok ? 'ok' : 'error', text: res.text };
+            try {
+              const res = await this.mcp.executeExposedTool(taskId, 'independent', call.name, args, signal);
+              ok = !res.isError;
+              return { role: 'tool', callId: call.id, name: call.name, outcome: ok ? 'ok' : 'error', text: res.text };
+            } catch (err) {
+              if (signal.aborted) {
+                return { role: 'tool', callId: call.id, name: call.name, outcome: 'cancelled', text: 'MCP 工具调用已取消' };
+              }
+              const msg = redact(err instanceof Error ? err.message : String(err), secrets);
+              return {
+                role: 'tool',
+                callId: call.id,
+                name: call.name,
+                outcome: 'error',
+                text: wrapProvenance('external_data', `MCP 调用失败 / ${call.name}`, `外部 MCP 工具调用失败（未中断任务，可向用户说明原因或换用其他方式）：${msg}`),
+              };
+            }
           }
           if (call.name !== 'command') {
             if(!['write_file','create_file','replace_text'].includes(call.name)) {

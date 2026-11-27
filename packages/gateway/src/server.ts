@@ -288,6 +288,7 @@ async function startGateway(opts: GatewayOptions, dataDir: string, lock: Instanc
     blockedLocalPorts,
     allowFakeIpProxy: () => independent.getNetwork().allowFakeIpProxy,
   });
+  rollback.push(() => mcp.close());
   independentRuntime.mcp = mcp;
   tasks.mcp = mcp;
   const monitor = new MonitorService(db, {
@@ -396,7 +397,7 @@ async function startGateway(opts: GatewayOptions, dataDir: string, lock: Instanc
     await settle(() => lanPairing.stop());
     await settle(() => ws.close());
     await settle(() => agentSvc.shutdown());
-    const graceful = Promise.all([settle(() => tasks.shutdown()), settle(() => attachments.close()),
+    const graceful = Promise.all([settle(() => tasks.shutdown()), settle(() => mcp.close()), settle(() => attachments.close()),
       settle(() => workspaceCleanup), settle(() => workspaces.settle())]);
     if (opts.deadlineMs !== undefined) {
       const timedOut = await Promise.race([graceful.then(() => false), delay(opts.deadlineMs).then(() => true)]);

@@ -954,6 +954,7 @@ export class TaskService {
       return rt;
     } catch (e) {
       this.history?.revoke(sessionId);
+      this.mcp?.revokeBridge(sessionId);
       await opening?.close().catch(() => {});
       release();
       throw e;

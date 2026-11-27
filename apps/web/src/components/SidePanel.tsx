@@ -84,6 +84,10 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
   const [taskMcp, setTaskMcp] = useState<TaskMcpConnections | null>(null);
   const [mcpError, setMcpError] = useState<string | null>(null);
   const [mcpBusy, setMcpBusy] = useState(false);
+  const activeTaskIdRef = useRef(task.id);
+  const mountedRef = useRef(true);
+  useEffect(() => { mountedRef.current = true; return () => { mountedRef.current = false; }; }, []);
+  useEffect(() => { activeTaskIdRef.current = task.id; setTaskMcp(null); setMcpError(null); setMcpBusy(false); }, [task.id]);
   const [usageError, setUsageError] = useState<string | null>(null), [fileError, setFileError] = useState<string | null>(null), [independentError, setIndependentError] = useState<string | null>(null);
   useEffect(() => { let live = true; void api.taskUsage(task.id).then((v) => { if (live) { setUsage(v); setUsageError(null); } }).catch((e) => { if (live) setUsageError(asApiError(e).message); }); return () => { live = false; }; }, [task.id, usageRevision, conn]);
   useEffect(() => { if (isolated) return; let live = true; void api.taskFiles(task.id).then((v) => { if (live) { setFiles(v); setFileError(null); } }).catch((e) => { if (live) setFileError(asApiError(e).message); }); return () => { live = false; }; }, [task.id, fileRevision, independentRevision, conn, isolated]);
@@ -91,17 +95,20 @@ export function SidePanel({ task, plan, config }: { task: Task; plan: EventOf<'p
   useEffect(() => { let live = true; void api.taskMcp(task.id).then((v) => { if (live) { setTaskMcp(v); setMcpError(null); } }).catch((e) => { if (live) setMcpError(asApiError(e).message); }); return () => { live = false; }; }, [task.id, task.agent, conn]);
   const toggleTaskMcp = async (serverId: string, nextActive: boolean) => {
     if (!taskMcp || mcpBusy) return;
+    const reqTaskId = task.id;
     const currentDisabled = taskMcp.servers.filter((s) => s.disabledForTask).map((s) => s.id);
     const nextDisabled = nextActive ? currentDisabled.filter((id) => id !== serverId) : [...new Set([...currentDisabled, serverId])];
     setMcpBusy(true);
     try {
-      const updated = await api.putTaskMcp(task.id, { disabledServerIds: nextDisabled });
+      const updated = await api.putTaskMcp(reqTaskId, { disabledServerIds: nextDisabled });
+      if (!mountedRef.current || activeTaskIdRef.current !== reqTaskId) return;
       setTaskMcp(updated);
       setMcpError(null);
     } catch (e) {
+      if (!mountedRef.current || activeTaskIdRef.current !== reqTaskId) return;
       setMcpError(asApiError(e).message);
     } finally {
-      setMcpBusy(false);
+      if (mountedRef.current && activeTaskIdRef.current === reqTaskId) setMcpBusy(false);
     }
   };
   const activeMcpCount = (taskMcp?.servers ?? []).filter((s) => s.activeForTask).length;

@@ -81,8 +81,8 @@ for await (const line of input) {
       try {
         const result = await callHub({ method: 'tools/list' });
         send(id, { result });
-      } catch {
-        send(id, { result: { tools: [] } });
+      } catch (e) {
+        send(id, { error: { code: -32000, message: e instanceof Error ? e.message : '读取 MCP 工具清单失败' } });
       }
       break;
     case 'tools/call':

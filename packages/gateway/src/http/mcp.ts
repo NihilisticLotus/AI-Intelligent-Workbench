@@ -31,9 +31,9 @@ export function mcpRoutes(s: Services) {
     return c.json(await s.mcp.patch(c.req.param('id'), body));
   });
 
-  r.delete('/mcp/servers/:id', (c) => {
+  r.delete('/mcp/servers/:id', async (c) => {
     requireLocal(c, '请在这台电脑上删除 MCP 服务');
-    s.mcp.delete(c.req.param('id'));
+    await s.mcp.delete(c.req.param('id'));
     return c.json({ ok: true });
   });
 

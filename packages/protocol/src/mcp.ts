@@ -50,7 +50,7 @@ export const McpServerSummary = z.object({
   lastCalledTool: z.string().max(128).nullable(),
   toolCount: z.number().int().nonnegative(),
   toolsFolded: z.boolean(),
-  tools: z.array(McpToolInfo).max(200),
+  tools: z.array(McpToolInfo).max(500),
   createdAt: McpTs,
   updatedAt: McpTs,
 }).strict();
@@ -148,7 +148,7 @@ export const McpTestResult = z.object({
   ok: z.boolean(),
   durationMs: z.number().int().nonnegative(),
   steps: z.array(McpTestStep),
-  tools: z.array(McpToolInfo).max(200),
+  tools: z.array(McpToolInfo).max(500),
   folded: z.boolean(),
   error: z.string().max(500).nullable(),
 }).strict();

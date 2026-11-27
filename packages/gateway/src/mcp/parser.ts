@@ -8,8 +8,8 @@ import { Errors } from '../util';
 const DESKTOP_EXCLUSIVE_RE = /(?:^|[-_.\s])(blender|houdini|fxhoudini|renderdoc|unity|unreal)(?:$|[-_.\s])/i;
 /** 禁止出现在命令字符串里的 shell 拼接或重定向元字符 */
 const SHELL_META_RE = /[;&|`<>]|\$\(|\r|\n|\0/;
-/** 禁止直接作为启动命令的通用 shell 解释器（避免通过 sh -c / cmd /c 绕过参数审计） */
-const SHELL_EXEC_RE = /^(?:cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh(?:\.exe)?|sh|bash|zsh|fish|csh|ksh)$/i;
+/** 禁止直接作为启动命令的通用 shell 或脚本宿主解释器（避免通过 sh -c / cmd /c / wsl 绕过参数审计） */
+const SHELL_EXEC_RE = /^(?:cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh(?:\.exe)?|wsl(?:\.exe)?|mshta(?:\.exe)?|wscript(?:\.exe)?|cscript(?:\.exe)?|sh|bash|zsh|fish|csh|ksh)$/i;
 const SAFE_ENV_KEY_RE = /^[A-Za-z_][A-Za-z0-9_]{0,127}$/;
 const SAFE_HEADER_KEY_RE = /^[A-Za-z0-9-]{1,128}$/;
 

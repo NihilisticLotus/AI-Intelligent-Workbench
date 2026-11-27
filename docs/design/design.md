@@ -1,6 +1,7 @@
 # AI Console 设计文档
 
-> 版本 0.4.68 · 2026-11-27 · 状态：设计中
+> 版本 0.4.69 · 2026-11-27 · 状态：设计中
+> v0.4.69 同步第二阶段第 2.2 步监控告警、调用账本与花费上限阀门：新增共享协议 `packages/protocol/src/monitor.ts`（`TaskSource`、`UsageCapRule`、`UpsertUsageCapBody`、`UsageCapEvaluation`、`MonitorOverview` 等，并在 `ErrorCode`/`ErrorActionKey` 追加 `usage.cap_exceeded` 与 `open_monitor`）；SQLite 迁移至 v28 新增 `usage_cap_rules` 表及用量/事件时间索引；实现 `MonitorService` 诚实汇总全局/按 Agent/按项目当日与当月 Token 及实际报告/预留费用（订阅制无金额绝不估价或伪造 `$0`），并在新任务与新回合启动前执行 80% 提醒 / 100% 达限阀门（默认 `block_unattended` 仅拦无人值守任务、放行制作人手动消息且绝不中断运行中回合）；新增 `GET /api/v1/monitor/overview`、`GET/PUT/DELETE /api/v1/monitor/caps`（写操作 `requireLocal`）并开启 `FeatureKey.PageMonitor`。见 [step-2.2.md](../acceptance/step-2.2.md)。
 > v0.4.68 同步第二阶段第 2.1 步网络安全加固基线：新增 `packages/protocol/src/security.ts`（`ProvenanceTier`、`SecurityStatus`）；新增消息来源防伪信封 `security/provenance.ts`（三档权威隔离 + 零宽/BiDi 清洗 + 半角/全角/中文伪造封条转义）接入 `handoff/render.ts` 与 `handoff/execution.ts`；新增受控子进程环境变量白名单 `security/env-policy.ts` 由 `independent/commands.ts` 复用；抽离并强化公共出站防内网探测门禁 `security/egress.ts`（支持 `::ffff:` 映射 IPv6 解包、禁止回打 Gateway 监听端口与 DNS-pinned `all: true` 默认严格公网模式）供 `metadata-http.ts` / `model-http.ts` / `discovery.ts` / `model-driver.ts` / `handoff/summary.ts` 复用；新增 `GET /api/v1/security/status` 与前端只读锁 100% 对齐。见 [step-2.1.md](../acceptance/step-2.1.md)。
 > v0.4.67 同步 2026-11-26 全项目代码审查加固：`/api/v1/hello` 动态上报 `Worktrees`/`RealAgents`/`FsBrowse`；收紧局域网管理路由 `requireLocal` 与删任务二次确认、WS 吊销同步丢帧强断、目录校验与权限路径/凭据/Git 命令守卫；隔离 ZCode `XDG_CONFIG_HOME`、补齐 ACP 恢复会话权限重设与 Gateway 私有环境变量剥离，及工作区/信号量/进程/文件清单稳定性修复。见 [workbench-review-2026-11-26.md](../acceptance/workbench-review-2026-11-26.md)。
 > v0.4.66 同步第 1.8 步：新增 Google Antigravity 官方 `agy acp`（1.5.18）原生接入，通过受控 `zcode-acp-server@0.94.0`（`ask` 映射为 `build`、禁用默认 `yolo` 与远程端口）接入新版 ZCode，升级 `codex-acp@2.12.0` / `@openai/codex@0.171.0`，补充 `.gemini` 凭据目录写保护与探测临时目录异步重试清理。见 2026-11-26 开发笔记。
@@ -1656,6 +1657,22 @@ audit_log (id INTEGER PRIMARY KEY AUTOINCREMENT, device_id TEXT, action TEXT, de
 - 轮次统计在 `session/prompt` 返回时写入 `prompt_stats`（`session_id, task_id, agent_id, model, profile_id, started_at, first_token_ms, duration_ms, tokens_in, tokens_out, tokens_cached, tokens_thought, cost`）。工具调用和 MCP 调用从事件库按小时汇总进 `metrics_hourly`（scope 用 `agent:<id>`、`model:<id>`、`mcp:<server>/<tool>` 等）。
 - 接口：`GET /stats/summary?from=&to=&groupBy=agent|model|profile|project|group|source` · `GET /stats/timeseries?metric=&groupBy=&step=hour|day` · `GET /stats/tools?groupBy=` · `GET /stats/mcp` · `GET /stats/export.csv?…`
 - token 和费用的准确度取决于各 Agent 通过 `usage_update` 报告的内容。有的 Agent 不报告缓存或思考 token，统计里显示为“未报告”，不用 0 冒充。
+
+### 23.5 第 2.2 步落地实现：调用账本与 Token/花费双口径上限阀门
+
+第 2.2 步在不新增外部依赖的前提下先建成后续无人值守自动化、多岗位与受控工具调用所必需的“刹车系统”与全局调用账本：
+
+- **诚实统计口径**：
+  - `MonitorService` 直接按本地自然日与自然月聚合 `turn_usage`（输入/输出/思考/缓存/总 Token），以及 `independent_request_attempts`、`handoff_summary_requests` 中的实际预留金额与第三方 ACP `session.usage` 明确上报的费用（按会话与币种取窗口内最大累计值去重，排除 `independent` 防重复计费）。
+  - 任何未报告的 Token 字段严格保持 `null`，订阅制或未上报单价的模型严格返回 `reportedCosts: []`、`usedCostMicros: null`，绝不猜测单价或伪造 `$0`。
+- **双口径上限阀门（数据库迁移 v28 `usage_cap_rules`）**：
+  - 支持配置全工作台（`global`）或单 Agent（`agent`）的每日（`daily`）/每月（`monthly`）上限，可单独或同时设置 Token 上限（`maxTokens`）与费用上限（`maxCostMicros` + 三字母币种）。
+  - 进度达到 80% 时触发黄色预警（`warn`，不拦截任务）；达到 100% 时触发超限（`exceeded`）：默认策略 `block_unattended` 仅在新任务（`POST /tasks` 且非草稿）或新回合（`prompt()`）启动前拦截 `automation` / `webhook` / `delegated` 来源并返回 `429 usage.cap_exceeded`（附带 `open_monitor` 动作），始终放行制作人 `manual` 手动消息；可选 `block_all` 策略同时拦截手动新回合。**绝不中途打断已经在运行中的回合**。
+  - 上限拦截事件写入事件流以便在监控页“最近动态”的「上限与审批」筛选项查看，但不计入 Agent 故障次数或今日执行异常。
+- **接口与边界**：
+  - `GET /api/v1/monitor/overview`（设备鉴权，本机与局域网均可只读查看概览、近 7 天趋势、按 Agent/项目当日与当月明细、上限进度、Agent 健康状态与最近动态）。
+  - `GET /api/v1/monitor/caps`（只读）、`PUT /api/v1/monitor/caps`（仅本机 `requireLocal`）、`DELETE /api/v1/monitor/caps/:id`（仅本机 `requireLocal`）。
+  - `/api/v1/hello` 正式开启 `FeatureKey.PageMonitor: true`，`tasks.source` 持久化并在 `Task` 协议中暴露。
 
 ## 24. 快速判断层
 

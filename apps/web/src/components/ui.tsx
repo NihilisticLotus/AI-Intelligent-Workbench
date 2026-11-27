@@ -1,6 +1,6 @@
 // 通用小组件：对话框、确认框、菜单、错误提示（把 ApiError.actions 渲染成按钮）、徽标、状态标记、提示条、读屏播报。
 import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
-import { ErrorActionKey, type AgentKind, type ApiError } from '@aic/protocol';
+import { ErrorActionKey, FeatureKey, type AgentKind, type ApiError } from '@aic/protocol';
 import { Icon } from './Icon';
 import { createStore, useStore } from '../state/store';
 import { announceStore, dismissAlert, errorAlertStore, navigate, showError, toast, toastStore } from '../state/ui';
@@ -227,6 +227,7 @@ export function runErrorAction(a: string | ActionLike, onRetryOrCtx?: (() => voi
     case 'reload': location.reload(); return;
     case 'open_agents': navigate(kind ? { page: 'agents', agent: kind } : { page: 'agents' }); return;
     case 'open_settings': navigate({ page: 'settings' }); return;
+    case 'open_monitor': navigate({ page: 'feature', key: FeatureKey.PageMonitor }); return;
     case 'pair': case 're_pair': case 'pairing.start': location.hash = ''; location.reload(); return;
     // 1.2：真实 Agent 的错误按钮（protocol 的 ErrorActionKey；同时认几个常见的别名）
     case 'agents.login': case 'agent.login': case 'login': {

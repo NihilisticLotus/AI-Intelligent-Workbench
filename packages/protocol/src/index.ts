@@ -8,7 +8,9 @@ export * from './access';
 export * from './workspaces';
 export * from './permissions';
 export * from './security';
+export * from './monitor';
 import { AlwaysAllowConfirmation } from './permissions';
+import { TaskSource } from './monitor';
 
 export const PROTOCOL_VERSION = 1;
 export const API_BASE = '/api/v1';
@@ -77,6 +79,7 @@ export const ErrorCode = {
   AttachmentReadFailed: 'attachment.read_failed',
   AgentNativeConfiguration: 'agent.native_configuration',
   IndependentDiscoveryFailed: 'independent.discovery_failed',
+  UsageCapExceeded: 'usage.cap_exceeded',
 } as const;
 
 /**
@@ -89,6 +92,7 @@ export const ErrorActionKey = {
   Reload: 'reload',
   OpenAgents: 'open_agents',
   OpenSettings: 'open_settings',
+  OpenMonitor: 'open_monitor',
   PairingStart: 'pairing.start',
   /** 去登录 / 重新登录：打开 Agent 页对应的 Agent（args.kind）和账号（args.profileId） */
   Login: 'agents.login',
@@ -164,6 +168,7 @@ export const Task = z.object({
   lastActivityAt: Ts, createdAt: Ts, updatedAt: Ts,
   /** 1.2 新增：任务使用的账号；空 = 该 Agent 的默认账号 */
   profileId: Id.nullable().optional(),
+  source: TaskSource.optional(),
   independent: z.lazy(() => IndependentTaskReference).optional(),
   workspace: TaskWorkspace.optional(),
 });
@@ -541,6 +546,7 @@ export const CreateTaskBody = z.object({
   profileId: Id.nullable().optional(),
   attachments: z.array(Id).max(10).optional(),
   deferPrompt: z.boolean().optional(),
+  source: TaskSource.optional(),
   independent: z.lazy(() => IndependentTaskOptions).optional(),
 }).refine((v) => !!v.prompt.trim() || !!v.attachments?.length || v.deferPrompt === true, '文字和附件至少提供一个');
 export const PatchTaskBody = z.object({

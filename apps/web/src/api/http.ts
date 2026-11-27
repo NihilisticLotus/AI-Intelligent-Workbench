@@ -18,7 +18,10 @@ import {
   type CreateIndependentServiceBody, type PatchIndependentServiceBody, type CreateIndependentModelBody,
   type PatchIndependentModelBody, type PatchIndependentOverridesBody, type DiscoverIndependentModelsBody, type ImportIndependentModelsBody,
 } from '@aic/protocol';
-import { AccessAuditEntry, LanPairingCode, LanPairingPending, LanPairingStatus, LanState, RevokeLanResult, SecurityStatus, type PutLanBody } from '@aic/protocol';
+import {
+  AccessAuditEntry, LanPairingCode, LanPairingPending, LanPairingStatus, LanState, MonitorOverview, RevokeLanResult,
+  SecurityStatus, UsageCapEvaluation, type PutLanBody, type UpsertUsageCapBody,
+} from '@aic/protocol';
 
 /** 客户端自己产生的错误码（网络断开、超时等），不在服务端协议里 */
 export const ClientErrorCode = {
@@ -231,6 +234,10 @@ export class HttpClient {
   importIndependentModels(id: string, body: ImportIndependentModelsBody) { return this.request('POST', `/independent/services/${encodeURIComponent(id)}/models/import`, { body, parse: ImportIndependentModelsResult }); }
   hello() { return this.request('GET', '/hello', { parse: Hello }); }
   securityStatus() { return this.request('GET', '/security/status', { parse: SecurityStatus }); }
+  monitorOverview() { return this.request('GET', '/monitor/overview', { parse: MonitorOverview }); }
+  monitorCaps() { return this.request('GET', '/monitor/caps', { parse: listOf(UsageCapEvaluation) }).then((r) => r.items); }
+  saveMonitorCap(body: UpsertUsageCapBody) { return this.request('PUT', '/monitor/caps', { body, parse: UsageCapEvaluation }); }
+  deleteMonitorCap(id: string) { return this.request('DELETE', `/monitor/caps/${encodeURIComponent(id)}`, { parse: OkResult }); }
   pairingStart() { return this.request('POST', '/pairing/start', { body: {}, parse: PairingStartResult }); }
   /** kind / tokenDelivery 由 Platform 决定：浏览器要 Cookie + 设备密钥，桌面和手机要 Bearer 令牌 */
   pairingComplete(code: string, deviceName: string, kind: DeviceKind, tokenDelivery: 'cookie' | 'bearer') {

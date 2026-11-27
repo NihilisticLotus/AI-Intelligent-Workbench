@@ -77,8 +77,9 @@
   .board-card-title, .agents-page, .set-sec, .project-settings { overflow-wrap: anywhere; }
   .board-card-title { max-width: 100%; }
   .permission-table-wrap { max-width: 100%; overscroll-behavior-x: contain; }
-  .independent-fieldset, .independent-service-body, .profile-row, .page, .security-list, .security-item { min-width: 0; }
-  .security-list { grid-template-columns: minmax(0, 1fr); }
+  .independent-fieldset, .independent-service-body, .profile-row, .page, .security-list, .security-item, .monitor-page, .monitor-section, .monitor-cap-list, .monitor-cap-card { min-width: 0; }
+  .security-list, .monitor-cap-list { grid-template-columns: minmax(0, 1fr); }
+  .monitor-table-wrap { max-width: 100%; overscroll-behavior-x: contain; }
 }
 
 @media (max-width: 767px), (max-width: 1279px) and (pointer: coarse) {
@@ -106,6 +107,9 @@
   .nt-send { margin-inline-start: auto; }
   .off-row { flex-wrap: wrap; }
   .off-row .sub { min-width: 96px; }
+  .monitor-tiles { grid-template-columns: minmax(0, 1fr); }
+  .monitor-form-grid { grid-template-columns: minmax(0, 1fr); }
+  .monitor-head-acts { margin-left: 0; }
 }
 
 /* 软键盘打开时，保留编辑、发送和停止，给正在输入的文本让出高度。 */

@@ -6,8 +6,8 @@
 
 | 文档 | 说明 |
 |---|---|
-| [design/design.md](design/design.md) | 架构设计 v0.4.68：第二阶段 2.1 网络安全加固基线与防注入围栏（`ProvenanceTier`/`SecurityStatus`、消息来源防伪信封、受控子进程环境白名单、DNS-pinned 出站防内网门禁及自检接口）；2026-11-26 全项目审查安全与稳定性加固；Antigravity 原生接入、受控 ZCode 桥接与新版 Codex 适配，`.gemini` 写保护、局域网 UAC、G1/N2、独立任务与交接契约 |
-| [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.50：设置页「安全防护状态」只读卡片与局域网只读锁前后端对齐；2026-11-26 全项目审查修复（Markdown 远程图片防外联等）；Antigravity 与 ZCode 接入、局域网设备与访问、手机布局及统一选择器 |
+| [design/design.md](design/design.md) | 架构设计 v0.4.69：第二阶段 2.2 监控告警、调用账本与花费/Token 双口径上限阀门（迁移 v28 `usage_cap_rules`、`MonitorService`、`/monitor/*` 接口与 `PageMonitor` 开关）；2.1 网络安全加固基线与防注入围栏；2026-11-26 全项目审查安全与稳定性加固；Antigravity 原生接入、受控 ZCode 桥接与新版 Codex 适配，`.gemini` 写保护、局域网 UAC、G1/N2、独立任务与交接契约 |
+| [design/ui-design.md](design/ui-design.md) | 界面设计 v0.3.51：开放监控页（概览四格、80%/100% 预警横幅、花费与 Token 上限阀门及局域网只读锁、近 7 天 SVG 趋势与诚实口径账本、Agent 健康与最近动态）；2.1 设置页「安全防护状态」卡片与局域网只读锁对齐；Antigravity 与 ZCode 接入、局域网设备与访问、手机布局及统一选择器 |
 | [prototype/index.html](prototype/index.html) | 可点击原型（双击打开）：工作台、看板、Agent、资产、生成、自动化、监控、能力 |
 
 ## 调研
@@ -37,6 +37,7 @@
 | 目录 | 说明 |
 |---|---|
 | [acceptance/](acceptance/) | 每一步的验收记录 |
+| [acceptance/step-2.2.md](acceptance/step-2.2.md) | 2026-11-27 第二阶段第 2.2 步通过：监控告警、调用账本（诚实口径不伪造 `$0`）与 Token/费用双口径上限阀门、`MonitorPage` 开放及深浅双主题/阈值联动/390×844/双标签局域网实操验收，1,280 / 5 |
 | [acceptance/step-2.1.md](acceptance/step-2.1.md) | 2026-11-27 第二阶段第 2.1 步通过：网络安全加固基线与防注入围栏、自检接口与设置页「安全防护状态」、局域网前端只读锁对齐及双主题/390×844/回环局域网实操验收，1,270 / 5 |
 | [acceptance/workbench-review-2026-11-26.md](acceptance/workbench-review-2026-11-26.md) | 2026-11-26 全项目代码审查与修复验收：关闭 ISSUE-0180、0182～0188，新增 17 项回归单测，全仓 1,256 / 5，深浅双主题与 390×844 浏览器复核 |
 | [acceptance/step-1.8.md](acceptance/step-1.8.md) | 2026-11-26 第 1.8 步通过：Antigravity 官方 `agy acp` 接入、ZCode 受控桥接（`build` 模式）、Codex 2.12.0 升级，三家真实冒烟与三端自动交接合并验收，1,239 / 5 |

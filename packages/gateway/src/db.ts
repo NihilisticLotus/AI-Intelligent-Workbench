@@ -308,6 +308,22 @@ const MIGRATIONS: string[] = [
   // v26：原有配对全部来自本机，局域网配对单独标记。
   `ALTER TABLE devices ADD COLUMN pairing_source TEXT NOT NULL DEFAULT 'local' CHECK (pairing_source IN ('local', 'lan'));`,
   `CREATE INDEX IF NOT EXISTS idx_audit_log_ts ON audit_log(ts);`,
+  // v28（2.2 步）：监控花费/Token 上限规则表与用量/事件时间索引。
+  `CREATE TABLE IF NOT EXISTS usage_cap_rules (
+     id TEXT PRIMARY KEY,
+     scope TEXT NOT NULL CHECK(scope IN ('global','agent')),
+     agent TEXT,
+     period TEXT NOT NULL CHECK(period IN ('daily','monthly')),
+     max_tokens INTEGER,
+     max_cost_micros INTEGER,
+     currency TEXT NOT NULL DEFAULT 'USD',
+     enforcement TEXT NOT NULL DEFAULT 'block_unattended' CHECK(enforcement IN ('block_unattended','block_all')),
+     enabled INTEGER NOT NULL DEFAULT 1,
+     created_at INTEGER NOT NULL,
+     updated_at INTEGER NOT NULL
+   );
+   CREATE INDEX IF NOT EXISTS idx_turn_usage_at ON turn_usage(at);
+   CREATE INDEX IF NOT EXISTS idx_events_type_ts ON events(type, ts);`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

@@ -79,7 +79,7 @@ export function systemRoutes(s: Services) {
         [FeatureKey.PageAssets]: false,
         [FeatureKey.PageGenerate]: false,
         [FeatureKey.PageAutomations]: false,
-        [FeatureKey.PageMonitor]: false,
+        [FeatureKey.PageMonitor]: true,
         [FeatureKey.PageCapabilities]: false,
       },
       machine: s.machine,

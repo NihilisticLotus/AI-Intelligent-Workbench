@@ -1,5 +1,5 @@
 // 界面层的小状态：路由（地址栏 hash）、提示条、读屏播报。
-import { AgentKind, type ApiError } from '@aic/protocol';
+import { AgentKind, FeatureKey, type ApiError } from '@aic/protocol';
 import { createStore } from './store';
 
 // ---------- 路由 ----------
@@ -41,6 +41,7 @@ function routeFromFragment(h: string): Route {
     return profileId ? { page: 'agents', agent, profileId } : agent ? { page: 'agents', agent } : { page: 'agents' };
   }
   if (h === '/settings') return { page: 'settings' };
+  if (h === '/monitor' || h.startsWith('/monitor/')) return { page: 'feature', key: FeatureKey.PageMonitor };
   const projectSettings=/^\/projects\/([^/]+)\/settings$/.exec(h);
   if(projectSettings)return {page:'project-settings',projectId:decodeURIComponent(projectSettings[1]!)};
   if (h.startsWith('/p/')) return { page: 'feature', key: decodeURIComponent(h.slice(3)) };

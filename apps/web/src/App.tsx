@@ -12,6 +12,7 @@ import { openPalette } from './components/Palette';
 import { openNewTask } from './components/dialogs';
 import { requestFocusApproval } from './components/focus';
 import { AgentsPage } from './pages/AgentsPage';
+import { MonitorPage } from './pages/MonitorPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { ProjectSettingsPage } from './pages/project-settings-page';
 import { PairingPage } from './pages/PairingPage';
@@ -125,7 +126,8 @@ function Shell() {
       {pageRoute.page === 'settings' ? <SettingsPage /> : null}
       {pageRoute.page === 'project-settings' ? <ProjectSettingsPage key={pageRoute.projectId} projectId={pageRoute.projectId}/> : null}
       {pageRoute.page === 'home' && workView === 'chat' ? <Home /> : null}
-      {pageRoute.page === 'feature' ? (
+      {pageRoute.page === 'feature' && pageRoute.key === FeatureKey.PageMonitor ? <MonitorPage /> : null}
+      {pageRoute.page === 'feature' && pageRoute.key !== FeatureKey.PageMonitor ? (
         <main className="main"><div className="content-scroll"><div className="page">
           <div className="empty"><h3>这个页面还没有开放</h3><p>它会在后续阶段提供。</p></div>
         </div></div></main>

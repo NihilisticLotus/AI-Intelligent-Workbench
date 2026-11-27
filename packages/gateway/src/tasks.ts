@@ -1,7 +1,7 @@
 // 任务、会话与审批（1.1 版本的 TaskScheduler + SessionManager + PermissionBroker 合在这里，后续再拆）。
 // 所有状态变化都先经过 EventStore.append（先写库，再推送）。
 // 1.2：真实 Agent 的会话运行时（账号环境变量、恢复 H1、并发上限、空闲回收、进程崩溃）、切换模型（H0）、异常映射（phase-1.md 6.5）。
-import type { AgentKind, ApiError, Approval, PermissionLevel, Task, TaskStatus, AttachmentInfo, PromptAttachment } from '@aic/protocol';
+import type { AgentKind, ApiError, Approval, PermissionLevel, Task, TaskSource, TaskStatus, AttachmentInfo, PromptAttachment } from '@aic/protocol';
 import { ErrorCode, visionOf } from '@aic/protocol';
 import type { z } from 'zod';
 import type { CreateTaskBody, PatchTaskBody, TasksQuery, TaskActivity } from '@aic/protocol';
@@ -14,6 +14,7 @@ import type { Db } from './db';
 import type { EventStore } from './events';
 import { AppError, AbortError, Errors, newId, now } from './util';
 import type { IndependentTaskRuntime } from './independent/task-runtime';
+import type { MonitorService } from './monitor';
 import type { IndependentTaskOptions } from '@aic/protocol';
 import { emptyUsage, recordTurnUsage } from './usage';
 import { WorkspaceManager, WorkspaceError } from './workspaces';
@@ -35,6 +36,7 @@ type TaskRow = {
   auto_allow_low_risk: number; auto_merge_on_pass: number;
   last_activity_at: number; created_at: number; updated_at: number;
   profile_id: string | null;
+  source?: TaskSource | null;
   workspace_kind: TaskWorkspace['kind'] | null; workspace_path: string | null; branch: string | null; base_ref: string | null;
 };
 
@@ -44,6 +46,7 @@ const toTask = (r: TaskRow): Task => ({
   autoAllowLowRisk: !!r.auto_allow_low_risk, autoMergeOnPass: !!r.auto_merge_on_pass,
   lastActivityAt: r.last_activity_at, createdAt: r.created_at, updatedAt: r.updated_at,
   profileId: r.profile_id ?? null,
+  source: r.source ?? 'manual',
 });
 
 /** 已建立会话的任务的内存状态 */
@@ -136,6 +139,7 @@ export class TaskService {
   /** 由 Gateway 组装时注入（1.2）；为空时退回 1.1 的行为 */
   agentSvc: AgentService | null = null;
   independentRuntime: IndependentTaskRuntime | null = null;
+  monitor: MonitorService | null = null;
   workspaces: WorkspaceManager | null = null;
   private projectQueue = new TaskQueue(() => 1, (_key, ids) => this.queueChanged(ids), message => this.log(message));
   private turnActivity = new Map<string, TaskActivity>();
@@ -567,6 +571,8 @@ export class TaskService {
   async create(body: z.infer<typeof CreateTaskBody>): Promise<Task> {
     if (!this.db.get('SELECT id FROM projects WHERE id = ?', body.projectId)) throw Errors.badRequest('找不到这个项目');
     if (body.groupId && !this.db.get('SELECT id FROM task_groups WHERE id = ?', body.groupId)) throw Errors.badRequest('找不到这个分组');
+    const source: TaskSource = body.source ?? 'manual';
+    if (!body.deferPrompt) this.monitor?.assertCanStartTurn(body.agent, source);
     if (body.agent === 'independent') {
       if (!this.independentRuntime || !body.independent) throw Errors.badRequest('请先填写独立 Agent 的模型、上下文与预算配置');
       if (body.profileId || body.model || body.effort) throw Errors.badRequest('独立 Agent 使用自己的任务配置，不接受第三方账号或模型字段');
@@ -574,9 +580,9 @@ export class TaskService {
       if (body.attachments?.length) throw Errors.badRequest('请先创建任务，再上传附件');
       const id = newId('t'), t = now();
       this.db.tx(() => {
-        this.db.run(`INSERT INTO tasks (id,project_id,group_id,title,prompt,status,permission_level,agent,last_activity_at,created_at,updated_at)
-          VALUES (?,?,?,?,?,'draft',?,'independent',?,?,?)`, id, body.projectId, body.groupId ?? null,
-          body.title?.trim() || body.prompt.trim().split(/\r?\n/)[0]?.slice(0,40) || '新任务', body.prompt, body.permission, this.activityTs(), t, t);
+        this.db.run(`INSERT INTO tasks (id,project_id,group_id,title,prompt,status,permission_level,agent,source,last_activity_at,created_at,updated_at)
+          VALUES (?,?,?,?,?,'draft',?,'independent',?,?,?,?)`, id, body.projectId, body.groupId ?? null,
+          body.title?.trim() || body.prompt.trim().split(/\r?\n/)[0]?.slice(0,40) || '新任务', body.prompt, body.permission, source, this.activityTs(), t, t);
         this.independentRuntime!.configure(id, body.independent!);
         this.events.append({ type: 'task.created', taskId: id, sessionId: null, data: { task: this.get(id) } });
       });
@@ -598,9 +604,9 @@ export class TaskService {
     const t = now();
     const title = (body.title?.trim() || body.prompt.trim().split(/\r?\n/)[0]!.slice(0, 40)) || '新任务';
     this.db.run(
-      `INSERT INTO tasks (id, project_id, group_id, title, prompt, status, permission_level, agent, model, effort, profile_id, last_activity_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?)`,
-      id, body.projectId, body.groupId ?? null, title, body.prompt, body.permission, body.agent, model, effort, profileId, this.activityTs(), t, t,
+      `INSERT INTO tasks (id, project_id, group_id, title, prompt, status, permission_level, agent, model, effort, profile_id, source, last_activity_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      id, body.projectId, body.groupId ?? null, title, body.prompt, body.permission, body.agent, model, effort, profileId, source, this.activityTs(), t, t,
     );
     const task = this.get(id);
     this.events.append({ type: 'task.created', taskId: id, sessionId: null, data: { task } });
@@ -1222,13 +1228,14 @@ export class TaskService {
     }
   }
 
-  async prompt(taskId: string, text: string, attachmentIds: string[] = [], target?:HandoffTarget, options:HandoffSendOptions={},reverseOf?:string,restore?:{checkpoint:string;revision:string}): Promise<{ taskId: string; messageId: string;pendingHandoffId?:string }> {
+  async prompt(taskId: string, text: string, attachmentIds: string[] = [], target?:HandoffTarget, options:HandoffSendOptions={},reverseOf?:string,restore?:{checkpoint:string;revision:string}, triggerSource: TaskSource = 'manual'): Promise<{ taskId: string; messageId: string;pendingHandoffId?:string }> {
     const row = this.getRow(taskId);
     if (FINAL.includes(this.get(taskId).status)) throw Errors.invalidState('任务已经结束，不能继续发送消息');
     if(this.workspaces?.operation(taskId)?.state==='pending')throw Errors.invalidState('上次项目操作尚未确认完成，暂不能继续任务。');
     if (this.db.get('SELECT task_id FROM workspace_preparations WHERE task_id=?', taskId)) throw Errors.invalidState('工作副本尚未准备好，请先处理准备提示');
     if (this.isBusy(taskId)) throw Errors.invalidState('任务正在执行', '请等这一轮结束，或先点 [停止]', [{ label: '停止', action: 'task.cancel', args: { taskId } }]);
     const destination=target?.agent??row.agent;
+    this.monitor?.assertCanStartTurn(destination, triggerSource, undefined, taskId);
     const switching=!!target && (destination!==row.agent || !!options.forceH2 || !!reverseOf);
     if (destination === 'independent') {
       if(!this.db.get('SELECT 1 FROM independent_task_settings WHERE task_id=?',taskId))throw Errors.invalidState('请先填写这个任务的独立 Agent 服务、模型与预算');

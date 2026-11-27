@@ -15,6 +15,7 @@ import type { EventStore } from './events';
 import { AppError, AbortError, Errors, newId, now } from './util';
 import type { IndependentTaskRuntime } from './independent/task-runtime';
 import type { MonitorService } from './monitor';
+import type { McpHub } from './mcp/hub';
 import type { IndependentTaskOptions } from '@aic/protocol';
 import { emptyUsage, recordTurnUsage } from './usage';
 import { WorkspaceManager, WorkspaceError } from './workspaces';
@@ -140,6 +141,7 @@ export class TaskService {
   agentSvc: AgentService | null = null;
   independentRuntime: IndependentTaskRuntime | null = null;
   monitor: MonitorService | null = null;
+  mcp: McpHub | null = null;
   workspaces: WorkspaceManager | null = null;
   private projectQueue = new TaskQueue(() => 1, (_key, ids) => this.queueChanged(ids), message => this.log(message));
   private turnActivity = new Map<string, TaskActivity>();
@@ -907,12 +909,15 @@ export class TaskService {
       const handoffId=opts.handoff?.id ?? (resume ? prev?.handoff_id : null);
       const history = handoffId && this.history?.serverFor({taskId,sessionId,handoffId});
       if (history) secrets.push(...history.env.filter(entry => entry.name === 'AIC_HISTORY_TOKEN').map(entry => entry.value));
+      const mcpBridge = this.mcp?.bridgeFor({ taskId, sessionId, agent: row.agent }) ?? null;
+      if (mcpBridge) secrets.push(...mcpBridge.env.filter(entry => entry.name === 'AIC_MCP_TOKEN').map(entry => entry.value));
+      const mcpServers = [...(history ? [history] : []), ...(mcpBridge ? [mcpBridge] : [])];
       const redactor = new StreamRedactor(secrets);
       const conn = await a.spawn({
         cwd: await this.runtimePath(taskId), model: row.model, effort: row.effort, permission: row.permission_level,
         host: this.host(taskId, sessionId, secrets, redactor), sessionLabel: sessionId,
         ...(spawnEnv ? { env: spawnEnv.env, profile: spawnEnv.account } : {}),
-        ...(secrets.length ? { redact: secrets } : {}), ...(history ? { mcpServers: [history] } : {}),
+        ...(secrets.length ? { redact: secrets } : {}), ...(mcpServers.length ? { mcpServers } : {}),
         ...(resume ? { resume } : {}), ...(signal ? { signal } : {}), ...(launchModel ? { launchModel: true } : {}),
       });
       opening = conn;
@@ -1581,7 +1586,7 @@ export class TaskService {
     const approval: Approval = {
       id: newId('a'), taskId, sessionId, title: req.title, reason: req.reason, detail: req.detail, cwd: req.cwd,
       options, canAlwaysAllow:!!preview, status: 'pending', decidedBy: null, createdAt: t, expiresAt: t + this.approvalTimeoutMs,
-      ...(row.agent === 'independent'&&operation.tool!=='read' ? { independentToolId: req.toolId } : {}),
+      ...(row.agent === 'independent' && (operation.tool === 'shell' || operation.tool === 'edit') ? { independentToolId: req.toolId } : {}),
     };
     this.db.run(
       'INSERT INTO approvals (id, task_id, session_id, request_json, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',

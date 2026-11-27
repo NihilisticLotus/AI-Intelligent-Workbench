@@ -80,7 +80,7 @@ export function systemRoutes(s: Services) {
         [FeatureKey.PageGenerate]: false,
         [FeatureKey.PageAutomations]: false,
         [FeatureKey.PageMonitor]: true,
-        [FeatureKey.PageCapabilities]: false,
+        [FeatureKey.PageCapabilities]: true,
       },
       machine: s.machine,
       device: { id: d.id, name: d.name, kind: d.kind, source: d.pairing_source },

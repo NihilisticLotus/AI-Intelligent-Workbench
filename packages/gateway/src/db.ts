@@ -324,6 +324,35 @@ const MIGRATIONS: string[] = [
    );
    CREATE INDEX IF NOT EXISTS idx_turn_usage_at ON turn_usage(at);
    CREATE INDEX IF NOT EXISTS idx_events_type_ts ON events(type, ts);`,
+  // v29（2.3 步）：能力中心 MCP 服务表与按任务临时停用覆盖表（密钥明文绝不落表，只存 secrets 引用 ID）。
+  `CREATE TABLE IF NOT EXISTS mcp_servers (
+     id TEXT PRIMARY KEY,
+     name TEXT NOT NULL UNIQUE,
+     description TEXT NOT NULL DEFAULT '',
+     transport TEXT NOT NULL CHECK(transport IN ('stdio','http')),
+     command TEXT,
+     args_json TEXT NOT NULL DEFAULT '[]',
+     url TEXT,
+     env_refs_json TEXT NOT NULL DEFAULT '{}',
+     header_refs_json TEXT NOT NULL DEFAULT '{}',
+     concurrency TEXT NOT NULL DEFAULT 'shared' CHECK(concurrency IN ('shared','exclusive')),
+     agents_json TEXT NOT NULL DEFAULT '[]',
+     enabled INTEGER NOT NULL DEFAULT 1,
+     status TEXT NOT NULL DEFAULT 'idle' CHECK(status IN ('idle','starting','ready','error','disabled')),
+     last_error TEXT,
+     last_checked_at INTEGER,
+     last_called_at INTEGER,
+     last_called_tool TEXT,
+     tools_json TEXT NOT NULL DEFAULT '[]',
+     created_at INTEGER NOT NULL,
+     updated_at INTEGER NOT NULL
+   );
+   CREATE TABLE IF NOT EXISTS task_mcp_overrides (
+     task_id TEXT NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+     server_id TEXT NOT NULL REFERENCES mcp_servers(id) ON DELETE CASCADE,
+     disabled INTEGER NOT NULL DEFAULT 1,
+     PRIMARY KEY (task_id, server_id)
+   );`,
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS.length;

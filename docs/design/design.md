@@ -1,6 +1,7 @@
 # AI Console 设计文档
 
-> 版本 0.4.69 · 2026-11-27 · 状态：设计中
+> 版本 0.4.70 · 2026-11-27 · 状态：设计中
+> v0.4.70 同步第二阶段第 2.3 步能力中心（上）MCP 工具管家与结果限流网关：新增共享协议 `packages/protocol/src/mcp.ts`（`McpServerSummary`、`CreateMcpServerBody`、`PatchMcpServerBody`、`McpParseResult`、`McpTestResult`、`TaskMcpConnections` 等，密钥只写不回显）；SQLite 迁移至 v29 新增 `mcp_servers` 与 `task_mcp_overrides`；实现智能粘贴解析器 `mcp/parser.ts`（JSON、`claude mcp add`、单行命令与 HTTP URL，拒绝 shell 注入与受保护环境变量）、受控 Stdio/HTTP MCP 客户端 `mcp/client.ts`（`shell:false`、`windowsHide:true`、2.1 环境变量白名单、ProcessRegistry 登记与 45 秒看门狗强杀、2.1 出站防内网门禁、8,000 字限流截断与 `external_data` 防注入信封）及 `mcp/hub.ts`（DPAPI 密钥引用、>40 工具自动折叠为 `search_tools`/`describe_tool`/`call_tool`、独占锁串行队列、独立 Agent 审批挂载与第三方 ACP `aic-mcp-hub` 受控桥接）；新增 `/api/v1/mcp/*` 与 `/api/v1/tasks/:id/mcp` 并开启 `FeatureKey.PageCapabilities`。见 [step-2.3.md](../acceptance/step-2.3.md)。
 > v0.4.69 同步第二阶段第 2.2 步监控告警、调用账本与花费上限阀门：新增共享协议 `packages/protocol/src/monitor.ts`（`TaskSource`、`UsageCapRule`、`UpsertUsageCapBody`、`UsageCapEvaluation`、`MonitorOverview` 等，并在 `ErrorCode`/`ErrorActionKey` 追加 `usage.cap_exceeded` 与 `open_monitor`）；SQLite 迁移至 v28 新增 `usage_cap_rules` 表及用量/事件时间索引；实现 `MonitorService` 诚实汇总全局/按 Agent/按项目当日与当月 Token 及实际报告/预留费用（订阅制无金额绝不估价或伪造 `$0`），并在新任务与新回合启动前执行 80% 提醒 / 100% 达限阀门（默认 `block_unattended` 仅拦无人值守任务、放行制作人手动消息且绝不中断运行中回合）；新增 `GET /api/v1/monitor/overview`、`GET/PUT/DELETE /api/v1/monitor/caps`（写操作 `requireLocal`）并开启 `FeatureKey.PageMonitor`。见 [step-2.2.md](../acceptance/step-2.2.md)。
 > v0.4.68 同步第二阶段第 2.1 步网络安全加固基线：新增 `packages/protocol/src/security.ts`（`ProvenanceTier`、`SecurityStatus`）；新增消息来源防伪信封 `security/provenance.ts`（三档权威隔离 + 零宽/BiDi 清洗 + 半角/全角/中文伪造封条转义）接入 `handoff/render.ts` 与 `handoff/execution.ts`；新增受控子进程环境变量白名单 `security/env-policy.ts` 由 `independent/commands.ts` 复用；抽离并强化公共出站防内网探测门禁 `security/egress.ts`（支持 `::ffff:` 映射 IPv6 解包、禁止回打 Gateway 监听端口与 DNS-pinned `all: true` 默认严格公网模式）供 `metadata-http.ts` / `model-http.ts` / `discovery.ts` / `model-driver.ts` / `handoff/summary.ts` 复用；新增 `GET /api/v1/security/status` 与前端只读锁 100% 对齐。见 [step-2.1.md](../acceptance/step-2.1.md)。
 > v0.4.67 同步 2026-11-26 全项目代码审查加固：`/api/v1/hello` 动态上报 `Worktrees`/`RealAgents`/`FsBrowse`；收紧局域网管理路由 `requireLocal` 与删任务二次确认、WS 吊销同步丢帧强断、目录校验与权限路径/凭据/Git 命令守卫；隔离 ZCode `XDG_CONFIG_HOME`、补齐 ACP 恢复会话权限重设与 Gateway 私有环境变量剥离，及工作区/信号量/进程/文件清单稳定性修复。见 [workbench-review-2026-11-26.md](../acceptance/workbench-review-2026-11-26.md)。
@@ -1848,6 +1849,18 @@ config_backups (id TEXT PRIMARY KEY, agent_id TEXT, path TEXT, blob_ref TEXT, re
 | 项 | 说明 | 应对 |
 |---|---|---|
 | ACP 注入的 MCP 被忽略 | 各家支持不一 | M2 阶段逐个实测；不支持的走“写入一条配置” |
+
+### 25.9 第 2.3 步落地实现：MCP 工具管家与结果限流网关
+
+- **登记与智能粘贴解析（`packages/gateway/src/mcp/parser.ts`）**：支持解析 JSON 片段（含 Markdown 代码块、`mcpServers` 多项对象与单项对象）、`claude mcp add` 命令、单行启动命令与 HTTP/HTTPS URL，自动将 `blender`/`houdini`/`renderdoc` 等桌面联动服务设为 `exclusive` 独占锁；严格拒绝管道/分号/命令替换等 Shell 注入字符、直接登记 `cmd.exe`/`powershell`/`sh`、覆盖 `AIC_*`/`NODE_OPTIONS`/`PATH` 等受保护环境变量以及 `file://` 或含凭据 URL。
+- **密钥隔离与迁移 v29（`mcp_servers` + `task_mcp_overrides`）**：环境变量与请求头密钥仅经 `SecretService`（Windows DPAPI）加密存入 `secrets` 表，数据库只保存引用 ID；查询接口仅返回变量名与末 4 位提示，删除或替换时自动清理旧密文。
+- **受控执行、看门狗与结果限流（`mcp/client.ts` + `mcp/hub.ts`）**：
+  - Stdio 模式固定 `shell: false`、`windowsHide: true`，使用 2.1 的 `buildIsolatedSubprocessEnv` 隔离环境变量并登记到 `ProcessRegistry`，默认 45 秒无响应看门狗通过 `killTree` 回收整棵进程树不留孤儿进程；
+  - HTTP 模式接入 2.1 `assertEgressUrl` + `createPinnedLookup`（禁止重定向、512 KB 响应上限、禁止回打 Gateway 自身端口与探测云元数据）；
+  - 单次返回先脱敏已知密钥，超 8,000 字符自动生成结构化截断摘要，并一律包裹 2.1 的 `external_data` 防注入信封；
+  - 单服务暴露超过 40 个工具时自动折叠为 `search_tools` / `describe_tool` / `call_tool` 三步元工具，避免撑爆上下文；
+  - 独立 Agent 直接挂载并在 `ask` 权限下经统一审批后调用（`readonly` 拒绝外部调用），第三方 ACP 会话经 `aic-mcp-hub` 本地一次性令牌桥接（`mcp/acp-bridge.mjs` → `POST /api/v1/internal/mcp/rpc`）复用同一套限流与防注入护栏。
+- **接口与开关**：`GET /api/v1/mcp/servers`、`POST /api/v1/mcp/parse`（`requireLocal`）、`POST/PATCH/DELETE /api/v1/mcp/servers`（`requireLocal`）、`POST /api/v1/mcp/servers/:id/test`（`requireLocal`）、`GET/PUT /api/v1/tasks/:id/mcp`；`/api/v1/hello` 正式开启 `FeatureKey.PageCapabilities: true`。
 | 写各家的配置文件出错 | 可能弄坏 Agent 原有设置 | 先备份、显示差异、用户确认；一键还原；格式不认识的文件只读不写 |
 | Skill 目录位置变化 | Agent 升级后不再读原目录 | 每次启动校验联接是否被识别；不识别时提示并改用 `skills_*` 工具 |
 | 桌面软件类 MCP 被多个会话同时调用 | Blender、Houdini 状态互相干扰 | 按服务器设为“独占”，排队调用 |

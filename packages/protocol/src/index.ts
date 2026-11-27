@@ -9,6 +9,7 @@ export * from './workspaces';
 export * from './permissions';
 export * from './security';
 export * from './monitor';
+export * from './mcp';
 import { AlwaysAllowConfirmation } from './permissions';
 import { TaskSource } from './monitor';
 

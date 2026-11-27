@@ -21,6 +21,8 @@ import {
 import {
   AccessAuditEntry, LanPairingCode, LanPairingPending, LanPairingStatus, LanState, MonitorOverview, RevokeLanResult,
   SecurityStatus, UsageCapEvaluation, type PutLanBody, type UpsertUsageCapBody,
+  McpParseResult, McpServerSummary, McpTestResult, TaskMcpConnections,
+  type CreateMcpServerBody, type PatchMcpServerBody, type PutTaskMcpOverridesBody,
 } from '@aic/protocol';
 
 /** 客户端自己产生的错误码（网络断开、超时等），不在服务端协议里 */
@@ -238,6 +240,14 @@ export class HttpClient {
   monitorCaps() { return this.request('GET', '/monitor/caps', { parse: listOf(UsageCapEvaluation) }).then((r) => r.items); }
   saveMonitorCap(body: UpsertUsageCapBody) { return this.request('PUT', '/monitor/caps', { body, parse: UsageCapEvaluation }); }
   deleteMonitorCap(id: string) { return this.request('DELETE', `/monitor/caps/${encodeURIComponent(id)}`, { parse: OkResult }); }
+  mcpServers() { return this.request('GET', '/mcp/servers', { parse: listOf(McpServerSummary) }).then((r) => r.items); }
+  parseMcp(input: string) { return this.request('POST', '/mcp/parse', { body: { input }, parse: McpParseResult }); }
+  createMcpServer(body: CreateMcpServerBody) { return this.request('POST', '/mcp/servers', { body, parse: McpServerSummary }); }
+  patchMcpServer(id: string, body: PatchMcpServerBody) { return this.request('PATCH', `/mcp/servers/${encodeURIComponent(id)}`, { body, parse: McpServerSummary }); }
+  deleteMcpServer(id: string) { return this.request('DELETE', `/mcp/servers/${encodeURIComponent(id)}`, { parse: OkResult }); }
+  testMcpServer(id: string) { return this.request('POST', `/mcp/servers/${encodeURIComponent(id)}/test`, { body: {}, parse: McpTestResult }); }
+  taskMcp(taskId: string) { return this.request('GET', `/tasks/${encodeURIComponent(taskId)}/mcp`, { parse: TaskMcpConnections }); }
+  putTaskMcp(taskId: string, body: PutTaskMcpOverridesBody) { return this.request('PUT', `/tasks/${encodeURIComponent(taskId)}/mcp`, { body, parse: TaskMcpConnections }); }
   pairingStart() { return this.request('POST', '/pairing/start', { body: {}, parse: PairingStartResult }); }
   /** kind / tokenDelivery 由 Platform 决定：浏览器要 Cookie + 设备密钥，桌面和手机要 Bearer 令牌 */
   pairingComplete(code: string, deviceName: string, kind: DeviceKind, tokenDelivery: 'cookie' | 'bearer') {

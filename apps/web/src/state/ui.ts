@@ -42,6 +42,7 @@ function routeFromFragment(h: string): Route {
   }
   if (h === '/settings') return { page: 'settings' };
   if (h === '/monitor' || h.startsWith('/monitor/')) return { page: 'feature', key: FeatureKey.PageMonitor };
+  if (h === '/capabilities' || h.startsWith('/capabilities/')) return { page: 'feature', key: FeatureKey.PageCapabilities };
   const projectSettings=/^\/projects\/([^/]+)\/settings$/.exec(h);
   if(projectSettings)return {page:'project-settings',projectId:decodeURIComponent(projectSettings[1]!)};
   if (h.startsWith('/p/')) return { page: 'feature', key: decodeURIComponent(h.slice(3)) };

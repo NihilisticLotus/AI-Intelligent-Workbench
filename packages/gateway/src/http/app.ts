@@ -17,6 +17,7 @@ import { taskRoutes } from './tasks';
 import { agentRoutes } from './agents';
 import { independentRoutes } from './independent';
 import { monitorRoutes } from './monitor';
+import { mcpRoutes } from './mcp';
 import { staticHandler } from './static';
 import { historyRoutes } from './history';
 import { errorLogText } from '../error-log';
@@ -89,6 +90,13 @@ export function createApp(s: Services, opts: { webDist: string }) {
         return fail(c, Errors.forbidden('历史查询只接受本机会话进程'));
       }
       s.history.authenticate(c.req.header('authorization'));
+    } else if (c.req.path === API_BASE + '/internal/mcp/rpc' && c.req.method === 'POST') {
+      const headers = c.req.raw.headers;
+      if (!isLocalRequest(c) || headers.has('origin') || headers.has('cookie') ||
+          Array.from(headers.keys()).some(name => name.startsWith('sec-fetch-'))) {
+        return fail(c, Errors.forbidden('MCP 桥接接口只接受本机会话进程'));
+      }
+      s.mcp.authenticateBridge(c.req.header('authorization'));
     } else if (!PUBLIC_API.has(c.req.path) && !(c.req.method === 'GET' && PAIRING_STATUS_PATH.test(c.req.path))) {
       const device = auth.authenticate(credsOf(c), ip);
       if (!device) {
@@ -128,6 +136,7 @@ export function createApp(s: Services, opts: { webDist: string }) {
   app.route(API_BASE, agentRoutes(s));
   app.route(API_BASE, independentRoutes(s));
   app.route(API_BASE, monitorRoutes(s));
+  app.route(API_BASE, mcpRoutes(s));
 
   // 没有匹配的 API：统一 404 ApiError；其他路径交给静态网页
   app.all(`${API_BASE}/*`, (c) => fail(c, Errors.notFound('没有这个接口')));

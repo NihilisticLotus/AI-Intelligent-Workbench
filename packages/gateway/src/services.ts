@@ -21,6 +21,7 @@ import type { LanPairing } from './lan/pairing';
 import type { AccessAudit } from './lan/audit';
 import type { AccessConfirmation } from './lan/confirmation';
 import type { MonitorService } from './monitor';
+import type { McpHub } from './mcp/hub';
 
 export interface Services {
   db: Db;
@@ -46,6 +47,7 @@ export interface Services {
   groups: GroupService;
   tasks: TaskService;
   monitor: MonitorService;
+  mcp: McpHub;
   workspaces: WorkspaceManager;
   /** 实际监听的端口 */
   port(): number;

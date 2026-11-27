@@ -31,6 +31,7 @@ import { IndependentTaskRuntime } from './independent/task-runtime';
 import type { readMetadataJson } from './independent/metadata-http';
 import { TaskService } from './tasks';
 import { MonitorService } from './monitor';
+import { McpHub } from './mcp/hub';
 import { HistoryAccess } from './handoff/history-access';
 import { HandoffExecution } from './handoff/execution';
 import { Git } from './git';
@@ -282,6 +283,13 @@ async function startGateway(opts: GatewayOptions, dataDir: string, lock: Instanc
   const independentRuntime = new IndependentTaskRuntime(db, independent, events, attachments, dataDir, processes, orphanCleanup, blockedLocalPorts);
   independentRuntime.recoverOnStartup();
   tasks.independentRuntime = independentRuntime;
+  const mcp = new McpHub(db, secrets, events, processes, {
+    port: () => port,
+    blockedLocalPorts,
+    allowFakeIpProxy: () => independent.getNetwork().allowFakeIpProxy,
+  });
+  independentRuntime.mcp = mcp;
+  tasks.mcp = mcp;
   const monitor = new MonitorService(db, {
     events,
     listAgents: async () => [...await agentSvc.list(), independentRuntime.info()],
@@ -315,7 +323,7 @@ async function startGateway(opts: GatewayOptions, dataDir: string, lock: Instanc
   const accessConfirmation = new AccessConfirmation(db, auth, events, lanPairing, accessAudit, log, opts.accessConfirmationTtlMs);
 
   const services: Services = {
-    db, attachments, independent, independentDiscovery, independentRuntime, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks, monitor, workspaces,
+    db, attachments, independent, independentDiscovery, independentRuntime, lastExit, auth, events, agents, agentSvc, profiles, secrets, processes, projects, groups, tasks, monitor, mcp, workspaces,
     history, port: () => port, lan, lanPairing, accessAudit, accessConfirmation,
     machine: { id: machineId, name: hostname(), os: process.platform === 'win32' ? 'windows' : process.platform },
     version: VERSION,

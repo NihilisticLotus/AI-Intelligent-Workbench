@@ -442,3 +442,66 @@ button.task-row { width: 100%; border: 0; background: none; text-align: left; fo
 @media (max-width: 900px) {
   .monitor-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+/* ---------- 2.3：能力中心（MCP 工具管家）与右侧连接面板 ---------- */
+.cap-head-acts { margin-left: auto; display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.cap-page { max-width: 1040px; transition: opacity .15s; }
+.cap-page.refetch { opacity: .68; }
+.cap-intro { margin: 0 0 var(--sp-3); color: var(--fg-2); font-size: var(--fs-13); line-height: 1.6; }
+.cap-tabs { margin-bottom: var(--sp-3); }
+.cap-count { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 5px; margin-left: 6px; border-radius: var(--r-pill); background: var(--bg-3); color: var(--fg-2); font-size: 11px; }
+.cap-section { display: flex; flex-direction: column; gap: var(--sp-3); }
+.cap-sec-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex-wrap: wrap; }
+.cap-sec-head h3 { margin: 0; }
+.cap-empty { padding: var(--sp-5) var(--sp-4); text-align: center; display: flex; flex-direction: column; align-items: center; gap: var(--sp-2); }
+.cap-empty h3 { margin: 0; font-size: var(--fs-15); color: var(--fg-1); }
+.cap-empty p { margin: 0; max-width: 520px; font-size: var(--fs-13); color: var(--fg-2); line-height: 1.6; }
+.cap-smart-box { display: flex; flex-direction: column; gap: var(--sp-2); padding: var(--sp-3); border-radius: var(--r-card); border: 1px solid var(--line); background: var(--bg-1); }
+.cap-smart-box label { font-size: var(--fs-12); font-weight: 600; color: var(--fg-1); }
+.cap-smart-box textarea { width: 100%; font-family: var(--font-mono); font-size: var(--fs-12); }
+.cap-smart-acts { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.cap-parse-badge { font-size: var(--fs-12); color: var(--ok); }
+.cap-candidates { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: var(--fs-12); color: var(--fg-2); }
+.cap-warn-line { margin: 0; font-size: var(--fs-12); color: var(--attn); }
+.cap-form { display: flex; flex-direction: column; gap: var(--sp-3); }
+.cap-form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-3); }
+.cap-form-grid label { display: flex; flex-direction: column; gap: 6px; font-size: var(--fs-12); color: var(--fg-2); min-width: 0; }
+.cap-form-wide { grid-column: 1 / -1; }
+.cap-field-block { display: flex; flex-direction: column; gap: var(--sp-2); }
+.cap-field-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex-wrap: wrap; }
+.cap-field-title { font-size: var(--fs-12); color: var(--fg-2); }
+.cap-agent-checks { display: flex; flex-wrap: wrap; gap: 8px 14px; }
+.cap-check-chip { display: inline-flex; align-items: center; gap: 6px; font-size: var(--fs-12); color: var(--fg-1); cursor: pointer; }
+.cap-saved-secret { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; padding: 6px 10px; border-radius: var(--r-ctrl); background: var(--bg-1); border: 1px solid var(--line); font-size: var(--fs-12); }
+.cap-secret-hint { color: var(--fg-2); flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.cap-kv-row { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: var(--sp-2); align-items: center; }
+.cap-form-acts { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+.cap-list { display: flex; flex-direction: column; gap: var(--sp-3); }
+.cap-card { display: flex; flex-direction: column; gap: var(--sp-3); min-width: 0; }
+.cap-card.is-off { opacity: .72; }
+.cap-card-top { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); flex-wrap: wrap; }
+.cap-card-title { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; min-width: 0; }
+.cap-card-title strong { font-size: var(--fs-14); color: var(--fg-1); font-family: var(--font-mono); overflow-wrap: anywhere; }
+.cap-card-acts { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cap-card-desc { margin: 0; font-size: var(--fs-13); color: var(--fg-2); line-height: 1.55; }
+.cap-meta-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--sp-2) var(--sp-4); font-size: var(--fs-12); color: var(--fg-2); }
+.cap-meta-grid > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.cap-meta-k { color: var(--fg-3); font-size: 11px; }
+.cap-meta-code { font-family: var(--font-mono); font-size: 12px; color: var(--fg-1); overflow-wrap: anywhere; }
+.cap-err-box { margin: 0; padding: 8px 10px; border-radius: var(--r-ctrl); background: var(--err-weak); color: var(--err); font-size: var(--fs-12); overflow-wrap: anywhere; }
+.cap-test-log { padding: var(--sp-3); border-radius: var(--r-card); border: 1px solid var(--line); background: var(--bg-1); font-size: var(--fs-12); }
+.cap-test-log.ok { border-color: color-mix(in srgb, var(--ok) 40%, var(--line)); }
+.cap-test-log.err { border-color: color-mix(in srgb, var(--err) 40%, var(--line)); }
+.cap-test-head { margin-bottom: 6px; color: var(--fg-1); }
+.cap-test-log ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; color: var(--fg-2); }
+.cap-tools-wrap { display: flex; flex-direction: column; gap: var(--sp-2); align-items: flex-start; }
+.cap-tool-list { list-style: none; margin: 0; padding: 0; width: 100%; display: flex; flex-direction: column; gap: 4px; max-height: 240px; overflow-y: auto; }
+.cap-tool-list li { display: flex; gap: var(--sp-2); align-items: baseline; flex-wrap: wrap; padding: 6px 8px; border-radius: var(--r-ctrl); background: var(--bg-1); font-size: var(--fs-12); color: var(--fg-2); }
+.cap-tool-list code { color: var(--fg-1); font-family: var(--font-mono); }
+.d-mcp-list { list-style: none; margin: 6px 0 8px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.d-mcp-item { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: 7px 9px; border-radius: var(--r-ctrl); border: 1px solid var(--line); background: var(--bg-1); }
+.d-mcp-item.is-off { opacity: .66; }
+.d-mcp-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.d-mcp-info strong { font-size: var(--fs-12); color: var(--fg-1); overflow-wrap: anywhere; }
+.d-mcp-meta { font-size: 11px; color: var(--fg-3); overflow-wrap: anywhere; }
+.d-mcp-foot { margin: 6px 0 8px; }

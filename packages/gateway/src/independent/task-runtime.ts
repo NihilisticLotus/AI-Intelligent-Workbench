@@ -30,6 +30,7 @@ import { IndependentTurnEngine, type IndependentApprovalClock } from './turn-eng
 import { independentModelTools } from './tool-definitions';
 import { usableCapability } from './capabilities';
 import { independentTurnUsage } from '../usage';
+import type { McpHub } from '../mcp/hub';
 const STOP_TEXT = {
   completed: '本回合已完成，等待你验收。', cancelled: '本回合已停止，实际工具与连接已收尾。',
   interrupted: '本回合已中断，请核对记录后继续。', timed_out: '已达到回合时间上限。',
@@ -45,6 +46,7 @@ export class IndependentTaskRuntime {
   readonly store: IndependentConversationStore;
   readonly ledger: IndependentRequestLedger;
   readonly journal: IndependentToolJournal;
+  mcp: McpHub | null = null;
   private details = new Map<string, IndependentApprovalDetail>();
   constructor(private db: Db, private catalog: IndependentCatalog, private events: EventStore,
     private attachments: AttachmentService, private dataDir: string, private processes: ProcessRegistry,
@@ -223,7 +225,11 @@ export class IndependentTaskRuntime {
       (proposal, signal) => approve(proposal.record.id, proposal.kind === 'create' ? '创建项目文件' : '替换项目文本',
         { kind: 'file', proposal }, signal));
     const command = new IndependentCommandTool(this.journal, executor);
-    const tools = options.limits.maxToolCalls > 0 ? independentModelTools(options.fileToolVersion) : [];
+    const builtinTools = options.limits.maxToolCalls > 0 ? independentModelTools(options.fileToolVersion) : [];
+    const mcpBundle = options.limits.maxToolCalls > 0 && this.mcp
+      ? this.mcp.exposedToolsFor(taskId, 'independent')
+      : { definitions: [], dispatch: new Map() };
+    const tools = [...builtinTools, ...mcpBundle.definitions];
     const allowedTools = new Set(tools.map((tool) => tool.name));
     const driver = new IndependentApiDriver(this.catalog, {
       generation: options.generation, context: options.context, accounting: this.ledger.accounting(taskId),
@@ -240,13 +246,52 @@ export class IndependentTaskRuntime {
     }, {
       execute: async (call: IndependentToolCall, identity: { taskId: string; sessionId: string; turnId: string }, signal: AbortSignal, turnClock?: IndependentApprovalClock) => {
         clock = turnClock;
+        const isMcpTool = mcpBundle.dispatch.has(call.name);
         const target = IndependentRelativePath.safeParse(call.arguments && typeof call.arguments === 'object' && 'path' in call.arguments ? call.arguments.path : undefined);
-        const toolId = newId('tool'); host.update({ kind: 'tool_start', toolId, toolKind: call.name === 'command' ? 'execute' : ['write_file', 'create_file', 'replace_text'].includes(call.name) ? 'edit' : 'read', title: call.name, target: target.success ? target.data : null });
+        const toolId = newId('tool'); host.update({ kind: 'tool_start', toolId, toolKind: isMcpTool ? 'fetch' : call.name === 'command' ? 'execute' : ['write_file', 'create_file', 'replace_text'].includes(call.name) ? 'edit' : 'read', title: call.name, target: target.success ? target.data : null });
         let ok = false;
         let memoryCommand: import('@aic/protocol').MemoryCommandResult | undefined;
         let rejected = false;
         try {
           if (!allowedTools.has(call.name)) return { role: 'tool', callId: call.id, name: call.name, outcome: 'error', text: '本次任务未声明这个工具，未执行' };
+          if (isMcpTool && this.mcp) {
+            const mcpEntry = mcpBundle.dispatch.get(call.name)!;
+            const args = call.arguments && typeof call.arguments === 'object' && !Array.isArray(call.arguments)
+              ? (call.arguments as Record<string, unknown>)
+              : {};
+            if (mcpEntry.mode !== 'search' && mcpEntry.mode !== 'describe') {
+              if (permission === 'readonly') {
+                rejected = true;
+                return { role: 'tool', callId: call.id, name: call.name, outcome: 'rejected', text: '只读权限不允许执行外部 MCP 工具调用' };
+              }
+              clock?.pause();
+              try {
+                const detailText = redact(JSON.stringify(args).slice(0, 2000), secrets);
+                const decision = await host.requestPermission({
+                  toolId,
+                  title: `调用 MCP 工具：${call.name}`,
+                  reason: '独立 Agent 请求调用已启用的 MCP 外部工具，请确认后执行。',
+                  detail: detailText,
+                  cwd: null,
+                  operation: { tool: 'any', command: null, paths: [], complete: true, deletion: false },
+                  options: [{ id: 'allow', label: '允许一次', kind: 'allow_once' }, { id: 'reject', label: '拒绝', kind: 'reject_once' }],
+                }, signal);
+                if (signal.aborted || decision.outcome !== 'selected' || decision.optionId !== 'allow') {
+                  rejected = !signal.aborted;
+                  return {
+                    role: 'tool',
+                    callId: call.id,
+                    name: call.name,
+                    outcome: signal.aborted ? 'cancelled' : 'rejected',
+                    text: decision.outcome === 'selected' ? redact(decision.note || '用户未批准本次 MCP 工具调用', secrets) : 'MCP 调用审批已取消或超时',
+                  };
+                }
+              } finally { clock?.resume(); }
+            }
+            const res = await this.mcp.executeExposedTool(taskId, 'independent', call.name, args, signal);
+            ok = !res.isError;
+            return { role: 'tool', callId: call.id, name: call.name, outcome: ok ? 'ok' : 'error', text: res.text };
+          }
           if (call.name !== 'command') {
             if(!['write_file','create_file','replace_text'].includes(call.name)) {
               const args=call.arguments&&typeof call.arguments==='object'?call.arguments as Record<string,unknown>:{};

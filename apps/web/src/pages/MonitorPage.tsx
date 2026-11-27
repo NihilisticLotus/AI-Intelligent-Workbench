@@ -7,7 +7,7 @@ import type {
 import { toApiError } from '../api/http';
 import { requestAgentTest, requestFocusApproval } from '../components/focus';
 import { Icon } from '../components/Icon';
-import { ErrorNotice } from '../components/ui';
+import { confirmDialog, ErrorNotice } from '../components/ui';
 import { agentFallback, clock } from '../lib/format';
 import { api, appStore, useApp, useRemoteAccess } from '../state/app';
 import { setPref } from '../state/prefs';
@@ -70,7 +70,11 @@ export function formatMicrosPlain(micros: number): string {
 
 export function formatMoney(currency: string, micros: number): string {
   const value = micros / 1_000_000;
-  const formatted = value >= 1 ? value.toFixed(2) : value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
+  const formatted = value >= 1
+    ? value.toFixed(2)
+    : micros > 0 && micros < 100
+      ? value.toFixed(6).replace(/0+$/, '').replace(/\.$/, '')
+      : value.toFixed(4).replace(/0+$/, '').replace(/\.$/, '');
   if (currency === 'USD') return `$${formatted}`;
   if (currency === 'CNY') return `¥${formatted}`;
   if (currency === 'EUR') return `€${formatted}`;
@@ -152,6 +156,7 @@ function parseCapBody(form: CapFormState): { body?: UpsertUsageCapBody; error?: 
 export function MonitorPage({ initialOverview }: { initialOverview?: MonitorOverview | null }) {
   const remote = useRemoteAccess();
   const approvals = useApp((s) => s.approvals);
+  const projects = useApp((s) => s.projects);
   const [overview, setOverview] = useState<MonitorOverview | null>(initialOverview ?? null);
   const [loading, setLoading] = useState(!initialOverview);
   const [refreshing, setRefreshing] = useState(false);
@@ -203,11 +208,12 @@ export function MonitorPage({ initialOverview }: { initialOverview?: MonitorOver
 
   const projectNames = useMemo(() => {
     const map = new Map<string, string>();
+    for (const p of projects) map.set(p.id, p.name);
     for (const item of [...(overview?.byProjectToday ?? []), ...(overview?.byProjectMonth ?? [])]) {
       if (item.projectId) map.set(item.projectId, item.label);
     }
     return map;
-  }, [overview]);
+  }, [overview, projects]);
 
   const defaultAgent: AgentKind = useMemo(() => {
     const firstEnabled = overview?.agents.find((a) => a.enabled);
@@ -297,6 +303,15 @@ export function MonitorPage({ initialOverview }: { initialOverview?: MonitorOver
 
   const removeCap = async (ev: UsageCapEvaluation) => {
     if (remote || savingCap) return;
+    const scopeLabel = capScopeLabel(ev, agentNames);
+    const periodLabel = ev.rule.period === 'daily' ? '每日' : '每月';
+    const ok = await confirmDialog({
+      title: '删除这条上限规则？',
+      body: `删除「${scopeLabel} · ${periodLabel}」上限后，该范围将不再触发 80% 提醒或 100% 拦截。`,
+      ok: '确认删除',
+      danger: true,
+    });
+    if (!ok || !mountedRef.current) return;
     setSavingCap(true);
     try {
       await api.deleteMonitorCap(ev.rule.id);
@@ -322,6 +337,10 @@ export function MonitorPage({ initialOverview }: { initialOverview?: MonitorOver
       return;
     }
     if (agent.quickAction === 'test') {
+      if (remote) {
+        toast('请到运行 AI Console 的电脑上测试 Agent 连接', 'attn');
+        return;
+      }
       navigate({ page: 'agents', agent: agent.kind });
       requestAgentTest(agent.kind);
       return;
@@ -454,7 +473,9 @@ export function MonitorPage({ initialOverview }: { initialOverview?: MonitorOver
 
                 <div className="monitor-tile">
                   <div className="monitor-tile-k">今日消耗</div>
-                  <div className="monitor-tile-v">{todayTokens !== null ? formatTokens(todayTokens) : '0'}</div>
+                  <div className="monitor-tile-v">
+                    {overview.today.turns === 0 ? '0' : (todayTokens !== null ? formatTokens(todayTokens) : '未报告')}
+                  </div>
                   <div className="monitor-tile-sub">
                     {todayCostText ? `已报告费用 ${todayCostText}` : '未报告金额（订阅制不估价）'}
                   </div>
@@ -854,7 +875,11 @@ export function MonitorPage({ initialOverview }: { initialOverview?: MonitorOver
                       {[...enabledAgents, ...disabledAgents].map((agent) => {
                         const st = agentStatusInfo(agent);
                         const actionLabel = agent.quickAction === 'login' ? '去登录' : agent.quickAction === 'test' ? '去测试' : '去管理';
-                        const actionDisabled = remote && agent.quickAction === 'login';
+                        const actionDisabled = remote && (agent.quickAction === 'login' || agent.quickAction === 'test');
+                        const todayAgentTokens = effectiveSummaryTokens(agent.todayUsage);
+                        const monthAgentTokens = effectiveSummaryTokens(agent.monthUsage);
+                        const todayUnreported = agent.todayUsage.turns > 0 && todayAgentTokens === null;
+                        const monthUnreported = agent.monthUsage.turns > 0 && monthAgentTokens === null;
                         return (
                           <tr key={agent.kind} className={!agent.enabled ? 'is-off' : undefined}>
                             <td><strong>{agent.displayName}</strong></td>
@@ -866,11 +891,11 @@ export function MonitorPage({ initialOverview }: { initialOverview?: MonitorOver
                             <td className="num mono">
                               {agent.concurrencyLimit !== null ? `${agent.runningSessions} / ${agent.concurrencyLimit}` : String(agent.runningSessions)}
                             </td>
-                            <td className={'num mono' + (effectiveSummaryTokens(agent.todayUsage) === null ? ' na' : '')}>
-                              {formatTokens(effectiveSummaryTokens(agent.todayUsage))}
+                            <td className={'num mono' + (todayUnreported ? ' na' : '')}>
+                              {agent.todayUsage.turns === 0 ? '0' : formatTokens(todayAgentTokens)}
                             </td>
-                            <td className={'num mono' + (effectiveSummaryTokens(agent.monthUsage) === null ? ' na' : '')}>
-                              {formatTokens(effectiveSummaryTokens(agent.monthUsage))}
+                            <td className={'num mono' + (monthUnreported ? ' na' : '')}>
+                              {agent.monthUsage.turns === 0 ? '0' : formatTokens(monthAgentTokens)}
                             </td>
                             <td className="monitor-err-cell">
                               {agent.recentFailureCount > 0 ? (
@@ -885,7 +910,7 @@ export function MonitorPage({ initialOverview }: { initialOverview?: MonitorOver
                                 type="button"
                                 className="btn xs"
                                 disabled={actionDisabled}
-                                title={actionDisabled ? '请到运行 AI Console 的电脑上登录' : undefined}
+                                title={actionDisabled ? '请到运行 AI Console 的电脑上操作' : undefined}
                                 onClick={() => runAgentAction(agent)}
                               >
                                 {actionLabel}

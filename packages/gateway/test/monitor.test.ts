@@ -79,15 +79,16 @@ describe('2.2 监控告警、调用账本与花费上限阀门', () => {
       usage: { inputTokens: 400, outputTokens: 200, totalTokens: 600 },
     });
 
-    // 模拟第三方 ACP session.usage 同一会话上报两次累计金额（0.10 -> 0.25 USD），应取最大值 0.25 而不相加为 0.35
+    // 模拟第三方 ACP session.usage 跨自然日/跨自然月会话：
+    // 11-30 23:59:59 累计上报 0.10 USD，12-01 00:00:01 同会话继续累计上报 0.25 USD -> 11-30 计 0.10，12-01 净增计 0.15（绝不重复算成 0.10+0.25=0.35）
     gw.gw.services.db.run(
       "INSERT INTO sessions (id, task_id, agent_id, status, started_at) VALUES ('s-acp-1', ?, 'claude', 'ended', ?)",
       taskId,
-      dec01Start,
+      nov30End - 10_000,
     );
     gw.gw.services.db.run(
       "INSERT INTO events (ts, task_id, session_id, type, payload, replay) VALUES (?, ?, 's-acp-1', 'session.usage', ?, 0)",
-      dec01Start + 1000,
+      nov30End,
       taskId,
       JSON.stringify({ used: 500, size: 100000, cost: { amount: 0.10, currency: 'USD' } }),
     );
@@ -114,11 +115,12 @@ describe('2.2 监控告警、调用账本与花费上限阀门', () => {
       tzOffsetMinutes: () => -480,
     });
 
-    // 在 11-30 23:59:59 视角：只看到 11-30 的 1500 Token，且订阅制没有费用（reportedCosts 为空，不伪造 $0）
+    // 在 11-30 23:59:59 视角：看到 11-30 的 1500 Token；演示 Agent 订阅制没有费用（reportedCosts 为空，不伪造 $0）；Claude 当日上报 0.10 USD
     const ovNov = await monitor.overview();
     expect(ovNov.today.totalTokens).toBe(1500);
     expect(ovNov.today.thoughtTokens).toBeNull();
-    expect(ovNov.today.reportedCosts).toEqual([]);
+    expect(ovNov.today.reportedCosts).toEqual([{ currency: 'USD', micros: 100_000 }]);
+    expect(ovNov.byAgentToday.find((x) => x.agent === 'fake')?.usage.reportedCosts).toEqual([]);
     expect(ovNov.month.totalTokens).toBe(1500);
     expect(ovNov.dailySeries).toHaveLength(7);
     expect(ovNov.dailySeries[6]!.date).toBe('2026-11-30');
@@ -126,14 +128,14 @@ describe('2.2 监控告警、调用账本与花费上限阀门', () => {
 
     // 在 12-01 12:00:00 视角：今日和本月均已清零，只计 12-01 的 600 Token；
     // 7 天趋势仍保留 11-30 (1500) 和 12-01 (600)；
-    // 已报告费用 = 0.25 (ACP 去重后最大值) + 0.05 (独立摘要) = 0.30 USD (300_000 micros)
+    // 已报告费用 = 0.15 (跨日同会话净增量 0.25 - 0.10) + 0.05 (独立摘要) = 0.20 USD (200_000 micros)
     fakeNow = dec01Noon;
     const ovDec = await monitor.overview();
     expect(ovDec.today.totalTokens).toBe(600);
     expect(ovDec.month.totalTokens).toBe(600);
-    expect(ovDec.today.reportedCosts).toEqual([{ currency: 'USD', micros: 300_000 }]);
+    expect(ovDec.today.reportedCosts).toEqual([{ currency: 'USD', micros: 200_000 }]);
     expect(ovDec.byAgentToday.find((x) => x.agent === 'fake')?.usage.reportedCosts).toEqual([]);
-    expect(ovDec.byAgentToday.find((x) => x.agent === 'claude')?.usage.reportedCosts).toEqual([{ currency: 'USD', micros: 250_000 }]);
+    expect(ovDec.byAgentToday.find((x) => x.agent === 'claude')?.usage.reportedCosts).toEqual([{ currency: 'USD', micros: 150_000 }]);
     expect(ovDec.byAgentToday.find((x) => x.agent === 'independent')?.usage.reportedCosts).toEqual([{ currency: 'USD', micros: 50_000 }]);
     expect(ovDec.dailySeries[5]!.date).toBe('2026-11-30');
     expect(ovDec.dailySeries[5]!.totalTokens).toBe(1500);
@@ -254,12 +256,38 @@ describe('2.2 监控告警、调用账本与花费上限阀门', () => {
     });
     expect(manualAllowed.status).toBe(201);
 
-    // 上限拦截不会把 Agent 误判为故障，但会在最近动态里留痕为 cap 类型
+    // 上限拦截不会把 Agent 误判为故障，但会在最近动态里留痕为 cap 类型；
+    // 即使随后产生 40 条正常已批准审批和 info 提示，也不会把早前的 cap/error 挤出最近动态
+    for (let i = 0; i < 40; i++) {
+      gw.gw.services.db.run(
+        "INSERT INTO events (ts, task_id, session_id, type, payload, replay) VALUES (?, ?, NULL, 'approval.resolved', ?, 0)",
+        Date.now() + i,
+        baseTaskId,
+        JSON.stringify({ approvalId: `ap-${i}`, status: 'approved', optionId: 'allow' }),
+      );
+    }
     const ovCheck = await gw.api('GET', '/monitor/overview', { token });
     expect(ovCheck.status).toBe(200);
     const parsedOv = MonitorOverview.parse(ovCheck.json);
     expect(parsedOv.counts.todayFailedEvents).toBe(0);
     expect(parsedOv.recentEvents.some((e) => e.kind === 'cap')).toBe(true);
+
+    // confirmWorkspace 恢复大副本确认任务时同样走上限阀门，不允许自动化任务绕过
+    gw.gw.services.db.run(
+      "UPDATE tasks SET source = 'automation', status = 'draft' WHERE id = ?",
+      baseTaskId,
+    );
+    gw.gw.services.db.run(
+      "INSERT OR REPLACE INTO workspace_preparations (task_id, state, bytes, error, defer_prompt) VALUES (?, 'confirmation_required', 200000000, '副本较大', 0)",
+      baseTaskId,
+    );
+    const confirmBlocked = await gw.api('POST', `/tasks/${baseTaskId}/workspace/prepare`, {
+      token,
+      body: { confirmLargeCopy: true },
+    });
+    expect(confirmBlocked.status).toBe(429);
+    expect(confirmBlocked.json.code).toBe(ErrorCode.UsageCapExceeded);
+    gw.gw.services.db.run('DELETE FROM workspace_preparations WHERE task_id = ?', baseTaskId);
 
     // 3. 验证“正在运行中的回合不会被中途打断”：
     const slowGw = await startGw({ fakeSpeed: 0.25 });

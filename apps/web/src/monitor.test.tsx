@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { afterEach, describe, expect, it } from 'vitest';
 import { FeatureKey, PROTOCOL_VERSION, type Hello, type MonitorOverview } from '@aic/protocol';
 import { appStore } from './state/app';
-import { MonitorPage } from './pages/MonitorPage';
+import { MonitorPage, formatMoney } from './pages/MonitorPage';
 
 function makeHello(lanConnection: boolean): Hello {
   return {
@@ -247,5 +247,27 @@ describe('2.2 监控页网页渲染与状态检查', () => {
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>.*?新增上限/);
     expect(html).toMatch(/<button[^>]*role="switch"[^>]*disabled=""/);
     expect(html).toMatch(/<button[^>]*disabled=""[^>]*>去登录<\/button>/);
+    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>去测试<\/button>/);
+  });
+
+  it('有未报告 Token 的回合时今日消耗显示“未报告”不伪造 0，极小正费用不舍入成 $0', () => {
+    appStore.set((s) => ({ ...s, hello: makeHello(false) }));
+    expect(formatMoney('USD', 10)).toBe('$0.00001');
+    const ov = baseOverview({
+      today: {
+        turns: 2,
+        reportedTurns: 0,
+        inputTokens: null,
+        outputTokens: null,
+        thoughtTokens: null,
+        cacheReadTokens: null,
+        cacheWriteTokens: null,
+        totalTokens: null,
+        reportedCosts: [{ currency: 'USD', micros: 10 }],
+      },
+    });
+    const html = renderToStaticMarkup(createElement(MonitorPage, { initialOverview: ov }));
+    expect(html).toContain('<div class="monitor-tile-v">未报告</div>');
+    expect(html).toContain('已报告费用 $0.00001');
   });
 });

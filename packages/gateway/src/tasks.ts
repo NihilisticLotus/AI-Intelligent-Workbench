@@ -397,9 +397,15 @@ export class TaskService {
   async confirmWorkspace(id: string): Promise<Task> {
     const prep = this.db.get<{state: string; defer_prompt: number}>('SELECT * FROM workspace_preparations WHERE task_id=?', id);
     if (!prep || prep.state !== 'confirmation_required' || this.isBusy(id)) throw Errors.invalidState('这个任务没有等待复制确认');
+    const row = this.getRow(id);
+    if (!prep.defer_prompt) this.monitor?.assertCanStartTurn(row.agent, row.source ?? 'manual', undefined, id);
     if (await this.prepareNewWorkspace(id, !!prep.defer_prompt, true)) {
       if (prep.defer_prompt) this.setStatus(id, 'draft');
-      else this.startTurn(id, this.getRow(id).prompt);
+      else {
+        const latest = this.getRow(id);
+        this.monitor?.assertCanStartTurn(latest.agent, latest.source ?? 'manual', undefined, id);
+        this.startTurn(id, latest.prompt);
+      }
     }
     return this.get(id);
   }

@@ -11,7 +11,6 @@ import type { EventStore } from './events';
 import { tokenFields } from './usage';
 import { AppError, Errors, newId, now as clockNow } from './util';
 
-const DAY_MS = 86_400_000;
 const AGENT_LABELS: Record<AgentKind, string> = {
   fake: '演示 Agent',
   claude: 'Claude Code',
@@ -265,7 +264,7 @@ export class MonitorService {
       }
     }
 
-    // 3. 汇总第三方 ACP session.usage 中明确上报的费用（按会话取窗口内最大累计值避免重复叠加）
+    // 3. 汇总第三方 ACP session.usage 中明确上报的费用（按会话计算窗口内相对窗口前的净增量，避免跨日/跨月重复叠加）
     const sessionCostRows = this.db.all<{ task_id: string | null; session_id: string | null; payload: string; agent: AgentKind | null; project_id: string | null; project_name: string | null }>(
       `SELECT e.task_id, e.session_id, e.payload, COALESCE(s.agent_id, t.agent) AS agent, t.project_id, p.name AS project_name
        FROM events e
@@ -276,7 +275,8 @@ export class MonitorService {
       from,
       to,
     );
-    const sessionMaxCost = new Map<string, { micros: number; currency: string; agent: AgentKind | null; projectId: string | null; projectName: string | null; taskId: string | null }>();
+    const sessionMaxCost = new Map<string, { micros: number; currency: string; sessionId: string | null; agent: AgentKind | null; projectId: string | null; projectName: string | null; taskId: string | null }>();
+    const activeSessionIds = new Set<string>();
     for (const row of sessionCostRows) {
       if (row.agent === 'independent') continue;
       let data: { cost?: { amount?: unknown; currency?: unknown } };
@@ -285,12 +285,14 @@ export class MonitorService {
       const currency = typeof data?.cost?.currency === 'string' ? data.cost.currency.toUpperCase() : '';
       if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0 || !/^[A-Z]{3}$/.test(currency)) continue;
       const micros = Math.round(amount * 1_000_000);
+      if (row.session_id) activeSessionIds.add(row.session_id);
       const dedupeKey = `${row.session_id ?? row.task_id ?? 'anon'}:${currency}`;
       const existing = sessionMaxCost.get(dedupeKey);
       if (!existing || micros > existing.micros) {
         sessionMaxCost.set(dedupeKey, {
           micros,
           currency,
+          sessionId: row.session_id,
           agent: row.agent,
           projectId: row.project_id,
           projectName: row.project_name,
@@ -298,11 +300,36 @@ export class MonitorService {
         });
       }
     }
-    for (const item of sessionMaxCost.values()) {
-      addCostToBucket(global, item.currency, item.micros, item.taskId);
-      if (item.agent) addCostToBucket(agentBucket(item.agent), item.currency, item.micros, item.taskId);
+    const baselineBefore = new Map<string, number>();
+    if (activeSessionIds.size > 0) {
+      const ids = [...activeSessionIds];
+      const placeholders = ids.map(() => '?').join(',');
+      const priorRows = this.db.all<{ session_id: string | null; payload: string }>(
+        `SELECT session_id, payload FROM events WHERE type = 'session.usage' AND ts < ? AND session_id IN (${placeholders})`,
+        from,
+        ...ids,
+      );
+      for (const row of priorRows) {
+        if (!row.session_id) continue;
+        let data: { cost?: { amount?: unknown; currency?: unknown } };
+        try { data = JSON.parse(row.payload); } catch { continue; }
+        const amount = data?.cost?.amount;
+        const currency = typeof data?.cost?.currency === 'string' ? data.cost.currency.toUpperCase() : '';
+        if (typeof amount !== 'number' || !Number.isFinite(amount) || amount < 0 || !/^[A-Z]{3}$/.test(currency)) continue;
+        const micros = Math.round(amount * 1_000_000);
+        const key = `${row.session_id}:${currency}`;
+        const prev = baselineBefore.get(key) ?? 0;
+        if (micros > prev) baselineBefore.set(key, micros);
+      }
+    }
+    for (const [key, item] of sessionMaxCost.entries()) {
+      const prior = item.sessionId ? (baselineBefore.get(key) ?? 0) : 0;
+      const delta = Math.max(0, item.micros - prior);
+      if (delta === 0 && prior > 0) continue;
+      addCostToBucket(global, item.currency, delta, item.taskId);
+      if (item.agent) addCostToBucket(agentBucket(item.agent), item.currency, delta, item.taskId);
       const pb = projectBucket(item.projectId, item.projectName);
-      if (pb) addCostToBucket(pb, item.currency, item.micros, item.taskId);
+      if (pb) addCostToBucket(pb, item.currency, delta, item.taskId);
     }
 
     return { global, byAgent, byProject };
@@ -499,7 +526,8 @@ export class MonitorService {
     const day = localDayBounds(ts, tz);
     const month = localMonthBounds(ts, tz);
     const dayKeys = recentLocalDayKeys(ts, 7, tz);
-    const sevenDaysStart = day.end - 7 * DAY_MS;
+    const firstKeyParts = dayKeys[0]!.split('-').map(Number);
+    const sevenDaysStart = Date.UTC(firstKeyParts[0]!, firstKeyParts[1]! - 1, firstKeyParts[2]!) + tz * 60_000;
 
     const todayAgg = this.aggregateWindow(day.start, day.end);
     const monthAgg = this.aggregateWindow(month.start, month.end);
@@ -578,6 +606,7 @@ export class MonitorService {
 
     const buildAgentBreakdown = (agg: WindowAggregation): MonitorBreakdownItem[] =>
       [...agg.byAgent.entries()]
+        .sort(([, a], [, b]) => b.effectiveTokens - a.effectiveTokens || b.turns - a.turns)
         .map(([agent, bucket]): MonitorBreakdownItem => ({
           key: agent,
           label: agentNameMap.get(agent) ?? AGENT_LABELS[agent] ?? agent,
@@ -585,11 +614,11 @@ export class MonitorService {
           agent,
           tasks: bucket.taskIds.size,
           usage: toTotals(bucket),
-        }))
-        .sort((a, b) => (b.usage.totalTokens ?? 0) - (a.usage.totalTokens ?? 0) || b.usage.turns - a.usage.turns);
+        }));
 
     const buildProjectBreakdown = (agg: WindowAggregation): MonitorBreakdownItem[] =>
       [...agg.byProject.entries()]
+        .sort(([, a], [, b]) => b.bucket.effectiveTokens - a.bucket.effectiveTokens || b.bucket.turns - a.bucket.turns)
         .map(([projectId, entry]): MonitorBreakdownItem => ({
           key: projectId,
           label: entry.name,
@@ -597,8 +626,7 @@ export class MonitorService {
           projectId,
           tasks: entry.bucket.taskIds.size,
           usage: toTotals(entry.bucket),
-        }))
-        .sort((a, b) => (b.usage.totalTokens ?? 0) - (a.usage.totalTokens ?? 0) || b.usage.turns - a.usage.turns);
+        }));
 
     const agents: MonitorAgentHealth[] = rawAgents.map((a) => {
       const enabled = a.enabled ?? a.status !== 'disabled';
@@ -627,13 +655,15 @@ export class MonitorService {
       };
     });
 
-    // 最近 30 条监控相关事件（错误、告警提示、审批记录）
+    // 最近 30 条监控相关事件（条件前置到 SQL，避免大量已批准审批或普通 info 通知挤掉真实错误与上限拦截）
     const rawRecentEvents = this.db.all<{ seq: number; ts: number; type: string; task_id: string | null; payload: string; task_title: string | null; agent: AgentKind | null }>(
       `SELECT e.seq, e.ts, e.type, e.task_id, e.payload, t.title AS task_title, COALESCE(s.agent_id, t.agent) AS agent
        FROM events e
        LEFT JOIN sessions s ON s.id = e.session_id
        LEFT JOIN tasks t ON t.id = e.task_id
-       WHERE e.type IN ('error', 'session.notice', 'approval.resolved')
+       WHERE e.type = 'error'
+          OR (e.type = 'session.notice' AND json_extract(e.payload, '$.level') = 'warn')
+          OR (e.type = 'approval.resolved' AND json_extract(e.payload, '$.status') IN ('rejected', 'expired'))
        ORDER BY e.seq DESC
        LIMIT 30`,
     );

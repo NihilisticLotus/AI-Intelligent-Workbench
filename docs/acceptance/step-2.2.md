@@ -67,3 +67,14 @@
 ## 备注
 
 - 预览完成后已立即终止临时守护进程并清理 `%TEMP%\aic-preview-*` 目录，未改动 `.aic-data` 或任何外部工具凭据目录。
+
+### 2026-11-27 审查复核追加（基于 `51ffde7`）
+
+- 对第 2.2 步前后端与任务入口做对抗式审查，发现并修复 6 项真实问题：
+  1. **`confirmWorkspace` 上限阀门绕过（高危）**：大工作副本等待确认后恢复执行时未重查上限阀门，自动化任务可能绕过 100% 拦截；在 [tasks.ts](../../packages/gateway/src/tasks.ts) 的 `confirmWorkspace` 复制前与启动回合前补齐 `assertCanStartTurn` 校验。
+  2. **跨日/跨月会话累计费用重复计费（高危）**：ACP `session.usage` 跨零点上报累计金额时，新窗口直接取最大值会重复算入上一日/上一月费用；[monitor.ts](../../packages/gateway/src/monitor.ts) 改为按会话扣除窗口起点前的历史累计基线，仅统计当前窗口净增量。
+  3. **最近动态被大量已批准审批挤空（中危）**：`recentEvents` 原先先 `LIMIT 30` 再在内存过滤，连续批准 30 次工具调用即可把真实错误与上限拦截挤出列表；改为将 `json_extract` 筛选条件前置进 SQL `WHERE`。
+  4. **7 天边界、排序与跨月项目名**：[monitor.ts](../../packages/gateway/src/monitor.ts) 改用精确日历起点计算 `sevenDaysStart` 并按 `effectiveTokens` 排序明细；[MonitorPage.tsx](../../apps/web/src/pages/MonitorPage.tsx) 的 7 天图例回退读取全局 `projects` 列表，避免跨月 7 天图把真实项目显示成“其他项目”。
+  5. **局域网「去测试」按钮与删除确认**：[MonitorPage.tsx](../../apps/web/src/pages/MonitorPage.tsx) 在局域网下同步禁用「去测试」按钮（与后端 `POST /agents/:kind/test` 的 `requireLocal` 对齐），并为删除上限规则增加 `confirmDialog` 二次确认防误触。
+  6. **诚实口径与极小正费用格式**：有回合但 Token 全未报告时今日消耗明确展示“未报告”而不伪造 `0`，零回合 Agent 显示 `0`；正微美元金额（`< $0.0001`）保留最多 6 位小数不再误舍入成 `$0`。
+- 追加回归复验：`npm run typecheck`（4/4 通过）、`npm test`（**1,281 通过 / 5 跳过 / 0 失败**，新增跨日净增量、40 条审批不挤掉动态、`confirmWorkspace` 429 拦截、未报告/极小金额及局域网「去测试」禁用断言）、`npm run build` 与 `git diff --check` 全绿。

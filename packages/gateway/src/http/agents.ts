@@ -9,6 +9,7 @@ import type { Services } from '../services';
 import { Errors } from '../util';
 import { parseQuery, readBody, type Ctx, type Env } from './app';
 import { requireLocal } from './access-guard';
+import { MetadataHttpError, readMetadataJson, type AddressPolicy } from '../independent/metadata-http';
 
 const LOCAL_LOGIN = '请在这台电脑上登录第三方 Agent';
 const LOCAL_KEY = '请在这台电脑上填写或修改 Key 与授权地址';
@@ -124,7 +125,13 @@ export function agentRoutes(s: Services) {
     const row = s.profiles.row(id);
     if (row.kind !== 'customEndpoint' || !row.base_url) throw Errors.badRequest('只有自定义地址的账号可以刷新模型列表');
     const secret = await s.profiles.secretOf(row);
-    const models = await fetchModels(row.base_url, row.auth_header ?? 'x-api-key', secret);
+    const models = await fetchModels(
+      row.base_url,
+      row.auth_header ?? 'x-api-key',
+      secret,
+      s.independent.getNetwork(),
+      () => (s.port() > 0 ? [s.port()] : []),
+    );
     s.profiles.setModels(id, models);
     s.agentSvc.pushStatus(row.agent);
     return c.json(s.profiles.get(id));
@@ -133,23 +140,52 @@ export function agentRoutes(s: Services) {
   return r;
 }
 
-/** 请求 <baseUrl>/models（10 秒超时，带同一个密钥）。地址已在创建账号时校验过（https 或本机 http） */
-async function fetchModels(baseUrl: string, header: 'x-api-key' | 'bearer', secret: string | null) {
-  const url = `${baseUrl.replace(/\/+$/, '')}/models`;
-  const headers: Record<string, string> = { accept: 'application/json' };
+/** 请求 <baseUrl>/models（经统一出站防内网门禁、10 秒超时与响应体积上限）。 */
+async function fetchModels(
+  baseUrl: string,
+  header: 'x-api-key' | 'bearer',
+  secret: string | null,
+  addressPolicy: AddressPolicy,
+  blockedLocalPorts: () => readonly number[],
+) {
+  let base: URL;
+  let url: URL;
+  try {
+    base = new URL(baseUrl);
+    url = new URL(`${base.href.replace(/\/+$/, '')}/models`);
+  } catch {
+    throw Errors.badRequest('拉取模型列表失败：地址格式无效', '请检查 Base URL；拉不到的话可以手动填写模型列表');
+  }
+  const headers: Record<string, string> = {};
   if (secret) {
-    if (header === 'bearer') headers.authorization = `Bearer ${secret}`;
+    if (header === 'bearer') headers.Authorization = `Bearer ${secret}`;
     else { headers['x-api-key'] = secret; headers['anthropic-version'] = '2023-06-01'; }
   }
-  let res: Response;
+  let j: unknown;
   try {
-    res = await fetch(url, { headers, signal: AbortSignal.timeout(10_000), redirect: 'error' });
-  } catch {
+    const result = await readMetadataJson({
+      base,
+      url,
+      publicCatalog: false,
+      headers,
+      timeoutMs: 10_000,
+      maxBytes: 4 * 1024 * 1024,
+      addressPolicy,
+      blockedLocalPorts,
+    });
+    j = result.json;
+  } catch (error) {
+    if (error instanceof MetadataHttpError) {
+      if (error.status !== null && error.status !== 200) {
+        throw Errors.badRequest(`拉取模型列表失败（HTTP ${error.status}）`, '请检查 API Key；拉不到的话可以手动填写模型列表');
+      }
+      if (error.message.includes('JSON') || error.message.includes('内容无法识别')) {
+        throw Errors.badRequest('模型列表不是 JSON', '可以手动填写模型列表');
+      }
+      throw Errors.badRequest(`拉取模型列表失败：${error.message}`, '请检查 Base URL；拉不到的话可以手动填写模型列表');
+    }
     throw Errors.badRequest('拉取模型列表失败：连不上这个地址', '请检查 Base URL；拉不到的话可以手动填写模型列表');
   }
-  if (!res.ok) throw Errors.badRequest(`拉取模型列表失败（HTTP ${res.status}）`, '请检查 API Key；拉不到的话可以手动填写模型列表');
-  let j: unknown;
-  try { j = await res.json(); } catch { throw Errors.badRequest('模型列表不是 JSON', '可以手动填写模型列表'); }
   const raw = Array.isArray(j) ? j : (j as { data?: unknown; models?: unknown })?.data ?? (j as { models?: unknown })?.models;
   if (!Array.isArray(raw)) throw Errors.badRequest('看不懂这个地址返回的模型列表', '可以手动填写模型列表');
   const models = raw

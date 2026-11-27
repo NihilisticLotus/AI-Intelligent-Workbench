@@ -2,16 +2,24 @@
 // 设计参考 OpenMausBot provenance-label（外部与历史文本不可伪造权威来源），按本仓库契约独立实现。
 import { ProvenanceTier } from '@aic/protocol';
 
-/** 不可见与双向控制字符（零宽空格/连接符、BOM、BiDi 覆盖与隔离符） */
-const INVISIBLE_AND_BIDI_RE = /[\u200B-\u200F\u202A-\u202E\u2060\u2066-\u2069\uFEFF]/gu;
+/** 不可见、软连字符、双向控制与 Unicode Tag 字符（防视觉欺骗与拆词绕过） */
+const INVISIBLE_AND_BIDI_RE = /[\u00AD\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF\u{E0000}-\u{E007F}]/gu;
 
-/** 匹配企图伪造的边界分隔符行（兼容半/全角尖括号与全角 AIC） */
-const FORGED_FENCE_RE = /[<＜]{3}\s*(?:[AＡ][IＩ][CＣ])\s*[-_－—]\s*([^\r\n>＞]*)(?:[>＞]{1,3}|$)/giu;
-const FORGED_END_FENCE_RE = /\b[AＡ][IＩ][CＣ]\s*[-_－—]\s*(?:END|SOURCE|TIER|AUTHORITY|PROVENANCE)\s*[>＞]{2,}/giu;
+/** 兼容半角与全角英文字母的正则片段构造器 */
+const fwWord = (word: string) =>
+  [...word].map((ch) => `[${ch}${String.fromCharCode(ch.charCodeAt(0) + 0xfee0)}]`).join('');
 
-/** 匹配企图伪造的方括号信封标签（兼容 ASCII []、全角 ［］ 与中文 【】） */
-const FORGED_PAIRED_TAG_RE = /[\[［【]\s*[AＡ][IＩ][CＣ]\s*[-_－—]\s*(?:SOURCE|END|TIER|AUTHORITY|PROVENANCE)\b([^\r\n\]］】]*)[\]］】]/giu;
-const FORGED_OPEN_TAG_RE = /[\[［【]\s*[AＡ][IＩ][CＣ]\s*[-_－—]\s*(?:SOURCE|END|TIER|AUTHORITY|PROVENANCE)\b/giu;
+const AIC_PREFIX = `${fwWord('AIC')}\\s*[-_－—–−＿]\\s*`;
+const AIC_KEYWORDS = `(?:${['SOURCE', 'END', 'TIER', 'AUTHORITY', 'PROVENANCE'].map(fwWord).join('|')})`;
+
+/** 匹配企图伪造的边界分隔符行（兼容半/全角尖括号、书名号与全角关键词） */
+const FORGED_FENCE_RE = new RegExp(`[<＜《〈]{2,}\\s*${AIC_PREFIX}([^\\r\\n>＞》〉]*)(?:[>＞》〉]{1,3}|$)`, 'giu');
+const FORGED_END_FENCE_RE = new RegExp(`${AIC_PREFIX}${AIC_KEYWORDS}(?:[\\s:：][^\\r\\n>＞》〉]*)?[>＞》〉]{2,}`, 'giu');
+
+/** 匹配企图伪造的方括号信封标签（兼容 ASCII []、全角 ［］、中文 【】「」『』 与全角关键词） */
+const FORGED_PAIRED_TAG_RE = new RegExp(`[\\[［【「『]\\s*${AIC_PREFIX}${AIC_KEYWORDS}([^\\r\\n\\]］】」』]*)[\\]］】」』]`, 'giu');
+const FORGED_OPEN_TAG_RE = new RegExp(`[\\[［【「『]\\s*${AIC_PREFIX}${AIC_KEYWORDS}`, 'giu');
+const AIC_TOKEN_RE = new RegExp(fwWord('AIC'), 'giu');
 
 const TIER_POLICIES: Record<ProvenanceTier, { title: string; rule: string }> = {
   producer: {
@@ -41,7 +49,7 @@ export function sanitizeProvenanceText(text: string): string {
   for (let pass = 0; pass < 6; pass++) {
     const next = cleaned
       .replace(FORGED_FENCE_RE, (_m, body: string) => {
-        const inner = body.replace(/[AＡ][IＩ][CＣ]/giu, '已过滤').trim();
+        const inner = body.replace(AIC_TOKEN_RE, '已过滤').trim();
         return inner ? `（已转义分隔符：${inner}）` : '（已转义分隔符）';
       })
       .replace(FORGED_END_FENCE_RE, '（已转义分隔符）')

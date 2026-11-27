@@ -185,7 +185,7 @@ export class HandoffExecution {
 
   async input(taskId:string,record:HandoffRecord,summary:string,text:string,attachments:{texts:string[];values:string[];files:PromptAttachment[]},permission:PermissionLevel,action:'redo'|'return'='return') {
     const {clean}=await outgoingRedactor(this.s,taskId,undefined,attachments.values);
-    const cleanUser=await clean(text), cleanBody=await clean(summary), markdown=sanitizeProvenanceText(await clean(record.markdown));
+    const cleanUser=await clean(text), cleanBody=await clean(summary), markdown=await clean(record.markdown);
     const user=cleanUser?wrapProvenance('producer','本轮用户消息',cleanUser):'';
     const body=cleanBody?wrapProvenance('delegated','任务说明 TASK.md',cleanBody):'';
     const attachmentTexts=attachments.texts.map(item=>item?wrapProvenance('external_data','附件文本摘录',item):item).filter(Boolean);

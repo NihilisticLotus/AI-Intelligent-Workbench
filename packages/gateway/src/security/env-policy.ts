@@ -23,10 +23,20 @@ export const ISOLATED_HOME_ENV_KEYS = new Set([
   'PSMODULEANALYSISCACHEPATH',
 ]);
 
+/** 不允许通过 extraVars 覆盖的系统可执行路径查找键（防劫持命令解析） */
+const PROTECTED_SYSTEM_EXEC_KEYS = new Set([
+  'SYSTEMROOT',
+  'WINDIR',
+  'PATH',
+  'PATHEXT',
+  'COMSPEC',
+]);
+
 /** 进程注入勾子、敏感凭据与调试覆盖变量：禁止出现在受控子进程的扩展允许项或注入项中 */
 const FORBIDDEN_EXACT_KEYS = new Set([
   'NODE_OPTIONS',
   'NODE_EXTRA_CA_CERTS',
+  'NODE_TLS_REJECT_UNAUTHORIZED',
   'NODE_PATH',
   'LD_PRELOAD',
   'LD_LIBRARY_PATH',
@@ -48,6 +58,9 @@ const FORBIDDEN_EXACT_KEYS = new Set([
   'HTTP_PROXY',
   'HTTPS_PROXY',
   'ALL_PROXY',
+  'NO_PROXY',
+  'AWS_ACCESS_KEY_ID',
+  'AZURE_OPENAI_API_KEY',
   'DEFAULT_AUTH_REQUEST',
   'MODEL_PROVIDER',
 ]);
@@ -85,8 +98,9 @@ export interface IsolatedSubprocessEnvOptions {
 
 /** 判定环境变量名是否属于禁止暴露给受控子进程的内部/注入/敏感键。 */
 export function isForbiddenSubprocessEnvKey(name: string): boolean {
-  const upper = name.trim().toUpperCase();
-  if (!upper || upper !== name.trim().toUpperCase() || /[=\0\r\n]/.test(name)) return true;
+  const trimmed = name.trim();
+  const upper = trimmed.toUpperCase();
+  if (!upper || trimmed !== name || /[=\0\r\n\s]/.test(name)) return true;
   return FORBIDDEN_EXACT_KEYS.has(upper) || FORBIDDEN_PREFIXES.some((prefix) => upper.startsWith(prefix));
 }
 
@@ -102,29 +116,38 @@ export function buildIsolatedSubprocessEnv(options: IsolatedSubprocessEnvOptions
   for (const key of extraAllowed) {
     const trimmed = key.trim();
     const upper = trimmed.toUpperCase();
-    if (!trimmed || isForbiddenSubprocessEnvKey(upper) || ISOLATED_HOME_ENV_KEYS.has(upper)) {
+    if (!trimmed || trimmed !== key || isForbiddenSubprocessEnvKey(key) || ISOLATED_HOME_ENV_KEYS.has(upper)) {
       throw new Error(`受控子进程白名单不允许放行环境变量：${key}`);
     }
     allowed.add(upper);
   }
 
   const extraValidated: Record<string, string> = {};
+  const extraUpperSeen = new Set<string>();
   for (const [key, value] of Object.entries(extraVars)) {
     const trimmed = key.trim();
     const upper = trimmed.toUpperCase();
-    if (!trimmed || trimmed !== key || isForbiddenSubprocessEnvKey(upper) || ISOLATED_HOME_ENV_KEYS.has(upper)) {
-      throw new Error(`不允许向受控子进程注入受限环境变量：${key}`);
+    if (
+      !trimmed ||
+      trimmed !== key ||
+      isForbiddenSubprocessEnvKey(key) ||
+      ISOLATED_HOME_ENV_KEYS.has(upper) ||
+      PROTECTED_SYSTEM_EXEC_KEYS.has(upper) ||
+      extraUpperSeen.has(upper)
+    ) {
+      throw new Error(`不允许向受控子进程注入受限或冲突环境变量：${key}`);
     }
     if (typeof value !== 'string' || value.includes('\0')) {
       throw new Error(`受控子进程环境变量值无效：${key}`);
     }
+    extraUpperSeen.add(upper);
     extraValidated[key] = value;
   }
 
   const result: Record<string, string> = {};
   for (const [name, value] of Object.entries(source)) {
     const upper = name.toUpperCase();
-    if (value !== undefined && allowed.has(upper)) result[upper] = value;
+    if (value !== undefined && allowed.has(upper) && !extraUpperSeen.has(upper)) result[upper] = value;
   }
 
   return {

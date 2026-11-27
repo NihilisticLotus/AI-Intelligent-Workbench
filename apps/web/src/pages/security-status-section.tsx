@@ -1,5 +1,5 @@
 // 设置页“安全防护状态”卡片：只读展示已默认开启的工作台安全底盘，使用非技术人员可读的中文说明。
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ApiError, SecurityStatus } from '@aic/protocol';
 import { api } from '../state/app';
 import { Icon } from '../components/Icon';
@@ -63,16 +63,21 @@ export function SecurityStatusSection({ initialStatus }: { initialStatus?: Secur
   const [status, setStatus] = useState<SecurityStatus | null>(initialStatus ?? null);
   const [loading, setLoading] = useState(initialStatus === undefined);
   const [error, setError] = useState<ApiError | null>(null);
+  const mountedRef = useRef(true);
+  const reqIdRef = useRef(0);
 
   const load = () => {
+    const id = ++reqIdRef.current;
     setLoading(true);
     setError(null);
     api.securityStatus().then(
       (data) => {
+        if (!mountedRef.current || reqIdRef.current !== id) return;
         setStatus(data);
         setLoading(false);
       },
       (err) => {
+        if (!mountedRef.current || reqIdRef.current !== id) return;
         setError(asApiError(err));
         setLoading(false);
       },
@@ -80,12 +85,19 @@ export function SecurityStatusSection({ initialStatus }: { initialStatus?: Secur
   };
 
   useEffect(() => {
+    mountedRef.current = true;
     if (initialStatus !== undefined) {
+      reqIdRef.current++;
       setStatus(initialStatus);
       setLoading(false);
-      return;
+      return () => {
+        mountedRef.current = false;
+      };
     }
     load();
+    return () => {
+      mountedRef.current = false;
+    };
   }, [initialStatus]);
 
   const rows = status ? buildRows(status) : [];

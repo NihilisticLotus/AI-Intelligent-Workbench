@@ -1,6 +1,6 @@
 // 公共出站网络策略与 DNS-pinned 防内网探测门禁（Egress Policy）。
 // 默认采用严格公网模式，供独立模型/元数据、后续 MCP HTTP、Webhook 与受控浏览器统一复用。
-import { lookup } from 'node:dns';
+import { lookup, type LookupOptions } from 'node:dns';
 import { BlockList, isIP } from 'node:net';
 
 /** 公共拒绝网段（IPv4）：0/8、私网、CGNAT、回环、链路本地/云元数据、基准测试(fake-ip)、保留/组播等 */
@@ -184,18 +184,24 @@ export function isAddressAllowed(targetUrl: URL, address: string, options: Egres
   const family = isIP(normalized);
   if (!family) return false;
 
+  const isPub = isPublicAddress(normalized);
+  const blockedPorts = resolveBlockedPorts(options.blockedLocalPorts);
+  if (!isPub && blockedPorts.has(effectivePort(targetUrl))) return false;
+
   const base = options.baseUrl ?? targetUrl;
   const rawHost = hostOfUrl(base);
-  if (rawHost.toLowerCase() === 'localhost') {
-    return options.allowLocalhost === true && (address === '127.0.0.1' || address === '::1');
+  const hostLower = rawHost.toLowerCase();
+  const hostTrimDot = hostLower.replace(/\.+$/, '');
+  if (hostTrimDot === 'localhost' || hostTrimDot.endsWith('.localhost')) {
+    return hostLower === 'localhost' && options.allowLocalhost === true && (address === '127.0.0.1' || address === '::1');
   }
-  if (isPublicAddress(normalized)) return true;
+  if (isPub) return true;
 
   if (options.allowFakeIpProxy === true && isIP(rawHost) === 0 && isFakeIpProxyAddress(address)) {
     return true;
   }
 
-  if (options.allowExplicitPrivateIp === true && isIP(rawHost) !== 0 && rawHost === address) {
+  if (options.allowExplicitPrivateIp === true && isIP(rawHost) !== 0 && hostLower === address.toLowerCase()) {
     const rawFamily = isIP(address);
     return PRIVATE_LOCAL.check(address, rawFamily === 6 ? 'ipv6' : 'ipv4');
   }
@@ -217,15 +223,17 @@ export function assertEgressUrl(url: URL, options: EgressPolicyOptions = {}): vo
   const rawHost = hostOfUrl(url);
   const normalizedHost = normalizeIp(rawHost);
   const hostLower = rawHost.toLowerCase();
+  const hostTrimDot = hostLower.replace(/\.+$/, '');
+  const isLocalhostName = hostTrimDot === 'localhost' || hostTrimDot.endsWith('.localhost');
   const blockedPorts = resolveBlockedPorts(options.blockedLocalPorts);
   const port = effectivePort(url);
-  const isLocalLiteral = hostLower === 'localhost' || hostLower.endsWith('.localhost') || (isIP(normalizedHost) !== 0 && !isPublicAddress(normalizedHost));
+  const isLocalLiteral = isLocalhostName || (isIP(normalizedHost) !== 0 && !isPublicAddress(normalizedHost));
 
   if (isLocalLiteral && blockedPorts.has(port)) {
     throw new EgressPolicyError('禁止出站请求连接本机 AI Console 服务端口', 'blocked_local_port');
   }
 
-  if (hostLower === 'localhost' || hostLower.endsWith('.localhost')) {
+  if (isLocalhostName) {
     if (!(hostLower === 'localhost' && options.allowLocalhost === true)) {
       throw new EgressPolicyError('出站策略禁止访问本机回环域名', 'blocked_address');
     }
@@ -257,10 +265,12 @@ export function createPinnedLookup(
       address: unknown,
       family?: number,
     ) => void;
-    const lookupOptions = typeof lookupOptionsOrCb === 'object' && lookupOptionsOrCb !== null
-      ? (lookupOptionsOrCb as Parameters<typeof lookup>[1])
-      : {};
-    const wantAll = Boolean((lookupOptions as { all?: boolean }).all);
+    const lookupOptions: LookupOptions = typeof lookupOptionsOrCb === 'number'
+      ? { family: lookupOptionsOrCb }
+      : typeof lookupOptionsOrCb === 'object' && lookupOptionsOrCb !== null
+        ? (lookupOptionsOrCb as LookupOptions)
+        : {};
+    const wantAll = Boolean(lookupOptions.all);
 
     resolver(host, { ...lookupOptions, all: true }, (err, rawAddresses) => {
       const addresses = Array.isArray(rawAddresses) ? rawAddresses : [];

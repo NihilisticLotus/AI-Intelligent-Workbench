@@ -149,8 +149,21 @@ function ServiceDialog({ initial, close, saved }: { initial?: IndependentService
         : field === 'apiKey' ? '密钥：至少 8 个字符，最多 8192 个字符，且不含空白或控制字符'
         : field === 'name' ? '服务名称：请填写 1～100 个字符' : '请检查服务表单，各项高级信息最多 100 个字符');
     }
-    if (service) await api.patchIndependentService(service.id, { ...parsed.data, expectedRevision: service.revision, ...(clearKey ? { apiKey: null } : {}) });
-    else await api.createIndependentService(parsed.data);
+    if (service) {
+      const patch = remote
+        ? {
+            expectedRevision: service.revision,
+            name: parsed.data.name,
+            apiVersion: parsed.data.apiVersion,
+            providerId: parsed.data.providerId,
+            plan: parsed.data.plan,
+            enabled: parsed.data.enabled,
+          }
+        : { ...parsed.data, expectedRevision: service.revision, ...(clearKey ? { apiKey: null } : {}) };
+      await api.patchIndependentService(service.id, patch);
+    } else {
+      await api.createIndependentService(parsed.data);
+    }
     setKey(''); close(); toast('服务已保存'); await saved();
   };
   const reload = service ? async () => { const fresh = await api.independentService(service.id); setService(fresh); setDraft(serviceDraft(fresh)); setKey(''); setClearKey(false); setFieldErrors({}); } : undefined;

@@ -130,7 +130,7 @@ export function AgentsPage() {
     if (!testReq) return;
     const a = agents.find((x) => x.kind === testReq.kind);
     agentTestRequestStore.set(() => null);
-    if (a) { select(a.kind, true); void runTest(a); }
+    if (a) { select(a.kind, true); if (!remote) void runTest(a); }
   }, [testReq]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // 从别处跳来（“去登录”）时滚到详情

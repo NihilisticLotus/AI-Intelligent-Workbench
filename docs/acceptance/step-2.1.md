@@ -67,3 +67,8 @@
 
 - 为保留 [phase-2.md 第 7.3 节](../plans/phase-2.md#73-分步任务拆解21-0--21-5单会话可执行) 指定的测试文件路径 `apps/web/src/security-baseline.test.tsx`，[apps/web/vite.config.ts](../../apps/web/vite.config.ts) 中的测试匹配已扩为 `src/**/*.test.{ts,tsx}`。
 - 临时预览数据目录与项目目录已随预览守护进程终止一并清除，未改动工作区既有 `.aic-data` 或任何外部工具凭据目录。
+
+### 2026-11-27 审查复核追加（基于 `8ab7594`）
+
+- 复核发现并修复 6 项问题：修复 `handoff/execution.ts` `input()` 二次清洗破坏已生成真实信封；将 `http/agents.ts` `fetchModels` 迁入统一出站门禁 `readMetadataJson` 并绑定本机 Gateway 端口拦截；加固 `egress.ts`（尾随点 `localhost.`、`isAddressAllowed` 的 `blockedLocalPorts` 校验、数字 `family` 参数）、`provenance.ts`（全角关键词、带档位闭合符、软连字符/Unicode Tag 清洗）与 `env-policy.ts`（禁止覆写 `PATH`/系统路径与 `NODE_TLS_REJECT_UNAUTHORIZED`）；补齐前端 `SecurityStatusSection` 卸载/竞态守卫与局域网 `PATCH` 最小字段裁剪、`AgentsPage` 跨页测试跳转保护。
+- 追加回归复验：`npm run typecheck`（4/4 通过）、`npm test`（**1,272 通过 / 5 跳过 / 0 失败**，新增 2 组回归测试项覆盖 `handoffs.input` 真实信封保留与 `profiles/:id/models/refresh` 出站拦截）、`npm run build` 通过。
